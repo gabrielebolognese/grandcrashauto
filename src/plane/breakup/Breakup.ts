@@ -474,7 +474,8 @@ export class Breakup implements IBreakup {
     if (!rt.ignited && info.energy > 0) {
       this.v4.copy(info.velocity);
       this.v4.y = Math.max(0, this.v4.y);
-      this.ignite(rt, info.position, this.v4, info.surface === 'water' ? 'water' : 'ground', 1);
+      const wet = info.surface === 'water' || this.underwater(info.position);
+      this.ignite(rt, info.position, this.v4, wet ? 'water' : 'ground', 1, wet && !!CONFIG.breakup.water.noExplosions);
     }
     if (outcome === 'building') this.ctx.fx.scorch?.(info.position, this.v5.copy(info.velocity).negate().normalize(), CONFIG.planes[rt.type].explosionRadius * 0.4);
   }
@@ -1361,7 +1362,8 @@ export class Breakup implements IBreakup {
       if ((outcome === 'groundCrash' || outcome === 'building') && !rt.ignited && this.fuelLeft(rt) > 1 && vn > CONFIG.breakup.fire.igniteVn) {
         // main fireball rolls on with the wreck's tangential velocity
         this.v4.copy(vpt).addScaledVector(normal, -vpt.dot(normal)).multiplyScalar(0.9);
-        this.ignite(rt, point, this.v4, 'ground', THREE.MathUtils.clamp(0.6 + vn / 60, 0.6, 1.1));
+        const wet = this.underwater(point); // seabed hit after punching through the water: burn, don't explode
+        this.ignite(rt, point, this.v4, wet ? 'water' : 'ground', THREE.MathUtils.clamp(0.6 + vn / 60, 0.6, 1.1), wet && !!CONFIG.breakup.water.noExplosions);
       }
     } else if (!a.tracked && surface !== 'self' && vn > 8 && a.mp.mass > 0.03 * rt.s.mass && rt.t - a.lastEventT > 0.3) {
       a.lastEventT = rt.t;
@@ -1380,7 +1382,7 @@ export class Breakup implements IBreakup {
       fx.dust(point, k * Math.min(2, 0.4 + a.radius * 0.1), material === 'sand' ? 0xe6d3a8 : material === 'grass' ? 0x9a8a68 : 0xb8b0a4);
     } else if (vn > 4) fx.sparks(point, normal, k * 0.6);
     // a fuel piece taking a hard hit ruptures → secondary explosion
-    if (rt.ignited && vn > cfg.fire.hardHitSecondary && this.asmFuel(rt, a) > 20 && rt.t - rt.lastSecT > 0.3 && rt.secCount < 7) this.secondary(rt, a);
+    if (rt.ignited && vn > cfg.fire.hardHitSecondary && this.asmFuel(rt, a) > 20 && rt.t - rt.lastSecT > 0.3 && rt.secCount < 7 && !(cfg.water.noExplosions && this.underwater(point))) this.secondary(rt, a);
   }
 
   private makeInfo(a: Assembly, point: THREE.Vector3, vel: THREE.Vector3, vn: number, vt: number, angle: number, part: string, energy: number, surface: ImpactSurface): ImpactInfo {
@@ -1519,6 +1521,17 @@ export class Breakup implements IBreakup {
     return y;
   }
 
+  /** Is this point below the sea/lake surface (or within 1 m of it)? */
+  private underwater(p: THREE.Vector3): boolean {
+    let wy: number | null = null;
+    try {
+      wy = this.ctx.terrain?.waterAt?.(p.x, p.z) ?? null;
+    } catch {
+      wy = null;
+    }
+    return wy !== null && p.y < wy + 1;
+  }
+
   private surfaceBelow(p: THREE.Vector3): { y: number; water: boolean } {
     let wy: number | null = null;
     try {
@@ -1590,7 +1603,7 @@ export class Breakup implements IBreakup {
     const sev = vn * hard + vh * hard * cfg.damage.waterTangent;
     this.accumulateDamage(rt, a, point, sev, true);
     if (this.asmHasFire(rt, a)) fx.steam?.(pos, Math.min(10, 2 + a.radius));
-    if (rt.ignited && speed > 35 && this.asmFuel(rt, a) > 20 && rt.t - rt.lastSecT > 0.3 && rt.secCount < 7) this.secondary(rt, a);
+    if (!cfg.water.noExplosions && rt.ignited && speed > 35 && this.asmFuel(rt, a) > 20 && rt.t - rt.lastSecT > 0.3 && rt.secCount < 7) this.secondary(rt, a);
     const big = a.tracked || a.piece?.hasCockpit || a.mp.mass > 0.15 * rt.s.mass;
     if (!big) return;
     const energy = 0.5 * a.mp.mass * speed * speed;
@@ -1607,7 +1620,7 @@ export class Breakup implements IBreakup {
     if (outcome === 'waterCrash' && speed > cfg.water.igniteSpeed && !rt.ignited && this.fuelLeft(rt) > 1) {
       // the impact fireball skims forward over the water with the wreck's momentum
       this.v4.set(vel.x, 0, vel.z).multiplyScalar(0.85);
-      this.ignite(rt, pos, this.v4, 'water', THREE.MathUtils.clamp(0.5 + speed / 150, 0.5, 1));
+      this.ignite(rt, pos, this.v4, 'water', THREE.MathUtils.clamp(0.5 + speed / 150, 0.5, 1), !!cfg.water.noExplosions);
     }
   }
 
@@ -1817,6 +1830,11 @@ export class Breakup implements IBreakup {
       if (depth > -a.radius * 0.4 && a.vel.y < -0.03 && a.bubbleT <= 0 && this.budgetBubbles-- > 0) {
         a.bubbleT = rnd(0.25, 0.5);
         this.ctx.fx.bubbles?.(this.v1.set(a.comW.x, a.waterY, a.comW.z), Math.min(4, 0.5 + a.radius * 0.3));
+      }
+      if (depth > cfg.abyssDepth && !(a as unknown as { abyss?: boolean }).abyss) {
+        (a as unknown as { abyss?: boolean }).abyss = true;
+        const none = groups(0, 0);
+        for (const c of a.colliders) if (c) c.setCollisionGroups(none);
       }
       if (depth > cfg.removeDepth + a.radius || (a.wetT > cfg.maxTime + 40 && depth > 0)) a.removed = true;
     }
@@ -2066,22 +2084,25 @@ export class Breakup implements IBreakup {
   }
 
   /** Main fuel ignition at the first big impact: fireball moving with the wreck, secondaries, fires on fuel pieces. */
-  private ignite(rt: PlaneRT, point: THREE.Vector3, vel: THREE.Vector3, surface: 'ground' | 'water', scale: number): void {
+  private ignite(rt: PlaneRT, point: THREE.Vector3, vel: THREE.Vector3, surface: 'ground' | 'water', scale: number, noBlast = false): void {
     if (rt.ignited) return;
     rt.ignited = true;
     const cfgF = CONFIG.breakup.fire;
     const fuel = this.fuelLeft(rt);
     const frac = fuel / Math.max(1, rt.s.fuel);
     const radius = CONFIG.planes[rt.type].explosionRadius * (0.5 + 0.4 * Math.min(1, frac)) * scale;
-    this.explosionFx(point, vel, radius, 'impact', surface, true);
-    this.evPos.copy(point);
-    this.evVel.copy(vel);
-    this.ctx.events.emit('planeExplosion', { position: this.evPos, velocity: this.evVel, radius, kind: 'secondary' });
-    const n = Math.round(rnd(cfgF.secondaries[0], cfgF.secondaries[1]));
-    let t = rt.t;
-    for (let i = 0; i < n; i++) {
-      t += rnd(cfgF.secInterval[0], cfgF.secInterval[1]);
-      rt.secondaries.push(t);
+    // Water (user feedback): no fireball / secondary blasts on the sea — the fuel just burns (slick + burning wreck).
+    if (!noBlast) {
+      this.explosionFx(point, vel, radius, 'impact', surface, true);
+      this.evPos.copy(point);
+      this.evVel.copy(vel);
+      this.ctx.events.emit('planeExplosion', { position: this.evPos, velocity: this.evVel, radius, kind: 'secondary' });
+      const n = Math.round(rnd(cfgF.secondaries[0], cfgF.secondaries[1]));
+      let t = rt.t;
+      for (let i = 0; i < n; i++) {
+        t += rnd(cfgF.secInterval[0], cfgF.secInterval[1]);
+        rt.secondaries.push(t);
+      }
     }
     // only wreckage in/near the fireball catches fire now; far pieces ignite at their own impact (secondary)
     const reach = radius * 1.5;
@@ -2125,6 +2146,11 @@ export class Breakup implements IBreakup {
     pos.x += rnd(-1, 1) * a.radius * 0.4;
     pos.z += rnd(-1, 1) * a.radius * 0.4;
     const surf = this.surfaceBelow(pos);
+    // Water (user feedback): wreckage on/near the sea burns but never explodes.
+    if (CONFIG.breakup.water.noExplosions && surf.water && pos.y - surf.y < 25) {
+      if (this.asmFuel(rt, a) > 2) this.ctx.fx.steam?.(pos, Math.min(10, 2 + a.radius));
+      return;
+    }
     pos.y = Math.max(pos.y, surf.y + 0.5);
     this.explosionFx(pos, a.vel, radius, 'secondary', pos.y - surf.y < 60 ? (surf.water ? 'water' : 'ground') : null, rt.secCount <= 2);
     this.evPos.copy(pos);

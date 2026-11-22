@@ -1237,17 +1237,19 @@ export const CONFIG = {
     },
     water: {
       density: 1000,
-      pressureCd: 1.0, // Newtonian face pressure
-      frictionCf: 0.03,
+      pressureCd: 0.42, // Newtonian face pressure (softened: water no longer feels like concrete)
+      frictionCf: 0.02,
       linDamp: 1.5, // m/s, linear heave damping term
       roundedEnd: 0.35, // pressure factor of closed (rounded) fuselage nose / tail-cone faces
       bowLift: 0.6, // share of a submerged nose's frontal pressure turned into lift (planing bow)
       metalDensity: 2700,
-      floodTime: 38, // s for a closed part to flood (open ends ×3.5 faster, fin ×0.28)
-      removeDepth: 9, // m below the surface (+ radius) → piece removed
+      floodTime: 14, // s for a closed part to flood (open ends ×3.5 faster, fin ×0.28) — sinks sooner
+      removeDepth: 60, // m below the surface (+ radius) → piece removed (sinks into the abyss first)
+      abyssDepth: 4, // m below the surface: stop colliding with the seabed, keep sinking
+      noExplosions: true, // user: water crashes break + burn, but never explode
       maxTime: 60, // s in water before flooding is forced
       ditchStallFactor: 1.3, // ditching if slower than this × stall, wings level, nose slightly up
-      slamHardSpeed: [25, 70], // water hardness ramps from soft to concrete between these speeds (m/s)
+      slamHardSpeed: [35, 120], // water damage hardness ramps between these speeds (m/s) — still breaks, less brutal
       igniteSpeed: 55, // m/s: water crash fast enough to ignite the fuel
     },
     crash: {
