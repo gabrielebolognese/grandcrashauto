@@ -74,6 +74,9 @@ export class CrowdManager {
   readonly root = new THREE.Group();
   materialized = 0;
   rebuilds = 0;
+  get blobVisible(): boolean {
+    return this.blob.visible;
+  }
 
   constructor(
     private clips: ClipInfo[],

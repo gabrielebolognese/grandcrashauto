@@ -18,6 +18,90 @@ import { makeWaterTexture } from './textures';
 const MAX_WAVES = 8;
 const DEPTH_MIN = -4;
 const DEPTH_MAX = 16;
+const MASK_RANGE = 1000; // m offshore encoded in the far land mask
+
+/**
+ * Coarse camera-centred mask of "metres offshore" (0 = land), baked progressively from terrain.oceanDistance.
+ * LOCAL coordinates; shifted on floating-origin moves.
+ */
+class LandMask {
+  readonly texture: THREE.DataTexture;
+  readonly bounds = new THREE.Vector4(0, 0, 1, 1);
+  valid = false;
+  cx = 0;
+  cz = 0;
+  extent = 0;
+  private data: Uint8Array;
+  private n: number;
+  private minX = 0;
+  private minZ = 0;
+  private step = 1;
+  private next = 0;
+  private sampler: ((x: number, z: number) => number) | null = null;
+
+  constructor(n: number) {
+    this.n = n;
+    this.data = new Uint8Array(n * n);
+    this.texture = new THREE.DataTexture(this.data, n, n, THREE.RedFormat, THREE.UnsignedByteType);
+    this.texture.magFilter = THREE.LinearFilter;
+    this.texture.minFilter = THREE.LinearFilter;
+    this.texture.generateMipmaps = false;
+    this.texture.colorSpace = THREE.NoColorSpace;
+    this.texture.name = 'env.landMask';
+  }
+
+  get busy(): boolean {
+    return this.sampler !== null;
+  }
+
+  begin(sampler: (x: number, z: number) => number, cx: number, cz: number, extent: number): void {
+    this.sampler = sampler;
+    this.cx = cx;
+    this.cz = cz;
+    this.extent = extent;
+    this.minX = cx - extent / 2;
+    this.minZ = cz - extent / 2;
+    this.step = extent / this.n;
+    this.next = 0;
+  }
+
+  shift(dx: number, dz: number): void {
+    this.cx -= dx;
+    this.cz -= dz;
+    this.minX -= dx;
+    this.minZ -= dz;
+    this.bounds.x -= dx;
+    this.bounds.y -= dz;
+  }
+
+  step_(budgetMs: number): boolean {
+    const fn = this.sampler;
+    if (!fn) return false;
+    const t0 = performance.now();
+    const total = this.n * this.n;
+    while (this.next < total) {
+      const end = Math.min(total, this.next + 64);
+      for (let i = this.next; i < end; i++) {
+        const x = this.minX + ((i % this.n) + 0.5) * this.step;
+        const z = this.minZ + (((i / this.n) | 0) + 0.5) * this.step;
+        let od = fn(x, z);
+        if (!Number.isFinite(od)) od = MASK_RANGE;
+        this.data[i] = Math.round(Math.min(1, Math.max(0, od / MASK_RANGE)) * 255);
+      }
+      this.next = end;
+      if (performance.now() - t0 > budgetMs) return false;
+    }
+    this.sampler = null;
+    this.valid = true;
+    this.bounds.set(this.minX, this.minZ, 1 / this.extent, 1 / this.extent);
+    this.texture.needsUpdate = true;
+    return true;
+  }
+
+  dispose(): void {
+    this.texture.dispose();
+  }
+}
 
 // [travel direction (deg, 180 = toward -Z / the shore), wavelength m, amplitude m, choppiness]
 const WAVES: [number, number, number, number][] = [
@@ -34,19 +118,30 @@ const GLSL_SEABED = /* glsl */ `
 uniform sampler2D uSeabed;
 uniform vec4 uSeabedBounds; // minX, minZ, 1/sizeX, 1/sizeZ
 uniform vec4 uShore;        // westX (local), southZ (local), slope, seabedValid
+uniform sampler2D uLandMask;
+uniform vec4 uMaskBounds;   // minX, minZ, 1/sizeX, 1/sizeZ
+uniform float uMaskValid;
 float seabedDepth(vec2 xz) {
-  // Analytic base coast lines (ocean west of westX and south of southZ).
+  // Far field: coarse camera-centred mask of metres offshore (terrain.oceanDistance) — land → no water at all,
+  // so the sea never shows inland beyond the loaded terrain. Fallback: analytic base coast lines.
   float w = uShore.x - xz.x;
   float s = xz.y - uShore.y;
   float d = ((w > 0.0 && s > 0.0) ? length(vec2(w, s)) : max(w, s)) * uShore.z;
+  d = max(d, 1.5);
+  if (uMaskValid > 0.5) {
+    vec2 muv = (xz - uMaskBounds.xy) * uMaskBounds.zw;
+    if (muv.x > 0.0 && muv.x < 1.0 && muv.y > 0.0 && muv.y < 1.0) {
+      float od = textureLod(uLandMask, muv, 0.0).r * ${MASK_RANGE.toFixed(1)};
+      d = od < 6.0 ? -10.0 : max(od * uShore.z, 1.5);
+    }
+  }
+  // Near field: exact depth baked from the ground height (beaches, harbours, islets).
   if (uShore.w > 0.5) {
     vec2 uv = (xz - uSeabedBounds.xy) * uSeabedBounds.zw;
     if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
       float baked = textureLod(uSeabed, uv, 0.0).r * ${(DEPTH_MAX - DEPTH_MIN).toFixed(1)} + ${DEPTH_MIN.toFixed(1)};
       vec2 e = min(uv, 1.0 - uv);
-      d = mix(max(d, 1.5), baked, smoothstep(0.0, 0.04, min(e.x, e.y)));
-    } else {
-      d = max(d, 1.5); // outside the baked field: never cut holes (terrain covers the water on land)
+      d = mix(d, baked, smoothstep(0.0, 0.04, min(e.x, e.y)));
     }
   }
   return d;
@@ -206,6 +301,8 @@ void main() {
   haze = max(haze, smoothstep(uOcean.y, uOcean.z, dist));
   col = envHaze(col, -V, haze);
   alpha = mix(alpha, 1.0, haze);
+  // No water at all over land that sits at / just above the water level (no fresnel or haze veil on flat ground).
+  alpha *= smoothstep(-0.25, 0.03, depth);
 
   gl_FragColor = vec4(col, alpha);
   ${GLSL_OUTPUT}
@@ -332,6 +429,9 @@ export class Ocean {
   private seabed: SeabedField;
   private baking: SeabedField | null = null;
   private sampler: ((x: number, z: number) => number) | null = null;
+  private mask = new LandMask(4);
+  private maskBaking: LandMask | null = null;
+  private maskSampler: ((x: number, z: number) => number) | null = null;
   private detail = -1;
   private radius = 0;
   private gridS0 = 1;
@@ -374,6 +474,9 @@ export class Ocean {
         uDepthParams: { value: new THREE.Vector4(2.5, 14, 1.4, 0.55) },
         uOcean: { value: new THREE.Vector4(650, 1000, 1400, 1) },
         uOrgMod: { value: new THREE.Vector2() },
+        uLandMask: { value: null as THREE.Texture | null },
+        uMaskBounds: { value: new THREE.Vector4(0, 0, 1, 1) },
+        uMaskValid: { value: 0 },
       },
       vertexShader: VERT,
       fragmentShader: FRAG,
@@ -510,6 +613,11 @@ export class Ocean {
     this.sampler = sampler;
   }
 
+  /** Metres-offshore sampler (LOCAL coords, 0 over land) for the far land mask — e.g. terrain.oceanDistance. */
+  setMaskSampler(sampler: ((x: number, z: number) => number) | null): void {
+    this.maskSampler = sampler;
+  }
+
   get seabedState(): 'baking' | 'baked' | 'analytic' {
     return this.baking ? 'baking' : this.seabed.valid ? 'baked' : 'analytic';
   }
@@ -518,6 +626,8 @@ export class Ocean {
   shift(dx: number, dz: number): void {
     this.seabed.shift(dx, dz);
     this.baking?.shift(dx, dz);
+    this.mask.shift(dx, dz);
+    this.maskBaking?.shift(dx, dz);
   }
 
   /**
@@ -558,6 +668,26 @@ export class Ocean {
         u.uSeabedBounds.value = done.bounds;
       }
     }
+    // Far land mask (coarse, big): re-bake when the camera drifts or the view range changes a lot.
+    if (this.maskSampler) {
+      const want = THREE.MathUtils.clamp(camera.far * 2.1, 6000, 30000);
+      const cur = this.maskBaking ?? this.mask;
+      const drift = Math.hypot(camera.position.x - cur.cx, camera.position.z - cur.cz);
+      if (!this.maskBaking && (cur.extent === 0 || drift > cur.extent * 0.15 || want > cur.extent * 1.4 || want < cur.extent * 0.55)) {
+        const res = 128;
+        const texel = want / res;
+        this.maskBaking = new LandMask(res);
+        this.maskBaking.begin(this.maskSampler, Math.round(camera.position.x / texel) * texel, Math.round(camera.position.z / texel) * texel, want);
+      }
+      if (this.maskBaking && this.maskBaking.step_(0.6)) {
+        this.mask.dispose();
+        this.mask = this.maskBaking;
+        this.maskBaking = null;
+        u.uLandMask.value = this.mask.texture;
+        u.uMaskBounds.value = this.mask.bounds;
+      }
+    }
+    u.uMaskValid.value = this.mask.valid ? 1 : 0;
     const coast = CONFIG.world.coast;
     u.uShore.value.set(coast.westX - origin.x, coast.southZ - origin.z, cfg.shoreSlope, this.seabed.valid ? 1 : 0);
 
@@ -603,5 +733,7 @@ export class Ocean {
     this.detailTex.dispose();
     this.seabed.dispose();
     this.baking?.dispose();
+    this.mask.dispose();
+    this.maskBaking?.dispose();
   }
 }

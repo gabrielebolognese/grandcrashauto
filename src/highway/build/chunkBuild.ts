@@ -217,18 +217,33 @@ export class ChunkBuilder {
 
   // ───────────────────────────── build ─────────────────────────────
   build(): ChunkOut {
+    const it = this.buildGen();
+    while (!it.next().done) {
+      /* drain */
+    }
+    return this.out;
+  }
+
+  /** Time-sliced build: yields between phases (the caller checks its frame budget). */
+  *buildGen(): Generator<void, ChunkOut> {
     this.pavement();
+    yield;
     this.median();
     this.guardrails();
+    yield;
     this.reflectors();
     this.bridges();
+    yield;
     this.tunnels();
     this.galleries();
     this.portals();
+    yield;
     this.gantries();
     this.streetlights();
+    yield;
     for (const k of this.r.features.kickers) if (this.ownsStation(k.s)) this.kicker(k);
     for (const m of this.r.features.megas) if (this.ownsStation((m.sA + m.sEnd) / 2)) this.mega(m);
+    yield;
     for (const rs of this.r.features.rest) if (this.ownsStation((rs.s0 + rs.s1) / 2)) this.restStop(rs);
     this.roadCollider();
     return this.out;

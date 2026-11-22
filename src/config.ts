@@ -130,7 +130,7 @@ export const CONFIG = {
       shallowDepth: 2.5, // m, turquoise shallows → mid blue
       deepDepth: 14, // m, mid blue → deep blue
       clearDepth: 1.4, // m, water becomes fully opaque past this depth (sand visible under the shallows)
-      foamWidth: 0.2, // m of depth covered by the shoreline foam band (beach slope ~1:30 → ~6 m)
+      foamWidth: 0.15, // m of depth covered by the shoreline foam band (beach slope ~1:30 → ~5 m)
       glitter: 1.0,
       seabedRes: 256, // texels per side of the camera-following depth field
       seabedExtent: 1536, // m covered near the ground (grows with altitude, up to seabedExtentMax)
@@ -1121,17 +1121,17 @@ export const CONFIG = {
     // tuning targets: lift-off time ≈ takeoffS, distance to clear 35 ft ≈ takeoffRollM.
     prop: {
       mass: 1100, rotationKmh: 105, stallKmh: 85, topKmh: 280, takeoffRollM: 250, takeoffS: 8, engines: 1, fuelKg: 150, explosionRadius: 10, glideRatio: 9,
-      cruiseKmh: 210, wingArea: 18, span: 11, oswald: 0.75, cl0: 0.35, clAlpha: 5.0, stallDeg: 16, cd0: 0.0489, cm0: -0.04,
+      cruiseKmh: 210, wingArea: 18, span: 11, oswald: 0.75, cl0: 0.35, clAlpha: 5.0, stallDeg: 16, cd0: 0.045, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.6, finVolume: 0.07, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.04, gearCD: 0, retractable: false, flapsUpKmh: 150, flapsLandKmh: 120,
-      thrust: 5933, propV0: 180, thrustLapse: 0, waveDrag: 0, spoolS: 1, idle: 0.06,
+      thrust: 5933, propV0: 195, thrustLapse: 0, waveDrag: 0, spoolS: 1, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.35, rollRateDeg: 85, yawAccel: 1.6, damping: [0.05, 0.02, 0.04],
       pitchRateDeg: 20, gammaK: 1.1, bankK: 2.2, pitchRateK: 6, rollRateK: 8,
       rotatePitchDeg: 9, rotateRateDeg: 8, brakeDecel: 4.5, steerDeg: 40, suspension: [0.32, 0.3, 1.1], turbulence: 1.0,
     },
     bizjet: {
       mass: 16000, rotationKmh: 200, stallKmh: 170, topKmh: 850, takeoffRollM: 900, takeoffS: 16, engines: 2, fuelKg: 4000, explosionRadius: 25, glideRatio: 15,
-      cruiseKmh: 520, wingArea: 70, span: 16, oswald: 0.8, cl0: 0.25, clAlpha: 4.6, stallDeg: 17.5, cd0: 0.0102, cm0: -0.04,
+      cruiseKmh: 520, wingArea: 70, span: 16, oswald: 0.8, cl0: 0.25, clAlpha: 4.6, stallDeg: 17.5, cd0: 0.008, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 4, wingAcFrac: 0.08, tailVolume: 0.65, finVolume: 0.07, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 290, flapsLandKmh: 235,
       thrust: 34900, propV0: 0, thrustLapse: 0.3, waveDrag: 0.156, spoolS: 2.5, idle: 0.06,
@@ -1141,7 +1141,7 @@ export const CONFIG = {
     },
     airliner: {
       mass: 70000, rotationKmh: 260, stallKmh: 215, topKmh: 880, takeoffRollM: 1500, takeoffS: 22, engines: 2, fuelKg: 18000, explosionRadius: 45, glideRatio: 15,
-      cruiseKmh: 520, wingArea: 180, span: 35, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 17.2, cd0: 0.019, cm0: -0.04,
+      cruiseKmh: 520, wingArea: 180, span: 35, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 17.2, cd0: 0.0152, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.7, finVolume: 0.075, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 350, flapsLandKmh: 290,
       thrust: 146000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.14, spoolS: 3.5, idle: 0.06,
@@ -1151,10 +1151,10 @@ export const CONFIG = {
     },
     jumbo: {
       mass: 330000, rotationKmh: 295, stallKmh: 245, topKmh: 920, takeoffRollM: 1900, takeoffS: 30, engines: 4, fuelKg: 150000, explosionRadius: 70, glideRatio: 15,
-      cruiseKmh: 540, wingArea: 650, span: 64, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 17.2, cd0: 0.0176, cm0: -0.04,
+      cruiseKmh: 540, wingArea: 650, span: 64, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 17.2, cd0: 0.0133, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 6, wingAcFrac: 0.08, tailVolume: 0.75, finVolume: 0.08, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 390, flapsLandKmh: 320,
-      thrust: 280000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.185, spoolS: 4, idle: 0.06,
+      thrust: 292000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.15, spoolS: 4, idle: 0.06,
       inertiaScale: [1.15, 1.1, 1.35], pitchAuthority: 1.25, rollRateDeg: 17, yawAccel: 0.35, damping: [0.07, 0.04, 0.06],
       pitchRateDeg: 5, gammaK: 0.45, bankK: 0.7, pitchRateK: 2.5, rollRateK: 2.2,
       rotatePitchDeg: 8, rotateRateDeg: 3.5, brakeDecel: 3, steerDeg: 55, suspension: [0.7, 0.3, 1.1], turbulence: 0.25,

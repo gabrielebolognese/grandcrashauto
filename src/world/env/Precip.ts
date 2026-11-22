@@ -143,6 +143,7 @@ export class Precip {
     this.mesh.renderOrder = 5;
     this.mesh.userData.noOriginShift = true;
     this.mesh.visible = false;
+    this.mesh.userData.warmup = true; // hidden until needed: pre-compiled behind the loading bar
   }
 
   setMax(n: number): void {

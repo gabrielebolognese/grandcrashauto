@@ -72,6 +72,7 @@ export class Lightning {
     this.mesh.frustumCulled = false;
     this.mesh.visible = false;
     this.mesh.renderOrder = 6;
+    this.mesh.userData.warmup = true; // hidden until needed: pre-compiled behind the loading bar
     this.mesh.userData.noOriginShift = true; // shifted by shift() on originShift
     for (let i = 0; i < 80; i++) this.pts.push(new THREE.Vector3());
   }

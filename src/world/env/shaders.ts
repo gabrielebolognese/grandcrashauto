@@ -125,7 +125,7 @@ float cloudDeck(vec3 dir, out vec3 deckCol) {
   float dens = smoothstep(0.35, 1.0, n) * uCover;
   deckCol = mix(uCloudLit, uCloudShade, 0.35 + 0.5 * dens);
   deckCol += uGlow * uGlowStrength * pow(sd, 6.0) * (1.0 - dens) * 0.6;
-  deckCol += vec3(0.75, 0.8, 1.0) * uLightning * 2.5 * (0.5 + n);
+  deckCol += vec3(0.75, 0.8, 1.0) * uLightning * 1.1 * (0.4 + n);
   return c * smoothstep(-0.02, 0.12, dir.y);
 }
 

@@ -74,7 +74,7 @@ export class Hud {
     this.clock = h('div', { class: 'hud-chip hud-clock off' }, this.clockIcon, this.clockText);
     this.prompts = h('div', { class: 'hud-prompts' });
     this.hint = h('div', { class: 'hud-hint' });
-    this.el = h('div', { class: 'hud', 'aria-hidden': 'true' }, h('div', { class: 'hud-tl' }, this.minimap.el, this.clock), this.speedo, this.prompts, this.hint);
+    this.el = h('div', { class: 'hud', 'aria-hidden': 'true' }, h('div', { class: 'hud-tl' }, this.clock) /* minimap removed (user request); big map via the Map button */, this.speedo, this.prompts, this.hint);
 
     ctx.events.on('prompt', ({ id, show, text }) => this.setPrompt(id, show, text));
     ctx.events.on('gearShift', () => {
@@ -222,8 +222,7 @@ export class Hud {
     // Hide the minimap until there is road data to show.
     const d = ctx.world?.data;
     const hasRoads = !!d && ((d.roads?.edges?.length ?? 0) > 0 || (ctx.highways?.graph?.edges?.length ?? 0) > 0);
-    this.minimap.el.classList.toggle('nodata', !hasRoads);
-    if (hasRoads) this.minimap.update(dt);
+    void hasRoads; // minimap removed from the HUD (user request) — no per-frame drawing
   }
 
   /** FPS counter runs in every state when enabled. */

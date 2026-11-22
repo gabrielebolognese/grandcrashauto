@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { GeoBuilder, MATTE, METAL, PAINT, DARK, VAR, type RGB, rgb, v3, mix } from './builder';
-import { loftFuselage, fusRing, profileAt, fuselageLines } from './fuselage';
+import { loftFuselage, fusRing, fusPoint, profileAt, fuselageLines } from './fuselage';
+
+const RAD = 180 / Math.PI;
 import type { Design } from './designs';
 
 /**
@@ -24,7 +26,7 @@ const PANEL: RGB = rgb(0x2a2d33);
 const GLARE: RGB = rgb(0x17181b);
 const SEAT: RGB = rgb(0x34373e);
 
-export function buildCockpit(b: GeoBuilder, D: Design): InstrumentPlacement {
+export function buildCockpit(b: GeoBuilder, D: Design, opts: { bulkhead: boolean } = { bulkhead: true }): InstrumentPlacement {
   const P = D.profile;
   const L = D.liv;
   const K = D.cockpit;
@@ -32,64 +34,100 @@ export function buildCockpit(b: GeoBuilder, D: Design): InstrumentPlacement {
   const zNoseCut = D.cuts[0];
   const R = Math.max(0.5, P.w((P.zNose + P.zTail) / 2));
   const hSill = 0.2;
+  const eye = K.eye;
+  const inset = Math.max(0.02, R * 0.025);
+  // the front pane (first glass rect) drives the layout: its lower edge on the centreline sets how low the
+  // windshield reaches; the glareshield lip sits just below it, the instrument face below that.
+  const front = L.rects.find((r) => r.kind === 'glass')!;
+  const zW = front.z1;
+  const pBot = fusPoint(P, zW, Math.max(0.001, front.t0));
+  const paneDeg = Math.atan2(eye.y - pBot.y, zW - eye.z) * RAD;
+  const lipDeg = Math.max(9, paneDeg + 1.5);
+  const zFront = Math.max(zW + 0.03, K.zFront);
   // inward shell: openings exactly at the glass rects
   const lines = fuselageLines(P, L, 48, true);
-  loftFuselage(b, P, L, zRear, Math.max(zNoseCut, K.zFront + 0.01), {
-    ringSeg: 48, step: R * 0.12, exact: true, win: false, extraZ: [K.zFront],
+  loftFuselage(b, P, L, zRear, Math.max(zNoseCut, zFront + 0.01), {
+    ringSeg: 48, step: R * 0.12, exact: true, win: false, extraZ: [zFront],
     inner: {
-      offset: Math.max(0.02, R * 0.025),
-      zFront: K.zFront,
+      offset: inset,
+      zFront,
       color: (h) => (h > 0.62 ? SHELL_UP : h > hSill ? SHELL_MID : SHELL_LOW),
     },
   }, lines);
-  // front closure (behind the dashboard)
+  // front closure (ahead of every pane, hidden behind the dashboard)
   b.set({ color: PANEL, mat: MATTE });
-  fan(b, P, K.zFront, -1, Math.max(0.02, R * 0.025));
-  // aft bulkhead with a door (hidden when the cabin is opened)
-  b.variant = VAR.bulkhead;
-  b.set({ color: SHELL_MID, mat: MATTE });
-  fan(b, P, zRear + 0.002, 1, Math.max(0.02, R * 0.025));
-  const pr = profileAt(P, zRear);
-  const doorH = Math.min(1.9, (pr.mid + pr.top - K.floorY) * 0.88);
-  const doorW = Math.min(0.42, pr.w * 0.3);
-  b.set({ color: rgb(0x5d6067), mat: PAINT });
-  b.fquadF(v3(doorW, K.floorY, zRear + 0.012), v3(-doorW, K.floorY, zRear + 0.012), v3(-doorW, K.floorY + doorH, zRear + 0.012), v3(doorW, K.floorY + doorH, zRear + 0.012), v3(0, 0, 1));
-  b.variant = 0;
+  fan(b, P, zFront, -1, inset);
+  if (opts.bulkhead) {
+    // aft bulkhead with a door (hidden when the cabin behind is torn open)
+    b.variant = VAR.bulkhead;
+    b.set({ color: SHELL_MID, mat: MATTE });
+    fan(b, P, zRear + 0.002, 1, inset);
+    const pr = profileAt(P, zRear);
+    const doorH = Math.min(1.9, (pr.mid + pr.top - K.floorY) * 0.88);
+    const doorW = Math.min(0.42, pr.w * 0.3);
+    b.set({ color: rgb(0x5d6067), mat: PAINT });
+    b.fquadF(v3(doorW, K.floorY, zRear + 0.012), v3(-doorW, K.floorY, zRear + 0.012), v3(-doorW, K.floorY + doorH, zRear + 0.012), v3(doorW, K.floorY + doorH, zRear + 0.012), v3(0, 0, 1));
+    b.variant = 0;
+  }
   // floor
   const wf = Math.max(0.3, widthAt(P, zRear + 0.3, K.floorY) - 0.04);
   b.set({ color: rgb(0x2c2e33), mat: MATTE });
   b.fquadF(v3(wf, K.floorY, zRear), v3(-wf, K.floorY, zRear), v3(-wf * 0.8, K.floorY, K.dashZ + 0.2), v3(wf * 0.8, K.floorY, K.dashZ + 0.2), v3(0, 1, 0));
 
-  // dashboard: slanted face toward the eye, glareshield on top
-  const eye = K.eye;
-  const halfW = Math.min(K.panelW / 2 + 0.08, widthAt(P, K.dashZ, K.dashTop) - 0.03);
-  const panelH = (K.panelW / 3) * 1.0;
-  const tilt = 0.22; // face tilted back
-  const yTop = K.dashTop - 0.035;
-  const yBot = yTop - panelH - 0.16;
-  const zTop = K.dashZ;
-  const zBot = K.dashZ + Math.tan(tilt) * (yTop - yBot);
+  // ---- instrument face: perpendicular to the view ray, spanning ~14° just under the glareshield lip
+  const dashDist = K.dashZ - eye.z;
+  const a1 = (lipDeg + 1.4) / RAD;
+  const span = 14 / RAD;
+  const ac = a1 + span / 2;
+  const distC = dashDist / Math.cos(ac);
+  const faceC = v3(0, eye.y - Math.sin(ac) * distC, eye.z + Math.cos(ac) * distC);
+  const panelH = 2 * distC * Math.tan(span / 2);
+  const panelW = panelH * 3;
+  const fNrm = v3(0, Math.sin(ac), -Math.cos(ac)); // toward the eye
+  const fUp = v3(0, Math.cos(ac), Math.sin(ac)); // face "up" (tilted back)
+  const at = (x: number, y: number, back = 0) => faceC.clone().add(v3(x, 0, 0)).addScaledVector(fUp, y).addScaledVector(fNrm, -back);
+  // dashboard board (face plane), wider than the face, from the lip down
+  const halfW = Math.max(panelW / 2 + 0.05, Math.min(widthAt(P, faceC.z, faceC.y) - 0.04, panelW * 0.5 + R * 0.55));
+  const topY = panelH / 2 + 0.03;
+  const botY = -panelH / 2 - Math.max(0.06, panelH * 0.45);
   b.set({ color: PANEL, mat: MATTE });
-  b.fquadF(v3(halfW, yTop, zTop), v3(-halfW, yTop, zTop), v3(-halfW, yBot, zBot), v3(halfW, yBot, zBot), v3(0, 0.2, -1));
-  // lower panel down to the floor (knee area)
-  b.set({ color: SHELL_LOW, mat: MATTE });
-  b.fquadF(v3(halfW, yBot, zBot), v3(-halfW, yBot, zBot), v3(-halfW * 0.9, K.floorY, zBot + 0.25), v3(halfW * 0.9, K.floorY, zBot + 0.25), v3(0, 0, -1));
-  // side cheeks
-  for (const sx of [1, -1]) {
-    b.fquadF(v3(sx * halfW, yTop, zTop), v3(sx * halfW, yBot, zBot), v3(sx * halfW, yBot, K.zFront), v3(sx * halfW, yTop, K.zFront), v3(-sx, 0, 0));
+  b.fquadF(at(halfW, topY, 0.004), at(-halfW, topY, 0.004), at(-halfW, botY, 0.004), at(halfW, botY, 0.004), fNrm);
+  if (K.glass) {
+    // flanking (unlit) displays: subtle glass-cockpit look
+    for (const sx of [1, -1]) {
+      const cx = sx * (panelW / 2 + panelH * 0.62);
+      if (Math.abs(cx) + panelH * 0.55 > halfW) continue;
+      b.set({ color: rgb(0x2a323c), mat: MATTE });
+      b.fquadF(at(cx + panelH * 0.55, panelH * 0.5, 0.002), at(cx - panelH * 0.55, panelH * 0.5, 0.002), at(cx - panelH * 0.55, -panelH * 0.5, 0.002), at(cx + panelH * 0.55, -panelH * 0.5, 0.002), fNrm);
+      b.set({ color: rgb(0x0e1319), mat: { r: 0.15, m: 0.3 } });
+      b.fquadF(at(cx + panelH * 0.5, panelH * 0.45, 0.0), at(cx - panelH * 0.5, panelH * 0.45, 0.0), at(cx - panelH * 0.5, -panelH * 0.45, 0.0), at(cx + panelH * 0.5, -panelH * 0.45, 0.0), fNrm);
+    }
   }
-  // glareshield: slab with an overhanging lip
+  // knee panel down to the floor
+  const kneeTop = at(0, botY, 0.004);
+  b.set({ color: SHELL_LOW, mat: MATTE });
+  b.fquadF(v3(halfW, kneeTop.y, kneeTop.z), v3(-halfW, kneeTop.y, kneeTop.z), v3(-halfW * 0.9, K.floorY, kneeTop.z + 0.3), v3(halfW * 0.9, K.floorY, kneeTop.z + 0.3), v3(0, 0, -1));
+  // side cheeks of the dashboard box
+  const lipP = at(0, topY, 0.004);
+  for (const sx of [1, -1]) {
+    b.fquadF(v3(sx * halfW, lipP.y, lipP.z), v3(sx * halfW, kneeTop.y, kneeTop.z), v3(sx * halfW, kneeTop.y, zFront), v3(sx * halfW, lipP.y, zFront), v3(-sx, 0, 0));
+  }
+  // glareshield: an overhanging lip, then a top sloping down to the windshield base
   b.set({ color: GLARE, mat: MATTE });
-  const gl = K.dashTop;
-  const lip = 0.12;
-  b.fquadF(v3(halfW + 0.03, gl, zTop - lip), v3(-halfW - 0.03, gl, zTop - lip), v3(-halfW - 0.03, gl, K.zFront), v3(halfW + 0.03, gl, K.zFront), v3(0, 1, 0));
-  b.fquadF(v3(halfW + 0.03, gl, zTop - lip), v3(-halfW - 0.03, gl, zTop - lip), v3(-halfW - 0.03, gl - 0.05, zTop - lip + 0.02), v3(halfW + 0.03, gl - 0.05, zTop - lip + 0.02), v3(0, 0, -1));
-  b.fquadF(v3(halfW + 0.03, gl - 0.05, zTop - lip + 0.02), v3(-halfW - 0.03, gl - 0.05, zTop - lip + 0.02), v3(-halfW - 0.03, gl - 0.05, zTop), v3(halfW + 0.03, gl - 0.05, zTop), v3(0, -1, 0));
-  // instrument face placement (slightly in front of the panel face)
-  const faceTop = yTop - 0.03;
-  const faceCy = faceTop - panelH / 2;
-  const faceCz = zTop + Math.tan(tilt) * (yTop - faceCy) - 0.012;
-  const q = new THREE.Quaternion().setFromAxisAngle(v3(1, 0, 0), -tilt).multiply(new THREE.Quaternion().setFromAxisAngle(v3(0, 1, 0), Math.PI));
+  const lipZ = lipP.z - 0.07;
+  const gl = eye.y - Math.tan(lipDeg / RAD) * (lipZ - eye.z);
+  const frontY = Math.min(gl, pBot.y - 0.02);
+  const hwF = Math.max(0.2, Math.min(halfW + 0.03, widthAt(P, zW, frontY) - 0.03));
+  b.fquadF(v3(halfW + 0.03, gl, lipZ), v3(-halfW - 0.03, gl, lipZ), v3(-hwF, frontY, zW), v3(hwF, frontY, zW), v3(0, 1, 0));
+  b.fquadF(v3(halfW + 0.03, gl, lipZ), v3(-halfW - 0.03, gl, lipZ), v3(-halfW - 0.03, lipP.y, lipP.z), v3(halfW + 0.03, lipP.y, lipP.z), v3(0, 0.3, -1));
+  b.fquadF(v3(hwF, frontY, zW), v3(-hwF, frontY, zW), v3(-hwF, frontY - 0.3, zW), v3(hwF, frontY - 0.3, zW), v3(0, 0, -1));
+  const q = new THREE.Quaternion().setFromAxisAngle(v3(1, 0, 0), ac).multiply(new THREE.Quaternion().setFromAxisAngle(v3(0, 1, 0), Math.PI));
+  const faceCz = faceC.z;
+  const faceCy = faceC.y;
+  const zBot = kneeTop.z;
+  const yBot = kneeTop.y;
+  const zTop = lipP.z;
+  const pr = profileAt(P, zRear);
 
   // centre pedestal + throttle levers
   const pedZ0 = eye.z + 0.05;
@@ -156,7 +194,7 @@ export function buildCockpit(b: GeoBuilder, D: Design): InstrumentPlacement {
     }
   }
   b.set({ color: [1, 1, 1], mat: DARK });
-  return { position: v3(0, faceCy, faceCz), quaternion: q, width: K.panelW, height: panelH };
+  return { position: v3(0, faceCy, faceCz).addScaledVector(fNrm, 0.003), quaternion: q, width: panelW, height: panelH };
 }
 
 /** Fuselage half-width at a given height (approx) for station z. */

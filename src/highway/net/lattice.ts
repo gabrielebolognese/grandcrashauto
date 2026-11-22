@@ -78,7 +78,9 @@ export interface EdgeDesc {
 export const EXITS: Record<string, { x: number; y: number; z: number; dir: V2; tag: string; name: string }> = {
   xN: { x: 0, y: 0.03, z: -420, dir: { x: 0, z: -1 }, tag: 'north', name: 'Coastline North' },
   xE: { x: 420, y: 0.03, z: -150, dir: { x: 1, z: 0 }, tag: 'east', name: 'Coastline East' },
-  xCE: { x: 394, y: 0, z: 272, dir: { x: 1, z: 0 }, tag: 'coastEast', name: 'Beach Boulevard' },
+  xCE: { x: 420, y: 0, z: 272, dir: { x: 1, z: 0 }, tag: 'coastEast', name: 'Beach Boulevard' },
+  xW: { x: -420, y: 0.03, z: -150, dir: { x: -1, z: 0 }, tag: 'west', name: 'Coastline West' },
+  xA: { x: -700, y: 1.2, z: 145, dir: { x: 1, z: 0 }, tag: 'airport', name: 'Airport' },
 };
 
 const PLACE_NAMES = [
@@ -154,7 +156,8 @@ function buildNode(key: string, seed: number): MNode | null {
   const C = cfg();
   const ex = EXITS[key];
   if (ex) {
-    return { key, x: ex.x, z: ex.z, baseY: ex.y, kind: 'exit', name: ex.name, i: NaN, j: NaN, fixedDir: ex.dir, fixedY: ex.y, exitTag: ex.tag };
+    const y = key === 'xA' ? (CONFIG.world as { airportElevation?: number }).airportElevation ?? ex.y : ex.y;
+    return { key, x: ex.x, z: ex.z, baseY: y, kind: 'exit', name: ex.name, i: NaN, j: NaN, fixedDir: ex.dir, fixedY: y, exitTag: ex.tag };
   }
   if (key === 'bCB') {
     const x = C.bridgeCenterX;
@@ -240,6 +243,10 @@ export function incident(key: string): EdgeRef[] {
       break;
     case 'xCE':
       out.push(mkEdge('xCE', 'jCE', 'link', true, null, false, 0));
+      break;
+    case 'xW':
+    case 'xA':
+      out.push(mkEdge('xW', 'xA', 'link', true, null, false, 0)); // city west exit ↔ airport access road
       break;
     case 'jCE':
       out.push(mkEdge('xE', 'jCE', 'trunk', true, null, false, 0));
@@ -391,7 +398,7 @@ export function nodeFrame(key: string): Map<string, EdgeEnd> {
     return { e, o, x: dx / l, z: dz / l, d: l };
   });
   if (n.fixedDir) {
-    for (const it of u) out.set(it.e.key, { dir: n.fixedDir, grade: 0, lin: 170, main: true, fork: 0, lanes: 2, exit: true });
+    for (const it of u) out.set(it.e.key, { dir: n.fixedDir, grade: 0, lin: key === 'xW' || key === 'xA' ? 25 : 170, main: true, fork: 0, lanes: 2, exit: true });
   } else if (u.length === 1) {
     out.set(u[0].e.key, { dir: { x: u[0].x, z: u[0].z }, grade: 0, lin: 120, main: true, fork: 0, lanes: lanesOf(u[0].e), exit: false });
   } else if (u.length === 2) {
@@ -482,8 +489,8 @@ export function edgesNearRect(minX: number, minZ: number, maxX: number, maxZ: nu
   for (let j = Math.max(0, r.j0); j <= r.j1; j++)
     for (let i = Math.max(-1, r.i0); i <= r.i1; i++) if (nodeExistsIJ(i, j)) consider(ij(i, j));
   // specials near the city / south coast
-  if (minX - reach < 9000 && maxX + reach > -1000 && minZ - reach < 1500 && maxZ + reach > -3500) {
-    for (const k of ['xN', 'xE', 'xCE', 'jCE', 'bCB']) consider(k);
+  if (minX - reach < 9000 && maxX + reach > -1500 && minZ - reach < 1500 && maxZ + reach > -3500) {
+    for (const k of ['xN', 'xE', 'xCE', 'xW', 'xA', 'jCE', 'bCB']) consider(k);
   }
   const out: EdgeRef[] = [];
   for (const e of seen.values()) {

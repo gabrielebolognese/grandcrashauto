@@ -23,6 +23,12 @@ import type { PlaneTypeId, PlaneVisual } from './types';
  */
 
 export type PlaneCfg = (typeof CONFIG.planes)['prop'];
+
+/**
+ * Main wheels must sit behind the centre of mass or the plane tips onto its tail. Models whose mass ends up behind
+ * the main gear (heavy rear engines) get their physics contact point moved back to 3% of the length behind the CoM.
+ */
+export const mainWheelZ = (z: number, length: number): number => Math.min(z, -0.03 * Math.max(4, length));
 export const planeCfg = (t: PlaneTypeId): PlaneCfg => CONFIG.planes[t] as PlaneCfg;
 
 interface Surface {
@@ -46,6 +52,7 @@ export interface FlightInputs {
   yaw: number; // +1 right
   assisted: boolean;
   assistFactor: number; // 0..1 (damage switches assists off progressively)
+  rollAssist: number; // 0..1 roll (wing-leveller) assist — ailerons survive a lost tail
   onGround: boolean;
   agl: number; // wing height above ground / water
   wheelAgl: number; // lowest wheel above ground
@@ -69,7 +76,7 @@ export interface FlightInputs {
 
 export function defaultInputs(): FlightInputs {
   return {
-    pitch: 0, roll: 0, yaw: 0, assisted: true, assistFactor: 1, onGround: true, agl: 0, wheelAgl: 0, gear: 1, gearDown: true,
+    pitch: 0, roll: 0, yaw: 0, assisted: true, assistFactor: 1, rollAssist: 1, onGround: true, agl: 0, wheelAgl: 0, gear: 1, gearDown: true,
     flaps: 0.5, thrust: [], liftScale: 1, extraCd: 0, sideDrag: [], noseDown: 0, gammaCap: 99,
     turb: new THREE.Vector3(), turbVert: 0, wind: new THREE.Vector3(), controlScale: new THREE.Vector3(1, 1, 1),
     tailLost: false, tailTime: 0, rotationHelp: true,
@@ -218,10 +225,10 @@ export class FlightModel {
       area: sv, alive: 1, inc: 0, side: 0, segs: [{ part: 'fin', frac: 1, lost: false }], stalled: 0,
     });
 
-    // Gear geometry: main-gear arm (rotation) and tail-strike attitude.
+    // Gear geometry: main-gear arm (rotation) and tail-strike attitude (mains forced behind the CoM, see PlaneGear).
     const mains = visual.gear.filter((g) => !g.steerable);
     if (mains.length) {
-      const zm = mains.reduce((a, g) => a + g.wheel.z, 0) / mains.length;
+      const zm = mains.reduce((a, g) => a + mainWheelZ(g.wheel.z, L), 0) / mains.length;
       const ym = mains.reduce((a, g) => a + g.wheel.y - g.radius, 0) / mains.length;
       this.mainGearArm = Math.max(0, -zm);
       let strike = 0.35;
@@ -284,7 +291,7 @@ export class FlightModel {
     this.Ap = (cfg.pitchAuthority * Math.max(0, dM)) / (this.inertia.x * qnT);
     // … and rotate the plane about its main gear at Vr.
     const qnR = Math.min(this.qnMax[0], (0.5 * this.rho * this.vRot * this.vRot) / this.qRef);
-    this.Ap = Math.max(this.Ap, (1.25 * W * this.mainGearArm) / (this.inertia.x * qnR));
+    this.Ap = Math.max(this.Ap, (1.25 * W * this.mainGearArm) / (this.inertia.x * qnR), 0.3);
     // Roll: full stick = rollRateDeg steady roll at vRef (wing damping ½ρ V S a yw²).
     const yw = Math.abs(this.surfaces[0].base.x);
     const cRoll = 0.5 * this.rho * vRef * this.S * cfg.clAlpha * yw * yw;
@@ -438,7 +445,8 @@ export class FlightModel {
       let a = Math.atan2(-vn, vc) + s.inc;
       if (s.kind === 'htail') {
         // downwash from the wing (drops when the wing stalls → natural nose drop), + stabilizer trim
-        const eps = wingAlive > 0 ? clamp((2 * (wingCl / wingAlive)) / (Math.PI * AR), -0.3, 0.3) : 0;
+        // ×0.5: tails sit partly out of the wake (T-tails mostly), elliptic-wing downwash would over-predict it
+        const eps = wingAlive > 0 ? clamp((0.5 * 2 * (wingCl / wingAlive)) / (Math.PI * AR), -0.25, 0.25) : 0;
         a += this.trim - eps;
       }
       let cl: number;
@@ -453,7 +461,7 @@ export class FlightModel {
         wingAlive += s.alive;
         wingCl += cl * s.alive;
       } else {
-        cl = this.tailCL(a, s.kind === 'fin' ? 3.0 : 4.6);
+        cl = this.tailCL(a, s.kind === 'fin' ? 3.0 : 3.6);
         st = this.st;
         const sin = Math.sin(a);
         cd = 0.012 + lerp(0.08 * cl * cl, 1.15 * sin * sin, smoothstep(0, 1, st));
@@ -558,6 +566,7 @@ export class FlightModel {
     const sR = inp.roll;
     const sY = inp.yaw;
     const af = inp.assisted ? clamp(inp.assistFactor, 0, 1) : 0;
+    const afR = inp.assisted ? clamp(inp.rollAssist, 0, 1) : 0;
     let de = sP;
     let da = sR;
     let dr = sY;
@@ -565,7 +574,7 @@ export class FlightModel {
     const vsCur = this.stallSpeed(inp.flaps);
     const alphaWarn = this.alphaStallBody - A.stallMarginDeg * DEG;
     this.stallWarning = !inp.onGround && V > 5 && (this.alpha > alphaWarn || V < vsCur * 1.05);
-    if (af > 0 && V > 2) {
+    if ((af > 0 || afR > 0) && V > 2) {
       const ctlP = Math.max(1e-3, this.Ap * I.x * Math.min(qn, this.qnMax[0]));
       const ctlR = Math.max(1e-3, this.Ar * I.z * Math.min(qn, this.qnMax[1]));
       const ctlY = Math.max(1e-3, this.Ay * I.y * Math.min(qn, this.qnMax[2]));
@@ -619,7 +628,7 @@ export class FlightModel {
       const pMax = cfg.rollRateDeg * DEG;
       const pCmd = clamp(cfg.bankK * (phiT - this.bank), -pMax, pMax);
       const wantR = I.z * cfg.rollRateK * (pCmd - this.p) - aeroRoll;
-      da = lerp(inp.onGround ? 0 : sR, clamp(wantR / ctlR, -1, 1), af);
+      da = lerp(inp.onGround ? 0 : sR, clamp(wantR / ctlR, -1, 1), afR);
 
       // Yaw: coordinated turn + sideslip damping, limited so engine-out yaw is still felt.
       let coord = 0;

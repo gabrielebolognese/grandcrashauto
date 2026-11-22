@@ -237,6 +237,9 @@ export class Environment implements IEnvironment {
       this.seabedReady = true;
       const world = this.ctx.world;
       this.ocean?.setSampler((x, z) => world.groundHeightAt(x, z));
+      const terrain = this.ctx.terrain;
+      if (terrain?.oceanDistance) this.ocean?.setMaskSampler((x, z) => terrain.oceanDistance(x, z));
+      else if (world.oceanDistance) this.ocean?.setMaskSampler((x, z) => world.oceanDistance!(x, z));
     }
 
     // ── camera-dependent pieces ──
@@ -306,7 +309,7 @@ export class Environment implements IEnvironment {
       intensity = moonCfg.intensity * phaseLight * fadeIn * (1 - 0.8 * THREE.MathUtils.smoothstep(ws.cloudCover, 0.4, 1));
       this.sun.color.set(moonCfg.color);
     }
-    this.sun.intensity = intensity * (1 + this.flash * (this.qLevel >= 1 ? 6 : 0));
+    this.sun.intensity = intensity * (1 + this.flash * (this.qLevel >= 1 ? 2.5 : 0));
     // Shadows fade out at twilight (and under thick cloud); the moon casts soft faint ones.
     this.sun.shadow.intensity = clk.sunElevation > -4
       ? THREE.MathUtils.smoothstep(clk.sunElevation, -1, 6) * (1 - 0.75 * THREE.MathUtils.smoothstep(ws.cloudCover, 0.5, 1))
@@ -314,10 +317,10 @@ export class Environment implements IEnvironment {
 
     this.hemi.color.copy(p.hemiSky);
     this.hemi.groundColor.copy(p.hemiGround);
-    this.hemi.intensity = p.hemiIntensity * (1 + this.flash * (this.qLevel >= 1 ? 5 : 0));
+    this.hemi.intensity = p.hemiIntensity * (1 + this.flash * (this.qLevel >= 1 ? 1.8 : 0));
     this.fog.color.copy(p.fog);
     (this.ctx.engine.scene.background as THREE.Color | null)?.copy?.(p.horizon);
-    this.ctx.engine.scene.environmentIntensity = p.envIntensity * (1 + this.flash * 2);
+    this.ctx.engine.scene.environmentIntensity = p.envIntensity * (1 + this.flash * 0.8);
     this.ctx.engine.renderer.toneMappingExposure = CONFIG.env.exposure * p.exposure;
     this.nightFactor = THREE.MathUtils.clamp(p.night, 0, 1);
 
@@ -346,7 +349,7 @@ export class Environment implements IEnvironment {
     U.uAmbient.value.copy(p.hemiSky).multiplyScalar(p.hemiIntensity);
     U.uAmbientGround.value.copy(p.hemiGround).multiplyScalar(p.hemiIntensity);
     this.ocean?.setColors(p.waterDeep, p.waterMid, p.waterShallow);
-    this.bloomPost?.setParams(p.bloomStrength + this.flash * 0.6, CONFIG.env.bloom.radius, p.bloomThreshold);
+    this.bloomPost?.setParams(p.bloomStrength + this.flash * 0.25, CONFIG.env.bloom.radius, p.bloomThreshold);
   }
 
   /** Throttled PMREM refresh: every few game minutes, on weather changes, or after setTime. Never per frame. */
@@ -524,7 +527,7 @@ export class Environment implements IEnvironment {
     else screen.drops += (target - screen.drops) * (1 - Math.exp(-realDt * (target > screen.drops ? 0.8 : 0.3)));
     const amount = ws.snow;
     screen.snow = this.qLevel === 0 ? amount : 0;
-    screen.flash = this.flash * 0.9;
+    screen.flash = this.flash * 0.55;
     const aspect = this.ctx.engine.size.width / Math.max(1, this.ctx.engine.size.height);
     this.c1.copy(this.pal.hemiSky).multiplyScalar(0.5 + 0.5 * (1 - this.nightFactor)).lerp(this.c2.setRGB(1, 1, 1), 0.5);
     screen.update(this.ctx.engine.time, aspect, this.c1);

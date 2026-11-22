@@ -3,7 +3,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import { CONFIG } from '../config';
 import { G, groups } from '../core/Physics';
 import type { Physics } from '../core/Physics';
-import type { PlaneCfg } from './FlightModel';
+import { mainWheelZ, type PlaneCfg } from './FlightModel';
 import type { PlaneVisual } from './types';
 
 /**
@@ -54,7 +54,9 @@ export class PlaneGear {
     const noses = gear.filter((w) => w.steerable);
     const mains = gear.filter((w) => !w.steerable);
     const zn = noses.length ? noses.reduce((a, w) => a + w.wheel.z, 0) / noses.length : 0;
-    const zm = mains.length ? mains.reduce((a, w) => a + w.wheel.z, 0) / mains.length : 0;
+    const L = visual.dims.length;
+    const wz = (w: { wheel: THREE.Vector3; steerable: boolean }) => (w.steerable ? w.wheel.z : mainWheelZ(w.wheel.z, L));
+    const zm = mains.length ? mains.reduce((a, w) => a + wz(w), 0) / mains.length : 0;
     let noseShare = noses.length && mains.length && zn - zm > 0.1 ? clamp01(-zm / (zn - zm)) : noses.length / Math.max(1, gear.length);
     if (!mains.length) noseShare = 1;
     if (!noses.length) noseShare = 0;
@@ -65,7 +67,7 @@ export class PlaneGear {
       const sag = rest * sagFrac;
       _p.x = w.wheel.x;
       _p.y = w.wheel.y + rest;
-      _p.z = w.wheel.z;
+      _p.z = wz(w);
       c.addWheel(_p, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, rest, w.radius);
       // Rapier: suspension force = stiffness · compression · chassisMass (+ damping · velocity · chassisMass).
       const k = load / (mass * sag);

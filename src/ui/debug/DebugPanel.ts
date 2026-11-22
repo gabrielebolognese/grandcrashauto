@@ -136,7 +136,18 @@ export class DebugPanel {
         btn('Garage', () => c.game.openGarage()),
       ),
     );
-    a.append(group('Time of day', ...(['day', 'sunset', 'night'] as const).map((t) => btn(t, () => c.settings.set({ timeOfDay: t })))));
+    const hrs = { day: 12.5, sunset: 19.25, night: 23 } as const;
+    a.append(
+      group(
+        'Time of day',
+        ...(['day', 'sunset', 'night'] as const).map((t) =>
+          btn(t, () => {
+            c.settings.set({ timeOfDay: t });
+            c.env?.setTime?.(hrs[t]);
+          }),
+        ),
+      ),
+    );
     a.append(group('Quality', ...(['low', 'medium', 'high'] as QualityLevel[]).map((q) => btn(q, () => c.settings.applyPreset(q, true)))));
     const ts = h('input', { type: 'range', min: 0.05, max: 2, step: 0.05, value: c.engine.timeScale, class: 'dbg-range' }) as HTMLInputElement;
     const tsv = h('span', { class: 'dbg-val', text: c.engine.timeScale.toFixed(2) });

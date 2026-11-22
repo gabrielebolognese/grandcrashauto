@@ -44,7 +44,7 @@ void main() {
     float glow = textureLod(uCloudTex, muv, 2.0).b;
     float rift = textureLod(uCloudTex, muv * 2.3 + 0.41, 1.0).a;
     float band = mw * (0.35 + 0.65 * glow) * (1.0 - 0.55 * smoothstep(0.55, 0.85, rift) * exp(-bd * bd * 160.0));
-    col += vec3(0.42, 0.48, 0.72) * band * uMilky * 0.075 * smoothstep(0.0, 0.25, h);
+    col += vec3(0.42, 0.48, 0.72) * band * uMilky * 0.05 * smoothstep(0.0, 0.25, h);
   }
   if (uStars > 0.001 && h > 0.0) {
     vec3 ip = floor(sp);

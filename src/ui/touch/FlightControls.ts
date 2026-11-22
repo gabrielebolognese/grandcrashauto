@@ -47,7 +47,8 @@ export class FlightControls {
     this.brake = h('div', { class: 'fc-btn fc-brake touch-ctl fade-ctl', role: 'button', 'aria-label': 'Brake' }, icon('brakeDisc'), h('span', { text: 'Brake' }));
     this.gearLabel = h('span', { text: 'Gear ▼' });
     this.gear = h('div', { class: 'fc-btn fc-gear touch-ctl fade-ctl', role: 'button', 'aria-label': 'Landing gear' }, icon('gear'), this.gearLabel);
-    this.el = h('div', { class: 'touch-layer flight', 'aria-hidden': 'true' }, this.zone, h('div', { class: 'fc-right' }, h('div', { class: 'fc-col' }, this.gear, this.brake), this.thrTrack));
+    // User request: only the stick (left) and the throttle (right); gear and brakes are automatic in the plane system.
+    this.el = h('div', { class: 'touch-layer flight', 'aria-hidden': 'true' }, this.zone, h('div', { class: 'fc-right' }, this.thrTrack));
     this.bindStick();
     this.bindThrottle();
     this.bindButtons();

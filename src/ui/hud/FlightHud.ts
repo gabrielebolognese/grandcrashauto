@@ -123,9 +123,8 @@ export class FlightHud {
     this.el = h(
       'div',
       { class: 'flight-hud', 'aria-hidden': 'true' },
-      this.spd.canvas,
-      this.alt.canvas,
-      h('div', { class: 'fl-top' }, this.hdg.canvas, h('div', { class: 'fl-status' }, this.thr, this.gearChip, this.flapChip, this.brakeChip), h('div', { class: 'fl-alerts' }, this.oomBanner, this.caution, this.stall)),
+      // User request: keep the plane visible — no instrument tapes / heading / status chips, only alerts.
+      h('div', { class: 'fl-top' }, h('div', { class: 'fl-alerts' }, this.oomBanner, this.caution, this.stall)),
       this.engines,
       this.crash,
       this.skip,

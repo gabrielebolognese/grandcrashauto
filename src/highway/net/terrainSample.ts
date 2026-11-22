@@ -1,5 +1,6 @@
 import { CONFIG } from '../../config';
-import { baseHeight } from '../../terrain/gen/height';
+import * as TH from '../../terrain/gen/height';
+const { baseHeight } = TH;
 
 /**
  * Natural terrain sampling for the PURE highway generator (worker-safe: no three.js, no DOM).
@@ -41,6 +42,8 @@ const isSea = (h0: number, h1: number, h2: number) => h0 < 0.25 && h1 < -0.4 && 
 
 /** z of the south coastline (land → sea going +z) at absolute x. */
 export function coastZAt(x: number): number {
+  const fn = (TH as { southShoreZ?: (ax: number) => number }).southShoreZ;
+  if (fn) return fn(x); // terrain's analytic shoreline (exact, cheap)
   const key = Math.round(x);
   const c = coastZCache.get(key);
   if (c !== undefined) return c;
@@ -68,6 +71,8 @@ export function coastZAt(x: number): number {
 
 /** x of the west coastline (land → sea going −x) at absolute z. */
 export function coastXAt(z: number): number {
+  const fn = (TH as { westShoreX?: (az: number) => number }).westShoreX;
+  if (fn) return fn(z);
   const key = Math.round(z);
   const c = coastXCache.get(key);
   if (c !== undefined) return c;

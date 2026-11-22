@@ -39,3 +39,14 @@ Smoke runs: machine-wide limit of 2 concurrent (lock files in %TEMP%, PID-checke
 - UI must forward touch drags to cameraRig.orbitDrag (camera note). Camber while driving → vehicle (sent).
 - Repo: github.com/gabrielebolognese/grandcrashauto (main). Netlify via netlify.toml, domain grandcrashauto.lol.
   live.mjs runs with --autopush 15 (commits+pushes passing builds) and archives builds to %USERPROFILE%\crashgame-timelapse\builds.
+
+## Low-CPU mode (user request): max 4 active agents
+- Active: npc, flight, highway, env (resumed after ui finished). Finished: camera, fx, audio, garage, carmodels, world, ui.
+- Paused (resume with "continue" + tell them what the lead already did):
+  - props: lead DID sign variants (signFace + 4 kinds + resolver). Remaining: re-test hits, re-measure tris/calls, final report.
+  - vehicle: lead DID snow wobble softening (lowGripWild 1.6 → 1.1). Remaining: re-verify drift + jump/glide/barrel, final report.
+  - terrain: lead DID airport-elevation blend in gen/height.ts (zoneGround). Remaining: verify pre-pause edits, spike profiling, visuals, plateau/determinism runs, report.
+  - planemodels: remaining cockpit view redesign, re-verify charring fix, polish, report.
+  - breakup: remaining visual smoke, perf measure, gear-up ditch scenario, report.
+  - nav: remaining re-tests, timings, full smoke, real highway/terrain data check, report.
+- Lead also: audio cockpit detection → cameraRig.view; Settings controlsOpacity default 0.3; boot warm-up compiles only visible + opt-in (tiny hidden / userData.warmup) meshes.

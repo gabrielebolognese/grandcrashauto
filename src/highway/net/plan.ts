@@ -140,14 +140,14 @@ function inForbidden(x: number, z: number): boolean {
 export function* planGen(d: EdgeDesc, rng: Rng): Generator<void, PlanOut> {
   const C = cfg();
   const A = d.a, B = d.b, eA = d.endA, eB = d.endB;
-  const R = C.designRadius;
-  const leadLen = (e: typeof eA) => (e.main ? e.lin + 20 : 40);
+  const R = d.ref.key === 'xW>xA' ? 92 : C.designRadius; // the airport link is a low-speed connector
+  const leadLen = (e: typeof eA) => (d.ref.key === 'xW>xA' ? 25 : e.main ? e.lin + 20 : 40);
   const lA = leadLen(eA), lB = leadLen(eB);
   const Ax = A.x + eA.dir.x * lA, Az = A.z + eA.dir.z * lA;
   const Bx = B.x + eB.dir.x * lB, Bz = B.z + eB.dir.z * lB;
   const th0 = Math.atan2(eA.dir.z, eA.dir.x);
   const th1 = Math.atan2(-eB.dir.z, -eB.dir.x); // arrival heading at B'
-  const rho = R * 1.32;
+  const rho = R * (d.ref.key === 'xW>xA' ? 1.04 : 1.32);
   // ── Dubins base (verified numerically: the endpoint must match) ──
   let base: number[] | null = null;
   for (const cand of dubins(Ax, Az, th0, Bx, Bz, th1, rho)) {
@@ -179,8 +179,8 @@ export function* planGen(d: EdgeDesc, rng: Rng): Generator<void, PlanOut> {
   yield;
   // ── 2nd-order DP over lateral offsets (state = offset, previous step) ──
   const K = Math.max(2, Math.round(Lb / 200));
-  const Mh = 18, M = 2 * Mh + 1, T = 3, NS = 2 * T + 1;
-  const step = Math.max(10, Math.min(26, (0.12 * Lb) / Mh));
+  const Mh = 22, M = 2 * Mh + 1, T = 3, NS = 2 * T + 1;
+  const step = Math.max(10, Math.min(44, (0.24 * Lb) / Mh));
   const offs = new Float64Array(K + 1);
   if (Lb > 500) {
     const total = lA + Lb + lB;
@@ -383,7 +383,7 @@ function buildAndFair(
 ): { P: Float64Array; m: number; h: number; worst: number; windows: number } {
   const C = cfg();
   const A = d.a, B = d.b, eA = d.endA, eB = d.endB;
-  const R = C.designRadius;
+  const R = d.ref.key === 'xW>xA' ? 92 : C.designRadius;
   // raw polyline: lead A, offset Dubins base (Catmull-Rom offsets), lead B
   const raw: number[] = [A.x, A.z];
   const nLeadA = Math.max(1, Math.round(lA / 25));

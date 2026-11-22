@@ -243,7 +243,7 @@ export class NpcSystem implements INpcSystem {
           .setLinearDamping(0.15)
           .setAngularDamping(1.1)
           .setCcdEnabled(true)
-          .setEnabled(false),
+          .setGravityScale(0),
       );
       const col = physics.world.createCollider(
         RAPIER.ColliderDesc.capsule(0.56, 0.21)
@@ -255,6 +255,7 @@ export class NpcSystem implements INpcSystem {
         body,
       );
       physics.tag(col, { kind: 'npc', material: 'flesh', id: -1 });
+      body.sleep(); // parked asleep far below (always enabled: no broadphase topology changes when used)
       this.rags.push({ body, npc: -1, t: 0, prev: new THREE.Vector3(), curr: new THREE.Vector3(), prevQ: new THREE.Quaternion(), currQ: new THREE.Quaternion() });
     }
 
@@ -275,6 +276,23 @@ export class NpcSystem implements INpcSystem {
 
   /** Pre-compile the hero shadow-depth program (regular materials are compiled by the lead's scene warm-up). */
   warmup(): void {
+    // exercise the rarely-run knockdown code paths once (JIT warm-up) on a detached dummy NPC
+    try {
+      const d = new Npc(-1);
+      d.app = randomAppearance(Rng.from(1, 2, 3));
+      d.active = true;
+      d.body = true;
+      d.px = 0;
+      d.py = 2;
+      d.pz = 0;
+      d.bvx = 3;
+      d.bwz = 4;
+      d.st = S.Knocked;
+      for (let i = 0; i < 40; i++) this.doBallistic(d, 1 / 60);
+      d.active = false;
+    } catch {
+      /* optional */
+    }
     const depth = this.lods[0]?.mesh.customDepthMaterial;
     if (!depth) return;
     const tmp = new THREE.InstancedMesh(this.lods[0].mesh.geometry, depth, 1);
@@ -1346,12 +1364,13 @@ export class NpcSystem implements INpcSystem {
   }
 
   private pathSide = 0;
+  private predictT = 1.7;
   private pathLat = 0;
   /** Is (x,z) inside the car's predicted swept box (straight + yaw-rate arc)? Returns time to impact or -1. */
   private pathHit(x: number, y: number, z: number, margin: number): number {
     const c = this.car;
     if (Math.abs(y - c.y) > 3) return -1;
-    const T = CONFIG.npc.predictTime;
+    const T = this.predictT;
     const K = 6;
     for (let k = 0; k <= K; k++) {
       const t = (k / K) * T;
@@ -1392,7 +1411,10 @@ export class NpcSystem implements INpcSystem {
     const presence = this.carOnSidewalk && kmh > 7;
     if (kmh < C.dangerKmh && !presence) return;
     const margin = C.dangerMargin + (this.carOnSidewalk ? 0.8 : 0);
-    const reach = c.speed * C.predictTime + 10;
+    // people notice slow cars early; a fast car is on them sooner (and some freeze like a deer in headlights)
+    this.predictT = Math.max(1.0, Math.min(C.predictTime, C.predictTime - (kmh - 30) / 60));
+    const freezeP = Math.max(0, Math.min(C.freezeMax, (kmh - 35) / 80));
+    const reach = c.speed * this.predictT + 10;
     let startled = 0;
     for (const n of this.npcs) {
       if (!n.active || n.reactT >= 0) continue;
@@ -1417,8 +1439,8 @@ export class NpcSystem implements INpcSystem {
       n.escZ = -c.fx * side;
       n.threatX = c.x;
       n.threatZ = c.z;
-      n.reactKind = this.chooseReaction(tHit, kmh);
-      if (n.st === S.Sit) n.reactKind = kmh < C.calmDodgeKmh ? 5 : 3;
+      n.reactKind = rand() < freezeP ? 6 : this.chooseReaction(tHit, kmh);
+      if (n.st === S.Sit && n.reactKind !== 6) n.reactKind = kmh < C.calmDodgeKmh ? 5 : 3;
       n.evDist = (c.hx + margin + 0.4 - this.pathLat) * 1; // lateral distance to clear
       startled++;
     }
@@ -1430,6 +1452,8 @@ export class NpcSystem implements INpcSystem {
         if (!site.alive[i] || site.pend[i]) continue;
         const tHit = this.pathHit(site.mx[i], site.my[i], site.mz[i], margin);
         if (tHit < 0) continue;
+        // stable per-member "freeze" decision (re-rolled every 3 s) so frozen members stay frozen
+        if (freezeP > 0 && ((i * 2654435761 + site.gen * 97 + Math.floor(this.animTime / 3) * 40503) >>> 0) % 1000 < freezeP * 1000) continue;
         const side = this.pathSide;
         const ex = c.fz * side, ez = -c.fx * side;
         const kind = this.chooseReaction(tHit, kmh);
@@ -1451,6 +1475,15 @@ export class NpcSystem implements INpcSystem {
     const kind = n.reactKind;
     n.reactT = -1;
     if (n.st === S.Knocked || n.st === S.Settle || n.st === S.Lying || n.st === S.GetUp) return;
+    if (kind === 6) {
+      // froze: flinch on the spot, staring at the car
+      n.lookX = n.threatX;
+      n.lookZ = n.threatZ;
+      n.lookY = n.y + 1;
+      n.lookT = 2;
+      if (n.st !== S.Sit) this.enterStand(n, CLIP.flinch, 1.2, 0.1);
+      return;
+    }
     if (n.st === S.Sit || n.st === S.SitDown || n.st === S.StandUp) {
       n.calm = kind === 5;
       this.startFlee(n, n.escX, n.escZ, rr(1.5, 3), n.threatX, n.threatZ);
@@ -1513,7 +1546,8 @@ export class NpcSystem implements INpcSystem {
       r.body.setLinvel({ x: 0, y: 0, z: 0 }, false);
       r.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
       r.body.setTranslation({ x: 0, y: -500 - ri * 3, z: 0 }, false);
-      r.body.setEnabled(false);
+      r.body.setGravityScale(0, false);
+      r.body.sleep();
     } catch {
       /* body removed */
     }
@@ -1572,7 +1606,7 @@ export class NpcSystem implements INpcSystem {
     }
     const r = this.rags[ri];
     const b = r.body;
-    b.setEnabled(true);
+    b.setGravityScale(1, true);
     b.setTranslation({ x: n.px, y: n.py, z: n.pz }, true);
     b.setRotation({ x: n.q.x, y: n.q.y, z: n.q.z, w: n.q.w }, true);
     b.setLinvel({ x: vx, y: vy, z: vz }, true);
@@ -2883,6 +2917,11 @@ export class NpcSystem implements INpcSystem {
       this.blobA.needsUpdate = true;
     }
     this.debug.visible = nv;
+    let dc = this.blob.visible ? 1 : 0;
+    for (const L of this.lods) if (L.mesh.visible) dc++;
+    for (const m of this.crowd.meshes) if (m.visible) dc++;
+    if (this.crowd.blobVisible) dc++;
+    this.debug.drawCalls = dc;
     this.debug.lod[0] = this.lods[0].count;
     this.debug.lod[1] = this.lods[1].count;
     this.debug.lod[2] = this.lods[2].count;

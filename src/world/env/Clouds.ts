@@ -68,7 +68,7 @@ void main() {
   float back = pow(max(dot(-V, L), 0.0), 5.0);
   col += uCloudLit * rim * (0.12 + 1.3 * back);
   col *= 1.4;
-  col += vec3(0.7, 0.75, 1.0) * uLightning * 1.8 * (0.4 + vH);
+  col += vec3(0.7, 0.75, 1.0) * uLightning * 0.9 * (0.4 + vH);
   float haze = 1.0 - exp(-vTrueDist / uCloudHaze);
   col = envHaze(col, -V, haze * 0.92);
   gl_FragColor = vec4(col, 1.0);

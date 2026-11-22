@@ -117,6 +117,20 @@ export class TopBar {
     this.fsBtn = tap('fullscreen', 'Fullscreen', null, () => toggleFullscreen());
     if (!fullscreenSupported()) this.fsBtn.style.display = 'none';
     const pause = tap('pause', 'Pause', 'Esc', () => ctx.game.pause());
+    // One-tap time of day: day → sunset → night → day (user request).
+    const dayNight = tap('sun', 'Day / night', null, () => {
+      const env = ctx.env;
+      if (!env?.setTime) return;
+      const hr = env.clockHours ?? 12;
+      const next = hr >= 6.5 && hr < 17.5 ? 19.3 : hr >= 17.5 && hr < 21.5 ? 23 : 12;
+      env.setTime(next);
+      ctx.events.emit('toast', { text: next === 12 ? '☀ Day' : next === 23 ? '🌙 Night' : '🌇 Sunset', ms: 900 });
+    });
+    // Plane: Explode middle / tail live behind a small "more" toggle so the view stays clear.
+    const more = h('button', { class: 'round-act touch-ctl boom-fade only-plane more-btn', type: 'button', 'aria-label': 'More explosions', title: 'Explode middle / tail' }, h('span', { text: '⋯' }));
+    this.midBtn.classList.add('extra');
+    this.tailBtn.classList.add('extra');
+    void resetBtn; // plane reset = long-press 💥 or R (no separate button)
     this.camLabel = h('div', { class: 'cam-label' });
 
     const onFs = () => {
@@ -130,10 +144,16 @@ export class TopBar {
     this.el = h(
       'div',
       { class: 'topbar', 'aria-hidden': 'true' },
-      h('div', { class: 'tb-cluster fade-ctl', role: 'toolbar', 'aria-label': 'Game controls' }, map, cam, this.lightsBtn, horn, look, this.fsBtn, pause),
-      h('div', { class: 'boom-wrap' }, this.midBtn, this.boom, this.tailBtn, resetBtn),
+      h('div', { class: 'tb-cluster fade-ctl', role: 'toolbar', 'aria-label': 'Game controls' }, map, cam, dayNight, this.lightsBtn, horn, look, this.fsBtn, pause),
+      h('div', { class: 'boom-wrap' }, this.midBtn, this.boom, this.tailBtn, more),
       this.camLabel,
     );
+    const wrap = this.el.querySelector('.boom-wrap') as HTMLDivElement;
+    more.addEventListener('click', () => {
+      uiSound('click');
+      wrap.classList.toggle('extra-open');
+    });
+    for (const b of [this.midBtn, this.tailBtn]) b.addEventListener('click', () => wrap.classList.remove('extra-open'));
   }
 
   setVisible(on: boolean): void {

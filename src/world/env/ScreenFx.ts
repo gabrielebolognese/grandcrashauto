@@ -82,7 +82,7 @@ void main() {
   }
   if (uFlash > 0.001) {
     col = mix(col, vec3(0.85, 0.9, 1.0), uFlash / max(a + uFlash, 0.001));
-    a = max(a, uFlash * 0.42);
+    a = max(a, uFlash * 0.3);
   }
   if (a < 0.002) discard;
   gl_FragColor = vec4(col, a);
@@ -124,6 +124,7 @@ export class ScreenFx {
     this.mesh.matrixAutoUpdate = false;
     this.mesh.userData.noOriginShift = true;
     this.mesh.visible = false;
+    this.mesh.userData.warmup = true; // hidden until needed: pre-compiled behind the loading bar
   }
 
   update(time: number, aspect: number, light: THREE.Color): void {

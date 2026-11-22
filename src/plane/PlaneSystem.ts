@@ -1235,6 +1235,7 @@ export class PlaneSystem implements IPlaneSystem {
     const ht = model.htailAlive;
     const fin = model.finAlive;
     fi.assistFactor = clamp(1 - this.assistPenalty, 0, 1) * failFade * (this.tailLost ? 0.35 * ht : 1);
+    fi.rollAssist = clamp(1 - this.assistPenalty, 0, 1) * failFade * (this.tailLost ? 0.7 : 1);
     fi.onGround = this.onGround;
     fi.agl = Math.max(0, t.y - this.groundY + (model.surfaces[0]?.pos.y ?? 0));
     fi.wheelAgl = this.agl;

@@ -111,6 +111,8 @@ export interface Design {
   weights: Record<string, number>;
   fuelFrac: Record<string, number>;
   cockpit: CockpitDef;
+  /** Small cabin seen from the cockpit (prop): cabin interiors always shown, bulkhead behind the rear seats. */
+  openCabin?: boolean;
   floorY: number;
   upperFloorY?: number;
   seatPitch: number;
@@ -156,7 +158,7 @@ function propDesign(): Design {
   };
   const b0 = curve([[-3.9, 0.32], [-2.2, -0.04], [-0.5, -0.12], [3.6, -0.12]]);
   const rects: FusRect[] = [
-    { z0: 1.68, z1: 2.42, t0: 0, t1: 1.02, kind: 'glass' },
+    { z0: 1.68, z1: 2.5, t0: 0, t1: 1.02, kind: 'glass' },
     { z0: 1.05, z1: 1.6, t0: 0.66, t1: 1.38, kind: 'glass' },
     { z0: 0.08, z1: 0.92, t0: 0.66, t1: 1.3, kind: 'glass' },
     { z0: -2.35, z1: -1.0, t0: 0.78, t1: 1.36, kind: 'uv', uv: uv('prop', 'reg') },
@@ -167,7 +169,7 @@ function propDesign(): Design {
     type: 'prop', name: 'Saltwing S2', livery: 'Coastline Flying Club', description: 'Two-seat high-wing trainer',
     length: 8, span: 11, height: 2.7,
     profile, liv,
-    cuts: [2.45, 1.55, 1.15, -0.45, -2.0],
+    cuts: [2.56, 1.55, 1.15, -0.45, -2.0],
     ring: [40, 18, 8], step: [0.16, 0.42, 1.4],
     win: null,
     wing: {
@@ -213,7 +215,8 @@ function propDesign(): Design {
       wingL1: 7, wingR1: 7, wingL2: 4, wingR2: 4, strutL: 0.8, strutR: 0.8, engine1: 18, gearNose: 2, gearL: 2.5, gearR: 2.5,
     },
     fuelFrac: { wingL1: 0.4, wingR1: 0.4, wingL2: 0.1, wingR2: 0.1 },
-    cockpit: { eye: v3(0, 0.5, 1.72), dashZ: 2.2, dashTop: 0.42, floorY: -0.45, zFront: 2.43, seatX: 0.27, glass: false, panelW: 0.9 },
+    cockpit: { eye: v3(0, 0.56, 1.72), dashZ: 2.2, dashTop: 0.42, floorY: -0.45, zFront: 2.43, seatX: 0.27, glass: false, panelW: 0.9 },
+    openCabin: true,
     floorY: -0.45,
     seatPitch: 0.9,
     seatsAbreast: [1, 1],
@@ -235,8 +238,8 @@ function bizjetDesign(): Design {
   };
   const b0 = curve([[-8.2, 0.6], [-6.5, 0.35], [-4, -0.12], [-1, -0.44], [4, -0.55], [8.8, -0.55]]);
   const rects: FusRect[] = [
-    { z0: 6.3, z1: 6.98, t0: 0.035, t1: 0.56, kind: 'glass' },
-    { z0: 5.78, z1: 6.55, t0: 0.64, t1: 1.03, kind: 'glass' },
+    { z0: 6.3, z1: 7.6, t0: 0.035, t1: 0.56, kind: 'glass' },
+    { z0: 5.78, z1: 6.75, t0: 0.64, t1: 1.03, kind: 'glass' },
     { z0: 5.28, z1: 5.72, t0: 0.68, t1: 0.99, kind: 'glass' },
     { z0: 0.9, z1: 3.55, t0: 0.69, t1: 1.03, kind: 'uv', uv: uv('bizjet', 'title') },
     { z0: -7.75, z1: -6.55, t0: 1.28, t1: 1.72, kind: 'uv', uv: uv('bizjet', 'reg') },
@@ -246,7 +249,7 @@ function bizjetDesign(): Design {
     type: 'bizjet', name: 'Swiftlet 7', livery: 'Palmhaven Jet Charter', description: 'Twin rear-engine business jet',
     length: 18, span: 16, height: 5.5,
     profile, liv,
-    cuts: [7.25, 5.0, 1.95, -1.7, -5.3],
+    cuts: [7.75, 5.0, 1.95, -1.7, -5.3],
     ring: [44, 20, 10], step: [0.3, 0.8, 2.4],
     win: { pitch: 0.95, halfW: 0.17, halfH: 0.22, corner: 0.16, rows: [{ y: 0.17, sMin: -3.85, sMax: 3.3 }], doors: [{ s: 4.45, y: -0.1, halfW: 0.38, halfH: 0.72 }] },
     wing: {
@@ -296,7 +299,7 @@ function bizjetDesign(): Design {
       wingL1: 8, wingR1: 8, wingL2: 3.5, wingR2: 3.5, engine1: 7, engine2: 7, gearNose: 0.8, gearL: 2, gearR: 2,
     },
     fuelFrac: { fuselageCenter: 0.3, wingL1: 0.28, wingR1: 0.28, wingL2: 0.07, wingR2: 0.07 },
-    cockpit: { eye: v3(0, 0.52, 5.62), dashZ: 6.25, dashTop: 0.36, floorY: -0.5, zFront: 6.75, seatX: 0.42, glass: true, panelW: 1.2 },
+    cockpit: { eye: v3(0, 0.66, 5.6), dashZ: 6.25, dashTop: 0.36, floorY: -0.5, zFront: 6.75, seatX: 0.42, glass: true, panelW: 1.2 },
     floorY: -0.55,
     seatPitch: 1.25,
     seatsAbreast: [1, 1],
@@ -318,8 +321,8 @@ function airlinerDesign(): Design {
   };
   const b0 = curve([[-19, 0.86], [-15, 0.55], [-11, 0.12], [-6, -0.3], [2, -0.42], [19, -0.44]]);
   const rects: FusRect[] = [
-    { z0: 14.98, z1: 15.86, t0: 0.035, t1: 0.5, kind: 'glass' },
-    { z0: 14.5, z1: 15.5, t0: 0.57, t1: 0.99, kind: 'glass' },
+    { z0: 14.98, z1: 16.3, t0: 0.035, t1: 0.5, kind: 'glass' },
+    { z0: 14.5, z1: 15.75, t0: 0.57, t1: 0.99, kind: 'glass' },
     { z0: 13.8, z1: 14.42, t0: 0.6, t1: 0.95, kind: 'glass' },
     { z0: 0.6, z1: 7.6, t0: 0.72, t1: 1.08, kind: 'uv', uv: uv('airliner', 'title') },
     { z0: -11.3, z1: -8.9, t0: 0.8, t1: 1.0, kind: 'uv', uv: uv('airliner', 'reg') },
@@ -388,7 +391,7 @@ function airlinerDesign(): Design {
       wingL1: 9, wingR1: 9, wingL2: 4, wingR2: 4, wingL3: 1.6, wingR3: 1.6, engine1: 6, engine2: 6, gearNose: 0.7, gearL: 2.2, gearR: 2.2,
     },
     fuelFrac: { fuselageCenter: 0.4, wingL1: 0.22, wingR1: 0.22, wingL2: 0.08, wingR2: 0.08 },
-    cockpit: { eye: v3(0, 1.45, 14.62), dashZ: 15.3, dashTop: 1.28, floorY: -0.15, zFront: 15.95, seatX: 0.55, glass: true, panelW: 1.9 },
+    cockpit: { eye: v3(0, 1.55, 14.55), dashZ: 15.25, dashTop: 1.28, floorY: -0.15, zFront: 15.95, seatX: 0.55, glass: true, panelW: 1.9 },
     floorY: -0.55,
     seatPitch: 0.81,
     seatsAbreast: [3, 3],
@@ -494,7 +497,7 @@ function jumboDesign(): Design {
       engine1: 3, engine2: 3, engine3: 3, engine4: 3, gearNose: 0.6, gearL: 1.6, gearR: 1.6, gearL2: 1.6, gearR2: 1.6,
     },
     fuelFrac: { fuselageCenter: 0.4, wingL1: 0.22, wingR1: 0.22, wingL2: 0.08, wingR2: 0.08 },
-    cockpit: { eye: v3(0, 3.98, 29.75), dashZ: 30.45, dashTop: 3.82, floorY: 2.95, zFront: 31.15, seatX: 0.6, glass: true, panelW: 2.0 },
+    cockpit: { eye: v3(0, 4.02, 29.7), dashZ: 30.42, dashTop: 3.82, floorY: 2.95, zFront: 31.15, seatX: 0.6, glass: true, panelW: 2.0 },
     floorY: -0.6,
     upperFloorY: 2.95,
     seatPitch: 0.84,

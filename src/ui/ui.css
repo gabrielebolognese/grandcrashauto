@@ -1281,3 +1281,9 @@ html body #fatal.fatal-styled {
     transform: translate(0, -50%);
   }
 }
+
+/* ── Lead tweaks (user feedback): plane explode extras hidden behind "⋯", minimal flight UI ── */
+.boom-wrap:not(.extra-open) .round-act.extra { display: none; }
+.boom-wrap .more-btn span { font-size: 20px; line-height: 1; font-weight: 900; }
+.boom-wrap.extra-open .more-btn { background: var(--c-coral, #ff7a6b); color: #fff; }
+.hud .minimap, .hud-tl .minimap { display: none !important; }
