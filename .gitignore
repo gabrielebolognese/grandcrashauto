@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.vite/
+test-results/
+playwright-report/
+.smoke/
+*.log
+.DS_Store
+.claude/settings.local.json

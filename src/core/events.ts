@@ -1,0 +1,61 @@
+import type * as THREE from 'three';
+import type { ColliderTag, SurfaceMaterial } from './Physics';
+import type { Settings } from './Settings';
+import type { QualityLevel } from '../config';
+import type { CarBuild } from '../vehicle/CarBuild';
+
+export type GameState = 'boot' | 'title' | 'menu' | 'garage' | 'driving' | 'paused';
+
+/**
+ * Every cross-module event. Emitters and listeners only depend on this file.
+ * Vectors in payloads are owned by the emitter and may be reused after the call —
+ * clone them if you need to keep them.
+ */
+export interface GameEvents extends Record<string, unknown> {
+  /** Raw physics contact-force event for colliders that requested CONTACT_FORCE_EVENTS (emitted by core Physics). */
+  contact: { h1: number; h2: number; tag1: ColliderTag | null; tag2: ColliderTag | null; force: number; dir: THREE.Vector3 };
+
+  /** Player car hit something (emitted by vehicle). strength is 0..1 normalized, force is in N. */
+  impact: { position: THREE.Vector3; normal: THREE.Vector3; strength: number; force: number; material: SurfaceMaterial; other: ColliderTag | null; speed: number };
+  /** Metal scraping along a surface, emitted every fixed step while scraping (vehicle). intensity 0..1 */
+  scrape: { position: THREE.Vector3; intensity: number };
+  /** Horn pressed/released (vehicle or game). */
+  horn: { position: THREE.Vector3; on: boolean };
+  /** A big explosion happened (vehicle emits for the player car). */
+  explosion: { position: THREE.Vector3; radius: number; force: number };
+  /** The player car was respawned repaired (game/vehicle). */
+  carReset: { position: THREE.Vector3; yaw: number };
+  /** The player car was spawned into the world (vehicle). */
+  carSpawned: { build: CarBuild };
+  /** Glass broke on the player car or a parked car. */
+  glassBreak: { position: THREE.Vector3; shattered: boolean };
+  /** A car part detached (bumper, hood, door, wheel...). */
+  partDetached: { part: string; position: THREE.Vector3 };
+  /** Automatic gearbox changed gear (vehicle). gear: -1 = R, 0 = N, 1..5 */
+  gearShift: { gear: number; up: boolean };
+
+  /** A light prop was knocked (props). speed in m/s of the hit. */
+  propHit: { position: THREE.Vector3; kind: string; speed: number };
+  /** A parked car was shoved (props). */
+  parkedCarHit: { position: THREE.Vector3; speed: number };
+
+  /** A pedestrian was knocked down by the car (npc). */
+  npcHit: { position: THREE.Vector3; speed: number };
+  /** Pedestrians were startled (npc) — audio plays short reactions. */
+  npcStartled: { position: THREE.Vector3; count: number; scream: boolean };
+
+  /** Game state machine transitions (game). */
+  stateChanged: { from: GameState; to: GameState };
+  /** Settings changed (core Settings). keys = changed keys. */
+  settingsChanged: { settings: Settings; keys: (keyof Settings)[] };
+  /** Effective quality changed (core Quality). */
+  qualityChanged: { level: QualityLevel };
+  /** Show/hide a contextual prompt in the HUD, e.g. id 'flip' (vehicle → ui). */
+  prompt: { id: string; show: boolean; text?: string };
+  /** Short toast message (anyone → ui). */
+  toast: { text: string; ms?: number };
+  /** Haptics request (anyone → ui, which checks the vibration setting). */
+  vibrate: { pattern: number | number[] };
+  /** First user gesture happened (ui) — audio unlocks on this. */
+  userGesture: Record<string, never>;
+}
