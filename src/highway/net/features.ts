@@ -208,26 +208,29 @@ export function* placeFeaturesGen(r: EdgeRoute, rng: Rng): Generator<void, Featu
   yield;
   // ── rest stops ──
   if (L > 2200 && d.ref.cls !== 'link' && rng.chance(C.restStopChance)) {
-    // systematic scan; the valid spot nearest a seeded target wins (deterministic)
+    // systematic scan; the valid spot nearest a seeded target wins (deterministic). Full pad first, compact second.
     const target = rng.range(0.3, 0.7) * L;
     const side: 1 | -1 = rng.chance(0.5) ? 1 : -1;
-    let best = -1, bestD = Infinity;
-    for (let sc = zoneA + 220; sc < L - zoneB - 220; sc += 45) {
-      const s0 = sc - 130, s1 = sc + 130;
-      if (Math.abs(sc - target) >= bestD || !free(s0, s1, 60)) continue;
-      const kr = kindRange(r, s0 - 40, s1 + 40);
-      if (kr.mixed || kr.first !== K_ROAD) continue;
-      let ok = true;
-      for (let q = s0; q <= s1 && ok; q += 30) if (Math.abs(grade(q)) > 0.05) ok = false;
-      if (!ok || straightness(r, sc, 150, 150, 1) > 40) continue;
-      best = sc;
-      bestD = Math.abs(sc - target);
-    }
-    if (best >= 0) {
-      const s0 = best - 130, s1 = best + 130;
-      const near = side === 1 ? d.b : d.a;
-      f.rest.push({ id: `rest:${r.key}`, s0, s1, side, lOff: a2 + 0.4, w: 40, name: near.name });
-      occupy(s0 - 80, s1 + 80);
+    for (const half of [130, 90]) {
+      let best = -1, bestD = Infinity;
+      for (let sc = zoneA + half + 90; sc < L - zoneB - half - 90; sc += 45) {
+        const s0 = sc - half, s1 = sc + half;
+        if (Math.abs(sc - target) >= bestD || !free(s0, s1, 60)) continue;
+        const kr = kindRange(r, s0 - 40, s1 + 40);
+        if (kr.mixed || kr.first !== K_ROAD) continue;
+        let ok = true;
+        for (let q = s0; q <= s1 && ok; q += 30) if (Math.abs(grade(q)) > 0.05) ok = false;
+        if (!ok || straightness(r, sc, half + 20, half + 20, 1) > 40) continue;
+        best = sc;
+        bestD = Math.abs(sc - target);
+      }
+      if (best >= 0) {
+        const s0 = best - half, s1 = best + half;
+        const near = side === 1 ? d.b : d.a;
+        f.rest.push({ id: `rest:${r.key}`, s0, s1, side, lOff: a2 + 0.4, w: 40, name: near.name });
+        occupy(s0 - 80, s1 + 80);
+        break;
+      }
     }
   }
 

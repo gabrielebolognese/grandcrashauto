@@ -321,7 +321,7 @@ function airlinerDesign(): Design {
   };
   const b0 = curve([[-19, 0.86], [-15, 0.55], [-11, 0.12], [-6, -0.3], [2, -0.42], [19, -0.44]]);
   const rects: FusRect[] = [
-    { z0: 14.98, z1: 16.3, t0: 0.02, t1: 0.5, kind: 'glass' },
+    { z0: 14.98, z1: 16.3, t0: 0, t1: 0.5, kind: 'glass' },
     { z0: 14.5, z1: 15.75, t0: 0.57, t1: 0.99, kind: 'glass' },
     { z0: 13.8, z1: 14.42, t0: 0.6, t1: 0.95, kind: 'glass' },
     { z0: 0.6, z1: 7.6, t0: 0.72, t1: 1.08, kind: 'uv', uv: uv('airliner', 'title') },
@@ -415,7 +415,7 @@ function jumboDesign(): Design {
   };
   const b0 = curve([[-35, 0.85], [-28, 0.62], [-21, 0.22], [-15, 0.11], [3, 0.11], [11, 0.08], [28, 0.08], [33, 0.02], [35, -0.1]]);
   const rects: FusRect[] = [
-    { z0: 30.25, z1: 31.25, t0: 0.018, t1: 0.42, kind: 'glass' },
+    { z0: 30.25, z1: 31.25, t0: 0, t1: 0.42, kind: 'glass' },
     { z0: 29.55, z1: 30.75, t0: 0.49, t1: 0.82, kind: 'glass' },
     { z0: 28.9, z1: 29.5, t0: 0.52, t1: 0.78, kind: 'glass' },
     { z0: 14.2, z1: 24.4, t0: 0.97, t1: 1.27, kind: 'uv', uv: uv('jumbo', 'title') },

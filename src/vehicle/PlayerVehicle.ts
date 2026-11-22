@@ -693,6 +693,13 @@ export class PlayerVehicle implements IPlayerVehicle, DamageHost, StuntHost {
       if (dragSurf > 0 && speed > 0.3) imp.addScaledVector(vel, (-Math.min(dragSurf * 0.25 * P.mass * dt, speed * P.mass * 0.5)) / speed);
     }
     if (grounded) imp.addScaledVector(up, -P.downforce * vF * vF * dt);
+    // drift flow: a power slide keeps some push along the direction of travel (the rear tyres would be spinning)
+    if (powerSlide && speed > 3) {
+      const push = P.mass * T.driftThrust * drive * smoothstep(T.driftSlipDeg, T.driftTargetDeg, slipDeg) * dt;
+      this.v2.copy(vel).addScaledVector(this.groundN, -vel.dot(this.groundN));
+      const hs = this.v2.length();
+      if (hs > 0.1) imp.addScaledVector(this.v2, push / hs);
+    }
     const wind = this.ctx.env?.wind;
     if (wind && speed * KMH > V.weather.crosswindMinKmh) {
       const lat = wind.dot(left);

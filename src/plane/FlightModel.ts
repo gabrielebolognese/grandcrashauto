@@ -466,7 +466,8 @@ export class FlightModel {
         cl = this.tailCL(a, s.kind === 'fin' ? 3.0 : 3.6);
         st = this.st;
         const sin = Math.sin(a);
-        cd = 0.012 + lerp(0.08 * cl * cl, 1.15 * sin * sin, smoothstep(0, 1, st));
+        // no profile term: the whole-aircraft cd0 already includes the tail's parasite drag
+        cd = lerp(0.06 * cl * cl, 1.15 * sin * sin, smoothstep(0, 1, st));
       }
       s.stalled = st;
       const qa = 0.5 * rho * v2 * s.area * s.alive;

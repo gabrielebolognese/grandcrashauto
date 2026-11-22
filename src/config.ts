@@ -387,6 +387,7 @@ export const CONFIG = {
       driftSlipDeg: 9,
       driftTargetDeg: 30, // drift assist: rear grip is modulated to hold about this slip angle while power-sliding
       driftGripGain: 0.035, // rear side-grip change per degree of slip error
+      driftThrust: 3.2, // m/s² arcade push along the velocity while power-sliding (drifts keep their flow instead of scrubbing)
       gripDropRate: 10, // 1/s rear grip falls when the handbrake is pulled
       gripRecoverRate: 1.3, // 1/s rear grip returns after the handbrake/drift
       highSpeedSide: 0.85, // side stiffness multiplier at top speed (calmer at speed)
@@ -1145,7 +1146,7 @@ export const CONFIG = {
       cruiseKmh: 520, wingArea: 180, span: 35, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 15.5, cd0: 0.0152, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.7, finVolume: 0.075, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 350, flapsLandKmh: 290,
-      thrust: 146000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.14, spoolS: 3.5, idle: 0.06,
+      thrust: 146000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.18, spoolS: 3.5, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.3, rollRateDeg: 32, yawAccel: 0.6, damping: [0.06, 0.03, 0.05],
       pitchRateDeg: 8, gammaK: 0.65, bankK: 1.1, pitchRateK: 3.5, rollRateK: 3.5,
       rotatePitchDeg: 8.5, rotateRateDeg: 4.5, brakeDecel: 3.5, steerDeg: 50, suspension: [0.55, 0.3, 1.1], turbulence: 0.35,
@@ -1155,7 +1156,7 @@ export const CONFIG = {
       cruiseKmh: 540, wingArea: 650, span: 64, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 15.9, cd0: 0.0133, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 6, wingAcFrac: 0.08, tailVolume: 0.75, finVolume: 0.08, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 390, flapsLandKmh: 320,
-      thrust: 292000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.15, spoolS: 4, idle: 0.06,
+      thrust: 292000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.19, spoolS: 4, idle: 0.06,
       inertiaScale: [1.15, 1.1, 1.35], pitchAuthority: 1.25, rollRateDeg: 17, yawAccel: 0.35, damping: [0.07, 0.04, 0.06],
       pitchRateDeg: 5, gammaK: 0.45, bankK: 0.7, pitchRateK: 2.5, rollRateK: 2.2,
       rotatePitchDeg: 8, rotateRateDeg: 3.5, brakeDecel: 3, steerDeg: 55, suspension: [0.7, 0.3, 1.1], turbulence: 0.25,
@@ -1292,7 +1293,7 @@ export const CONFIG = {
     hazeMul: 0.72, // atmospheric haze e-folding distance = view distance × this
     snowJitter: 45, // m of per-face jitter of the snow line
     scatter: {
-      radius: { low: 650, medium: 1000, high: 1400 }, // m: trees beyond this are not drawn
+      radius: { low: 600, medium: 850, high: 1300 }, // m: trees beyond this are not drawn
       lod0: 150, // m: full trees
       lod1: 430, // m: low trees; beyond = far impostors (half density)
       bushRadius: 320,
@@ -1328,8 +1329,8 @@ export const CONFIG = {
     minRadius: 400, // spec minimum curve radius (m)
     designRadius: 560, // routing target radius (margin over minRadius)
     maxGrade: 0.06, // spec maximum gradient
-    designGrade: 0.053, // profile Lipschitz bound
-    bankMax: 0.05, // superelevation on the tightest curves (rise per metre)
+    designGrade: 0.058, // profile Lipschitz bound (spec max 6 %)
+    bankMax: 0.04, // superelevation on the tightest curves (rise per metre)
     lanes: 3, // lanes per direction (links: 2)
     laneW: 3.6,
     medianHalf: 0.45,

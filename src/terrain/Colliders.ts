@@ -3,7 +3,7 @@ import { CONFIG } from '../config';
 import { G, groups, RAPIER as R, type Physics, type SurfaceMaterial } from '../core/Physics';
 import { CHUNK, CHUNK_CELL, CHUNK_V, type ChunkData } from './gen/chunk';
 import { SURF_NAMES } from './gen/biome';
-import type { WorkerPool } from './WorkerPool';
+import { KEY_CHUNK, type WorkerPool } from './WorkerPool';
 
 /**
  * 128 m query/collider chunks (2 m samples, identical to the L0 render tiles). Heightfield colliders (G.WORLD, tagged
@@ -21,7 +21,6 @@ interface ChunkRec {
 }
 
 const ck = (cx: number, cz: number) => (cx + 32768) * 65536 + (cz + 32768);
-const cks = (cx: number, cz: number) => `c${cx}:${cz}`;
 
 export class ColliderChunks {
   private recs = new Map<number, ChunkRec>();
@@ -32,7 +31,9 @@ export class ColliderChunks {
   // single-entry cache for hot queries
   private lastKey = -1;
   private lastRec: ChunkRec | null = null;
-  stats = { chunks: 0, colliders: 0, created: 0, removed: 0 };
+  stats = { chunks: 0, colliders: 0, created: 0, removed: 0, buildMsMax: 0 };
+  /** 1 per frame in game (smooth), more during warm-up */
+  maxBuildsPerFrame = 1;
 
   constructor(private physics: Physics, private pool: WorkerPool) {}
 
@@ -62,8 +63,11 @@ export class ColliderChunks {
     if (cand.length) {
       cand.sort((a, b) => dist2(a, focusX, focusZ) - dist2(b, focusX, focusZ));
       for (const r of cand) {
-        if (built >= 2 || (built >= 1 && performance.now() > deadline)) break;
+        if (built >= this.maxBuildsPerFrame || (built >= 1 && performance.now() > deadline)) break;
+        const tb = performance.now();
         this.build(r, offsetX, offsetZ);
+        const bm = performance.now() - tb;
+        if (bm > this.stats.buildMsMax) this.stats.buildMsMax = +bm.toFixed(2);
         built++;
       }
     }
@@ -82,8 +86,8 @@ export class ColliderChunks {
         this.stats.removed++;
       }
     }
-    // LRU on data
-    if (this.recs.size > T.cacheChunks) {
+    // LRU on data (every 30 frames)
+    if (this.frame % 30 === 0 && this.recs.size > T.cacheChunks) {
       const list = [...this.recs.values()].filter((r) => !r.collider && r.lastWanted !== this.frame);
       list.sort((a, b) => a.lastUsed - b.lastUsed);
       const n = this.recs.size - T.cacheChunks;
@@ -113,7 +117,7 @@ export class ColliderChunks {
         const r = this.get(cx, cz);
         r.lastWanted = this.frame;
         r.lastUsed = this.frame;
-        if (!r.data) this.pool.want(cks(cx, cz), basePriority + d, () => ({ type: 'chunk', cx, cz }));
+        if (!r.data) this.pool.wantJob(KEY_CHUNK + ck(cx, cz), basePriority + d, 'chunk', cx, cz);
       }
     }
   }

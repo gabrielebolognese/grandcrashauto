@@ -3,7 +3,7 @@ import { CONFIG } from '../config';
 import type { GameContext } from '../game/contracts';
 import { ST, ST_COL, ST_COUNT, ST_IS_STRUCTURE, ST_MAT, type ScatterData } from './gen/scatterTypes';
 import * as M from './scatterModels';
-import type { WorkerPool } from './WorkerPool';
+import { KEY_SCATTER, type WorkerPool } from './WorkerPool';
 
 /**
  * Scatter renderer. Trees: 3 LODs (full ≤ lod0, low ≤ lod1, far impostors at half density with bigger instances) as
@@ -36,6 +36,7 @@ interface Bucket {
   band: number; // tree band (0..2) or -1
   scale: number;
   density: number; // fraction of rank kept (× treeDensity for trees)
+  lastBuilt: number;
 }
 
 // bucket bits: 0-2 pine bands, 3-5 round bands, 6 bush, 7 rock, 8 fence, 9 rotor
@@ -55,6 +56,10 @@ export class ScatterRenderer {
   private lastEvalZ = 1e18;
   private lastEvalY = 1e18;
   private density = 1;
+  private structQueue: SChunk[] = [];
+  private fresh: SChunk[] = [];
+  /** warm-up: no per-frame limits */
+  unlimited = false;
   private shadows = true;
   stats = { chunks: 0, instances: 0, structures: 0, rebuilds: 0, tris: 0 };
   private triCounts: number[] = [];
@@ -77,7 +82,7 @@ export class ScatterRenderer {
       mesh.receiveShadow = band <= 0;
       mesh.castShadow = false;
       this.group.add(mesh);
-      this.buckets.push({ mesh, cap, dirty: true, type, band, scale, density });
+      this.buckets.push({ mesh, cap, dirty: true, type, band, scale, density, lastBuilt: -100 });
       this.triCounts.push(geo.getAttribute('position').count / 3);
     };
     // order matters: bucket index = bit
@@ -171,7 +176,7 @@ export class ScatterRenderer {
           this.chunks.set(ck(cx, cz), c);
         }
         c.lastWanted = this.frame;
-        if (!c.data) this.pool.want(`s${cx}:${cz}`, 400 + d2 * 1.15 + dy, () => ({ type: 'scatter', cx, cz }));
+        if (!c.data) this.pool.wantJob(KEY_SCATTER + ck(cx, cz), 400 + d2 * 1.15 + dy, 'scatter', cx, cz);
       }
     }
     // re-evaluate bands when the camera moved enough
@@ -181,17 +186,34 @@ export class ScatterRenderer {
       this.lastEvalZ = camZ;
       this.lastEvalY = camY;
       for (const c of this.chunks.values()) this.evalChunk(c, camX, camZ, dy, R, offX, offZ);
+      this.fresh.length = 0;
+    } else if (this.fresh.length) {
+      for (const c of this.fresh) this.evalChunk(c, camX, camZ, dy, R, offX, offZ);
+      this.fresh.length = 0;
     }
-    // rebuild dirty buckets within the budget (at least one per frame)
+    // structures entering range: a couple of chunks per frame (smooth frame times)
+    let adds = 0;
+    while (this.structQueue.length && adds < (this.unlimited ? 1e9 : 2)) {
+      const c = this.structQueue.shift()!;
+      if (c.structIds || !c.data || !(c.mask & BIT(9))) continue;
+      this.addStructures(c, offX, offZ);
+      adds++;
+    }
+    // rebuild ONE dirty bucket per frame (near buckets first; mid/far ones throttled), more only within the budget
     let did = 0;
-    for (const b of this.buckets) {
+    for (let i = 0; i < this.buckets.length; i++) {
+      const b = this.buckets[i];
       if (!b.dirty) continue;
-      if (did > 0 && performance.now() > deadline) break;
+      const minGap = b.band === 2 ? 24 : b.band === 1 ? 6 : 0;
+      if (!this.unlimited && this.frame - b.lastBuilt < minGap) continue;
+      if (did > 0 && (performance.now() > deadline || b.band >= 1)) break;
       this.rebuild(b, offX, offZ);
+      b.lastBuilt = this.frame;
       did++;
+      if (!this.unlimited && b.mesh.count > 1500) break;
     }
-    // forget far chunks (LRU)
-    if (this.chunks.size > CONFIG.terrain.cacheScatter) {
+    // forget far chunks (LRU), every 30 frames
+    if (this.frame % 30 === 0 && this.chunks.size > CONFIG.terrain.cacheScatter) {
       const list = [...this.chunks.values()].filter((c) => c.lastWanted !== this.frame && !c.structIds);
       list.sort((a, b) => a.lastUsed - b.lastUsed);
       const n = this.chunks.size - CONFIG.terrain.cacheScatter;
@@ -218,7 +240,7 @@ export class ScatterRenderer {
     c.data = data;
     c.mask = 0;
     c.band = 3;
-    this.lastEvalX = 1e18; // force re-evaluation (cheap)
+    this.fresh.push(c); // evaluated individually next update (no full re-evaluation)
   }
 
   private evalChunk(c: SChunk, camX: number, camZ: number, dy: number, R: number, offX: number, offZ: number): void {
@@ -251,8 +273,9 @@ export class ScatterRenderer {
     c.mask = mask;
     c.band = band;
     // structures enter / leave
-    if (inStruct && !c.structIds) this.addStructures(c, offX, offZ);
-    else if (!inStruct && c.structIds) this.removeStructures(c);
+    if (inStruct && !c.structIds) {
+      if (!this.structQueue.includes(c)) this.structQueue.push(c);
+    } else if (!inStruct && c.structIds) this.removeStructures(c);
   }
 
   private rebuild(b: Bucket, offX: number, offZ: number): void {

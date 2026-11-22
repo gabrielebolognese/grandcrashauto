@@ -685,6 +685,102 @@ export class PlaneSystem implements IPlaneSystem {
     });
   }
 
+  /** Horizontal unit heading of the intact body (falls back to the visual). */
+  private headingDir(out: THREE.Vector3): THREE.Vector3 {
+    const body = this.body;
+    if (body) {
+      const r = body.rotation();
+      _q.set(r.x, r.y, r.z, r.w);
+    } else if (this.visual) _q.copy(this.visual.root.quaternion);
+    out.set(0, 0, 1).applyQuaternion(_q).setY(0);
+    if (out.lengthSq() < 1e-6) out.set(0, 0, 1);
+    return out.normalize();
+  }
+
+  /** Put the intact body in the air at (x, y, z) on `dir`, level, at speed v, gear/flaps set, engines ≥ minThrottle. */
+  private placeAirborne(x: number, y: number, z: number, dir: THREE.Vector3, v: number, flaps: number, minThrottle: number): void {
+    const body = this.body;
+    const cfg = this.cfg;
+    const model = this.model;
+    if (!body || !cfg || !model) return;
+    const yaw = Math.atan2(dir.x, dir.z);
+    _q.setFromAxisAngle(UP, yaw);
+    body.setTranslation({ x, y, z }, true);
+    body.setRotation(_q, true);
+    body.setLinvel({ x: dir.x * v, y: 0, z: dir.z * v }, true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    if (cfg.retractable) {
+      this.gearPos = this.gearTarget = 0;
+      this.autoGearUpDone = true;
+      this.autoGearUpT = this.simTime;
+    }
+    this.flaps = this.flapsTarget = flaps;
+    this.throttle = Math.max(this.throttle, minThrottle);
+    for (const e of this.engines) if (e.st.status === 'ok') e.st.spool = Math.max(e.st.spool, this.throttle);
+    this.parking = false;
+    this.holdStillT = 0;
+    this.onGround = false;
+    this.airborneT = Math.max(this.airborneT, 1);
+    this.maxAglAir = Math.max(this.maxAglAir, y - this.groundAt(x, z, y));
+    model.gammaHold = 0;
+    model.trim = 0;
+  }
+
+  /**
+   * Quick placement (crash-toy request): move the intact plane `forward` m along its horizontal heading and `up` m
+   * vertically, keeping velocity, attitude and engines. Clamped above ground/water; a plane lifted off the ground gets
+   * flying speed (≥ 1.3 × Vs), gear up and ≥ 70 % throttle so it doesn't drop like a stone. Spammable.
+   */
+  nudge(forward: number, up: number): void {
+    const body = this.body;
+    const visual = this.visual;
+    const cfg = this.cfg;
+    const model = this.model;
+    if (!this.active || !body || !visual || !cfg || !model || this.crashed || this.split || this.busy) return;
+    if (!Number.isFinite(forward) || !Number.isFinite(up)) return;
+    const t = body.translation();
+    const dir = this.headingDir(new THREE.Vector3());
+    const x = t.x + dir.x * forward;
+    const z = t.z + dir.z * forward;
+    const rest = PlaneGear.restHeight(visual, cfg);
+    const gy = this.groundAt(x, z, Math.max(t.y, t.y + up) + 60, this.groundY);
+    const groundRoot = gy + rest;
+    if (this.onGround && up <= 0) {
+      // rolling on the ground: slide along the heading, following the surface
+      body.setTranslation({ x, y: groundRoot + 0.02, z }, true);
+    } else if (this.onGround) {
+      // lifted off the ground: give it flight
+      const v = body.linvel();
+      const speed = Math.max(Math.hypot(v.x, v.z), 1.3 * model.vStall);
+      this.placeAirborne(x, Math.max(t.y + up, groundRoot + 3), z, dir, speed, Math.min(this.flaps, 0.5), 0.7);
+    } else {
+      // in the air: keep everything, never below ground/water + clearance
+      body.setTranslation({ x, y: Math.max(t.y + up, groundRoot + 4), z }, true);
+    }
+    this.interp.reset(body);
+    this.updateCameraTarget();
+  }
+
+  /** "AIRBORNE" button: from the ground, put the plane in flight right here (~300 m up, ~1.7 × Vs, gear/flaps up). */
+  takeOff(): void {
+    const body = this.body;
+    const visual = this.visual;
+    const cfg = this.cfg;
+    const model = this.model;
+    if (!this.active || !body || !visual || !cfg || !model || this.crashed || this.split || this.busy) return;
+    const t = body.translation();
+    const dir = this.headingDir(new THREE.Vector3());
+    const gy = this.groundAt(t.x, t.z, t.y + 60, this.groundY);
+    this.placeAirborne(t.x, gy + PlaneGear.restHeight(visual, cfg) + 300, t.z, dir, 1.7 * model.vStall, 0, 0.7);
+    this.interp.reset(body);
+    this.updateCameraTarget();
+    try {
+      this.ctx.cameraRig.snap();
+    } catch {
+      /* camera */
+    }
+  }
+
   backToCar(): void {
     const { ctx } = this;
     if (this.active) this.endFlightToStand();

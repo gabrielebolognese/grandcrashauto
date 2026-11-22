@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CONFIG } from '../config';
 import type { RingMesh } from './gen/ring';
-import type { WorkerPool } from './WorkerPool';
+import { KEY_RING, type WorkerPool } from './WorkerPool';
 
 /**
  * Distant mountain ring: one cheap low-poly silhouette band beyond the loaded tiles (view distance × 0.92 → ~16 km),
@@ -12,7 +12,8 @@ export class MountainRing {
   private cx = 1e18;
   private cz = 1e18;
   private rIn = 0;
-  private pendingKey = '';
+  private pendingKey = -1;
+  private pendingStr = '';
   private gen = 0;
 
   constructor(material: THREE.Material, private pool: WorkerPool) {
@@ -43,15 +44,16 @@ export class MountainRing {
     const cz = Math.round(camZ / snap) * snap;
     const rOut = Math.max(R.outer, viewDist * 3.2);
     const rq = Math.round(rIn / 50) * 50;
-    const key = `r${cx}:${cz}:${rq}`;
-    if (key !== this.pendingKey) {
-      this.pendingKey = key;
+    const str = `r${cx}:${cz}:${rq}`;
+    if (str !== this.pendingStr) {
+      this.pendingStr = str;
       this.gen++;
+      this.pendingKey = KEY_RING + this.gen;
     }
-    this.pool.want(key, 900, () => ({ type: 'ring', cx, cz, rIn: rq, rOut, segments: R.segments, rings: R.rings }));
+    this.pool.want(this.pendingKey, 900, () => ({ type: 'ring', cx, cz, rIn: rq, rOut, segments: R.segments, rings: R.rings }));
   }
 
-  onRing(key: string, d: RingMesh, offX: number, offZ: number): void {
+  onRing(key: number, d: RingMesh, offX: number, offZ: number): void {
     if (key !== this.pendingKey) return;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(d.positions, 3));

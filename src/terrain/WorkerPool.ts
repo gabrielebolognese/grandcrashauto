@@ -16,20 +16,24 @@ export interface JobMsg {
   [k: string]: unknown;
 }
 interface Job {
-  key: string;
+  key: number;
   msg: JobMsg;
   priority: number;
   lastWanted: number;
 }
-export type ResultHandler = (type: JobType, key: string, data: any, ms: number) => void;
+export type ResultHandler = (type: JobType, key: number, data: any, ms: number) => void;
+/** Key namespaces (all numeric: no per-frame string allocations). */
+export const KEY_CHUNK = 2 ** 46;
+export const KEY_SCATTER = 2 ** 47;
+export const KEY_RING = 2 ** 48;
 
 const MAX_IN_FLIGHT = 2;
 
 export class WorkerPool {
   private workers: { w: Worker; inFlight: number }[] = [];
-  private queue = new Map<string, Job>();
-  private inFlight = new Map<number, { key: string; type: JobType; worker: number }>();
-  private inFlightKeys = new Set<string>();
+  private queue = new Map<number, Job>();
+  private inFlight = new Map<number, { key: number; type: JobType; worker: number }>();
+  private inFlightKeys = new Set<number>();
   private nextId = 1;
   private frame = 0;
   private fallback = false;
@@ -77,7 +81,20 @@ export class WorkerPool {
   }
 
   /** Request (or refresh) a job. */
-  want(key: string, priority: number, make: () => JobMsg): void {
+  /** Allocation-free request for tile / chunk / scatter jobs (tile: a=level, b=tx, c=tz; others: a=cx, b=cz). */
+  wantJob(key: number, priority: number, type: JobType, a: number, b: number, c = 0): void {
+    if (this.inFlightKeys.has(key)) return;
+    const j = this.queue.get(key);
+    if (j) {
+      j.priority = priority;
+      j.lastWanted = this.frame;
+      return;
+    }
+    const msg: JobMsg = type === 'tile' ? { type, level: a, tx: b, tz: c } : { type, cx: a, cz: b };
+    this.queue.set(key, { key, msg, priority, lastWanted: this.frame });
+  }
+
+  want(key: number, priority: number, make: () => JobMsg): void {
     if (this.inFlightKeys.has(key)) return;
     const j = this.queue.get(key);
     if (j) {
@@ -88,7 +105,7 @@ export class WorkerPool {
     this.queue.set(key, { key, msg: make(), priority, lastWanted: this.frame });
   }
 
-  isPending(key: string): boolean {
+  isPending(key: number): boolean {
     return this.queue.has(key) || this.inFlightKeys.has(key);
   }
 

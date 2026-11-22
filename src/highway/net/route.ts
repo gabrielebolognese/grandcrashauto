@@ -157,7 +157,7 @@ export function* routeGen(key: string): Generator<void, EdgeRoute | null> {
     above[i] = Math.max(above[i], above[i + 1] - gs);
   }
   const y = new Float64Array(n + 1);
-  for (let i = 0; i <= n; i++) y[i] = 0.47 * below[i] + 0.53 * above[i];
+  for (let i = 0; i <= n; i++) y[i] = 0.4 * below[i] + 0.6 * above[i]; // ride a little high: viaducts over tunnels
   const waterLift = () => {
     const w = new Float64Array(n + 1).fill(-1e9);
     for (let i = 0; i <= n; i++) if (g[i] < 0.3) w[i] = 8.5;
@@ -316,12 +316,22 @@ export function* routeGen(key: string): Generator<void, EdgeRoute | null> {
 
 function buildSegments(r: EdgeRoute): void {
   const segs: number[] = [];
-  const hwMain = halfPavedMax(r.lanes) + 2.2;
+  const hwPave = halfPavedMax(r.lanes);
+  const hwMain = hwPave + 2.2;
   const STEP = 3;
-  for (let i = 0; i < r.n; i += STEP) {
-    const j = Math.min(r.n, i + STEP);
-    const mid = (i + j) >> 1;
-    segs.push(r.x[i], r.z[i], r.x[j], r.z[j], r.y[i], r.y[j], hwMain, r.kind[mid]);
+  // reported height = the LOWEST point of the (banked) formation so terrain never pokes above the low edge
+  const yLow = (k: number) => r.y[k] - Math.abs(r.bank[k]) * hwPave - 0.02;
+  for (let i = 0; i < r.n; ) {
+    let j = Math.min(r.n, i + STEP);
+    // segments never straddle a structure boundary (portal cuts / bridge abutments stay exact)
+    for (let k = i + 1; k <= j; k++) {
+      if (r.kind[k] !== r.kind[i]) {
+        j = k;
+        break;
+      }
+    }
+    segs.push(r.x[i], r.z[i], r.x[j], r.z[j], yLow(i), yLow(j), hwMain, r.kind[i]);
+    i = j;
   }
   const lateral = (s: number, l: number, out: number[]) => {
     const f = s / r.ds;

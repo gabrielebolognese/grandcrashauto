@@ -650,3 +650,4 @@
 }
 .airborne-btn .ic { width: 16px; height: 16px; }
 @keyframes airborne-pulse { 50% { transform: translateX(-50%) scale(1.06); } }
+.fl-nudge:not(.visible), .airborne-btn:not(.visible) { display: none !important; }

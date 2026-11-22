@@ -28,7 +28,6 @@ interface TileRec {
 
 const OFF = 1 << 20;
 export const tileKey = (level: number, tx: number, tz: number) => (level * 2 * OFF + (tx + OFF)) * 2 * OFF + (tz + OFF);
-const keyStr = (level: number, tx: number, tz: number) => `t${level}:${tx}:${tz}`;
 
 const _box = new THREE.Box3();
 const _m = new THREE.Matrix4();
@@ -171,7 +170,7 @@ export class TileManager {
     if (r.slot < 0 && !r.data) {
       // nearer + coarser first (coarse tiles give quick coverage)
       const pr = d + level * -25;
-      this.pool.want(keyStr(level, tx, tz), pr, () => ({ type: 'tile', level, tx, tz }));
+      this.pool.wantJob(r.key, pr, 'tile', level, tx, tz);
     }
   }
 
@@ -222,7 +221,7 @@ export class TileManager {
 
   // ─────────────────────────────── results / uploads ───────────────────────────────
 
-  onTile(key: string, data: TileMesh): void {
+  onTile(key: number, data: TileMesh): void {
     const r = this.recs.get(tileKey(data.level, data.tx, data.tz));
     if (!r) return;
     void key;

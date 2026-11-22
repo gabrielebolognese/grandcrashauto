@@ -322,6 +322,7 @@ export class Highways implements IHighways {
       if (dtj > this.stats.maxJobMs) this.stats.maxJobMs = dtj;
       const kind = job.key.slice(0, job.key.indexOf(':') + 1 || job.key.length);
       if (dtj > (this.jobMax[kind] ?? 0)) this.jobMax[kind] = dtj;
+      if (dtj > 12) this.jobMax['slow_' + kind] = (this.jobMax['slow_' + kind] ?? 0) + 1;
       if (done) this.jobs.shift();
       if (performance.now() - t0 > budgetMs) break;
     }
@@ -454,6 +455,7 @@ export class Highways implements IHighways {
     c.state = 'built';
     this.stats.chunks++;
     this.stats.built++;
+    const tA = performance.now();
     for (const a of out.ambient) {
       const id = this.ctx.npcs?.addAmbientSpot?.({
         position: new THREE.Vector3(a.x - o.x, a.y, a.z - o.z),
@@ -463,6 +465,8 @@ export class Highways implements IHighways {
       });
       if (typeof id === 'number') c.ambient.push(id);
     }
+    const dA = performance.now() - tA;
+    if (dA > (this.jobMax['npc'] ?? 0)) this.jobMax['npc'] = dA;
     this.farSig = ''; // far ribbon gets a hole here on its next rebuild
   }
 

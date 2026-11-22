@@ -208,8 +208,8 @@ if (vWin.y < 50.0) {
 if (vChar > 0.002) {
   float nz = plNoise(vPPos * 0.9) * 0.6 + plNoise(vPPos * 3.7) * 0.4;
   // smoky darkening everywhere, then patchy soot that spreads with the amount
-  diffuseColor.rgb *= mix(1.0, 0.5 + 0.25 * nz, clamp(vChar * 1.8, 0.0, 1.0));
-  plCharM = smoothstep(0.05, 0.55, vChar * 1.35 + 0.2 - nz * 0.85);
+  diffuseColor.rgb *= mix(1.0, 0.36 + 0.22 * nz, clamp(vChar * 1.6, 0.0, 1.0));
+  plCharM = smoothstep(0.35, 0.85, vChar * 1.2 + 0.12 - nz * 0.6);
   vec3 soot = mix(vec3(0.018, 0.016, 0.014), vec3(0.085, 0.065, 0.05), plNoise(vPPos * 7.0));
   diffuseColor.rgb = mix(diffuseColor.rgb, soot, plCharM);
 }

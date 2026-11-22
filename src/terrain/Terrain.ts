@@ -112,12 +112,16 @@ export class Terrain implements ITerrain {
     }
     const t0 = performance.now();
     const cap = 3500;
+    this.scatter.unlimited = true;
+    this.colliders.maxBuildsPerFrame = 8;
     while (performance.now() - t0 < cap) {
       this.step(0, cam, 1e9);
       const s = this.tiles.stats;
       if (this.frame > 4 && s.holes === 0 && this.pool.pending === 0) break;
       await new Promise((r) => setTimeout(r, 16));
     }
+    this.scatter.unlimited = false;
+    this.colliders.maxBuildsPerFrame = 1;
     console.info(`[terrain] warmup ${Math.round(performance.now() - t0)} ms, tiles ${this.tiles.stats.drawn}, holes ${this.tiles.stats.holes}`);
   }
 
@@ -180,7 +184,7 @@ export class Terrain implements ITerrain {
     this.tick('features');
   }
 
-  private onResult(type: JobType, key: string, data: unknown, _ms: number): void {
+  private onResult(type: JobType, key: number, data: unknown, _ms: number): void {
     const off = this.ctx.origin.offset;
     if (type === 'tile') this.tiles.onTile(key, data as TileMesh);
     else if (type === 'chunk') this.colliders.onChunk(data as ChunkData);
@@ -196,7 +200,9 @@ export class Terrain implements ITerrain {
   }
 
   private flatLevel(ax: number, az: number): number {
-    return az > SEA_WALL_Z + 0.4 ? cityBeach(ax, az) : 0;
+    if (az > SEA_WALL_Z + 0.4) return cityBeach(ax, az);
+    const W = CONFIG.world as typeof CONFIG.world & { airportElevation?: number };
+    return rectDist(ax, az, W.airportBounds) < 0 ? (W.airportElevation ?? 0) : 0;
   }
 
   /** Corridor set for the 256 m cell around a point (main-thread fallback path). */
