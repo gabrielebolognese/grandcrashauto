@@ -133,10 +133,10 @@ export const JUMP = {
   z: -330, // spur straight centreline
   straightX0: -75,
   straightX1: 100,
-  kickerX0: -30,
+  kickerX0: -38,
   lipX: 0,
-  lipHeight: 4.6,
-  lipAngleDeg: 17,
+  lipHeight: 4.0,
+  lipAngleDeg: 14,
   landX0: 26,
   landHeight: 4.2,
   landX1: 81,

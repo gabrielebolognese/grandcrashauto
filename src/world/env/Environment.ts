@@ -239,7 +239,7 @@ export class Environment implements IEnvironment {
     const ws = this.weatherSim.state;
     const camH = Math.max(0, cam.position.y - CONFIG.world.waterLevel);
     this.ocean?.update(cam, engine.time, origin, ws.windSpeed + ws.gust * 0.5, (1 - 0.8 * ws.fog) * (1 - 0.45 * this.dawnMist));
-    this.scenery?.update(cam);
+    this.scenery?.update(cam, (1 - 0.85 * ws.fog) * (1 - 0.4 * this.dawnMist));
     if (this.clouds && this.clouds.mesh.visible) {
       this.clouds.update(cam, dt, this.wind, origin, ws.cloudCover);
       const frac = this.qLevel >= 2 ? 1 : 0.7;
@@ -251,7 +251,14 @@ export class Environment implements IEnvironment {
     }
     this.updatePrecip(realDt);
     this.updateLightning(realDt);
-    this.updateVisibility(camH);
+    // Height above the ground/sea (not sea level): mountain roads must not act like flying.
+    let ground = CONFIG.world.waterLevel;
+    try {
+      ground = Math.max(ground, this.ctx.world?.groundHeightAt(cam.position.x, cam.position.z) ?? ground);
+    } catch {
+      /* world not ready */
+    }
+    this.updateVisibility(Math.max(0, cam.position.y - ground), camH);
     this.updateScreen(realDt);
     this.updateTurbo(realDt);
 
@@ -460,7 +467,10 @@ export class Environment implements IEnvironment {
     this.ctx.events.emit('lightning', { position: bottom.clone(), intensity: 1 - dist / 2600 });
   }
 
-  private updateVisibility(camH: number): void {
+  /** @param agl camera height above ground/sea, seaH height above sea level */
+  private updateVisibility(agl: number, seaH: number): void {
+    const camH = agl;
+    void seaH;
     const q = this.ctx.quality.current as typeof this.ctx.quality.current & { terrainViewDistance?: number };
     const cam = this.ctx.engine.camera;
     const ws = this.weatherSim.state;
@@ -509,7 +519,8 @@ export class Environment implements IEnvironment {
     const planes = this.ctx.planes as { inCockpitSequence?: boolean } | undefined;
     const close = rig?.mode === 'hood' || !!planes?.inCockpitSequence;
     const target = close && this.qLevel >= 0 ? Math.min(1, ws.rain * 1.4) : 0;
-    screen.drops += (target - screen.drops) * (1 - Math.exp(-realDt * (target > screen.drops ? 0.8 : 0.4)));
+    if (!close) screen.drops = 0; // the drops live on the lens/windshield of the close camera
+    else screen.drops += (target - screen.drops) * (1 - Math.exp(-realDt * (target > screen.drops ? 0.8 : 0.3)));
     const amount = ws.snow;
     screen.snow = this.qLevel === 0 ? amount : 0;
     screen.flash = this.flash * 0.9;

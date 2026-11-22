@@ -53,14 +53,18 @@ const tv = new THREE.Vector3();
 const tn = new THREE.Vector3();
 
 export class GeoBuilder {
-  pos: number[] = [];
-  nor: number[] = [];
-  col: number[] = [];
-  uv: number[] = [];
-  win: number[] = [];
-  rm: number[] = [];
-  fx: number[] = [];
-  idx: number[] = [];
+  // growable typed storage (cap = vertex capacity)
+  pos = new Float32Array(3 * 256);
+  nor = new Float32Array(3 * 256);
+  col = new Float32Array(3 * 256);
+  uv = new Float32Array(2 * 256);
+  win = new Float32Array(2 * 256);
+  rm = new Float32Array(2 * 256);
+  fx = new Float32Array(4 * 256);
+  idx = new Uint32Array(768);
+  private n = 0;
+  private ni = 0;
+  private cap = 256;
 
   // current vertex state
   color: RGB = [1, 1, 1];
@@ -79,7 +83,34 @@ export class GeoBuilder {
   private nm = new THREE.Matrix3();
 
   get count(): number {
-    return this.pos.length / 3;
+    return this.n;
+  }
+
+  private grow(nv: number): void {
+    if (nv <= this.cap) return;
+    let c = this.cap;
+    while (c < nv) c *= 2;
+    const g = (a: Float32Array, k: number) => {
+      const b = new Float32Array(c * k);
+      b.set(a.subarray(0, this.n * k));
+      return b;
+    };
+    this.pos = g(this.pos, 3);
+    this.nor = g(this.nor, 3);
+    this.col = g(this.col, 3);
+    this.uv = g(this.uv, 2);
+    this.win = g(this.win, 2);
+    this.rm = g(this.rm, 2);
+    this.fx = g(this.fx, 4);
+    this.cap = c;
+  }
+  private growIdx(ni: number): void {
+    if (ni <= this.idx.length) return;
+    let c = this.idx.length;
+    while (c < ni) c *= 2;
+    const b = new Uint32Array(c);
+    b.set(this.idx.subarray(0, this.ni));
+    this.idx = b;
   }
 
   set(o: { color?: RGB; mat?: Mat; surf?: number; variant?: number; sway?: number }): this {
@@ -110,24 +141,38 @@ export class GeoBuilder {
       x = tv.x; y = tv.y; z = tv.z;
       nx = tn.x; ny = tn.y; nz = tn.z;
     }
-    this.pos.push(x, y, z);
-    this.nor.push(nx, ny, nz);
-    this.col.push(this.color[0], this.color[1], this.color[2]);
-    this.uv.push(u ?? this.u, v ?? this.v);
-    this.win.push(this.winS, this.winT);
-    this.rm.push(this.mat.r, this.mat.m);
-    this.fx.push(this.surf, this.variant, this.sway, this.part);
-    return this.count - 1;
+    const i = this.n;
+    if (i >= this.cap) this.grow(i + 1);
+    const i3 = i * 3, i2 = i * 2, i4 = i * 4;
+    const P = this.pos, N = this.nor, C = this.col;
+    P[i3] = x; P[i3 + 1] = y; P[i3 + 2] = z;
+    N[i3] = nx; N[i3 + 1] = ny; N[i3 + 2] = nz;
+    C[i3] = this.color[0]; C[i3 + 1] = this.color[1]; C[i3 + 2] = this.color[2];
+    this.uv[i2] = u ?? this.u; this.uv[i2 + 1] = v ?? this.v;
+    this.win[i2] = this.winS; this.win[i2 + 1] = this.winT;
+    this.rm[i2] = this.mat.r; this.rm[i2 + 1] = this.mat.m;
+    const F = this.fx;
+    F[i4] = this.surf; F[i4 + 1] = this.variant; F[i4 + 2] = this.sway; F[i4 + 3] = this.part;
+    this.n = i + 1;
+    return i;
   }
   vtxV(p: THREE.Vector3, n: THREE.Vector3, u?: number, v?: number): number {
     return this.vtx(p.x, p.y, p.z, n.x, n.y, n.z, u, v);
   }
 
   tri(a: number, b: number, c: number): void {
-    this.idx.push(a, b, c);
+    const j = this.ni;
+    if (j + 3 > this.idx.length) this.growIdx(j + 3);
+    const I = this.idx;
+    I[j] = a; I[j + 1] = b; I[j + 2] = c;
+    this.ni = j + 3;
   }
   quad(a: number, b: number, c: number, d: number): void {
-    this.idx.push(a, b, c, a, c, d);
+    const j = this.ni;
+    if (j + 6 > this.idx.length) this.growIdx(j + 6);
+    const I = this.idx;
+    I[j] = a; I[j + 1] = b; I[j + 2] = c; I[j + 3] = a; I[j + 4] = c; I[j + 5] = d;
+    this.ni = j + 6;
   }
 
   /** Flat-shaded triangle from 3 points (CCW = front). */
@@ -321,51 +366,83 @@ export class GeoBuilder {
   }
 
   append(o: GeoBuilder): void {
-    const base = this.count;
-    const cat = (dst: number[], src: number[]) => {
-      for (let i = 0; i < src.length; i++) dst.push(src[i]);
-    };
-    cat(this.pos, o.pos);
-    cat(this.nor, o.nor);
-    cat(this.col, o.col);
-    cat(this.uv, o.uv);
-    cat(this.win, o.win);
-    cat(this.rm, o.rm);
-    cat(this.fx, o.fx);
-    for (const i of o.idx) this.idx.push(i + base);
+    const base = this.n;
+    const on = o.count;
+    this.grow(base + on);
+    this.pos.set(o.pos.subarray(0, on * 3), base * 3);
+    this.nor.set(o.nor.subarray(0, on * 3), base * 3);
+    this.col.set(o.col.subarray(0, on * 3), base * 3);
+    this.uv.set(o.uv.subarray(0, on * 2), base * 2);
+    this.win.set(o.win.subarray(0, on * 2), base * 2);
+    this.rm.set(o.rm.subarray(0, on * 2), base * 2);
+    this.fx.set(o.fx.subarray(0, on * 4), base * 4);
+    this.n = base + on;
+    const oi = o.indexCount;
+    this.growIdx(this.ni + oi);
+    for (let i = 0; i < oi; i++) this.idx[this.ni + i] = o.idx[i] + base;
+    this.ni += oi;
+  }
+
+  get indexCount(): number {
+    return this.ni;
   }
 
   /** Overwrite the part id of every vertex. */
   setPartAll(id: number): void {
-    for (let i = 3; i < this.fx.length; i += 4) this.fx[i] = id;
+    for (let i = 0; i < this.n; i++) this.fx[i * 4 + 3] = id;
+  }
+
+  /** Replace surface id `from` by `to`. */
+  remapSurf(from: number, to: number): void {
+    for (let i = 0; i < this.n; i++) if (this.fx[i * 4] === from) this.fx[i * 4] = to;
   }
 
   translateAll(x: number, y: number, z: number): void {
-    for (let i = 0; i < this.pos.length; i += 3) {
+    for (let i = 0; i < this.n * 3; i += 3) {
       this.pos[i] += x;
       this.pos[i + 1] += y;
       this.pos[i + 2] += z;
     }
   }
 
+  /** Area-weighted centroid of the triangles (damaged-variant geometry excluded). */
+  areaCentroid(): THREE.Vector3 {
+    const c = new THREE.Vector3();
+    let A = 0;
+    const p = this.pos;
+    const ia = new THREE.Vector3(), ib = new THREE.Vector3(), ic = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+    for (let i = 0; i < this.ni; i += 3) {
+      const vv = this.fx[this.idx[i] * 4 + 1];
+      if (vv > 4.5 && vv < 8.5) continue;
+      ia.fromArray(p, this.idx[i] * 3);
+      ib.fromArray(p, this.idx[i + 1] * 3);
+      ic.fromArray(p, this.idx[i + 2] * 3);
+      const area = e1.subVectors(ib, ia).cross(e2.subVectors(ic, ia)).length() * 0.5;
+      c.addScaledVector(ia.add(ib).add(ic), area / 3);
+      A += area;
+    }
+    return A > 0 ? c.multiplyScalar(1 / A) : c;
+  }
+
   build(): THREE.BufferGeometry {
+    const n = this.n;
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    g.setAttribute('aWin', new THREE.Float32BufferAttribute(this.win, 2));
-    g.setAttribute('aRM', new THREE.Float32BufferAttribute(this.rm, 2));
-    g.setAttribute('aFx', new THREE.Float32BufferAttribute(this.fx, 4));
-    const count = this.count;
-    g.setIndex(count > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos.slice(0, n * 3), 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(this.nor.slice(0, n * 3), 3));
+    g.setAttribute('color', new THREE.BufferAttribute(this.col.slice(0, n * 3), 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(this.uv.slice(0, n * 2), 2));
+    g.setAttribute('aWin', new THREE.BufferAttribute(this.win.slice(0, n * 2), 2));
+    g.setAttribute('aRM', new THREE.BufferAttribute(this.rm.slice(0, n * 2), 2));
+    g.setAttribute('aFx', new THREE.BufferAttribute(this.fx.slice(0, n * 4), 4));
+    const idx = this.idx.subarray(0, this.ni);
+    g.setIndex(new THREE.BufferAttribute(n > 65535 ? idx.slice() : Uint16Array.from(idx), 1));
     g.computeBoundingBox();
     g.computeBoundingSphere();
     return g;
   }
 
   get triangles(): number {
-    return this.idx.length / 3;
+    return this.ni / 3;
   }
 }
 

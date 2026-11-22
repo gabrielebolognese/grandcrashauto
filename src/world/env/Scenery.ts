@@ -287,9 +287,9 @@ export class Scenery {
     return this.geo.attributes.position.count / 3;
   }
 
-  update(camera: THREE.PerspectiveCamera): void {
+  update(camera: THREE.PerspectiveCamera, hazeScale = 1): void {
     const camH = Math.max(0, camera.position.y);
-    this.mat.uniforms.uSceneryHaze.value = CONFIG.env.scenery.hazeDist * (1 + camH / 400);
+    this.mat.uniforms.uSceneryHaze.value = CONFIG.env.scenery.hazeDist * (1 + camH / 400) * Math.max(0.05, hazeScale);
   }
 
   dispose(): void {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CONFIG } from '../../config';
-import { EM, GeoBuilder, M, SF, alongSegment, box, cyl, cylX, cylZ, extrude, hash3, lathe, soup, tubeAlong, type PartOpts } from './GeoBuilder';
+import { EM, GeoBuilder, M, SF, alongSegment, box, cyl, cylX, cylZ, extrude, extrudeShape, hash3, lathe, soup, tubeAlong, type PartOpts } from './GeoBuilder';
 
 /**
  * Original procedural prop models (owner: props). Pastel coastal art-deco: stepped plinths, fluted poles, gold bands,
@@ -25,6 +25,13 @@ const metal: PartOpts = { surf: SF.metal };
 function chamferRect(w: number, h: number, c: number): number[][] {
   const x = w / 2, y = h / 2;
   return [[-x + c, -y], [x - c, -y], [x, -y + c], [x, y - c], [x - c, y], [-x + c, y], [-x, y - c], [-x, -y + c]];
+}
+
+/** Flat rectangular frame (outer w×h, inner iw×ih, chamfer c) of thickness d in the XY plane. */
+function frameRing(w: number, h: number, iw: number, ih: number, c: number, d: number): THREE.BufferGeometry {
+  const shape = new THREE.Shape(chamferRect(w, h, c).map((q) => new THREE.Vector2(q[0], q[1])));
+  shape.holes.push(new THREE.Path(chamferRect(iw, ih, c * 0.8).reverse().map((q) => new THREE.Vector2(q[0], q[1]))));
+  return extrudeShape(shape, d);
 }
 
 /** A slat running along X with a chamfered (z, y) cross-section. */
@@ -423,7 +430,7 @@ export function trafficLight(): THREE.BufferGeometry {
   // housing + backplate with a butter border
   b.add(extrude(chamferRect(0.34, 1.0, 0.05), 0.24, 0.012), W, { tint: 1, surf: SF.gloss }, M(0, 2.95, 0.3));
   b.add(extrude(chamferRect(0.54, 1.24, 0.1), 0.03), P.black, {}, M(0, 2.95, 0.165));
-  b.add(extrude(chamferRect(0.57, 1.27, 0.11), 0.02), '#ffd84a', { surf: SF.gloss }, M(0, 2.95, 0.155));
+  b.add(frameRing(0.56, 1.26, 0.48, 1.18, 0.1, 0.006), '#ffd84a', { surf: SF.gloss }, M(0, 2.95, 0.183));
   const lens = lathe([[0.105, 0], [0.105, 0.012], [0.08, 0.035], [0, 0.046]], 12, 50).rotateX(Math.PI / 2);
   const visor = new THREE.CylinderGeometry(0.128, 0.128, 0.22, 10, 1, true, Math.PI / 2, Math.PI).rotateX(Math.PI / 2);
   const lamps: [number, string, number][] = [[3.27, '#ff4a3d', EM.red], [2.95, '#ffb21e', EM.amber], [2.63, '#2fe08a', EM.green]];

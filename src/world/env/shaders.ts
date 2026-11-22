@@ -49,6 +49,7 @@ export function envUniforms(): Record<string, THREE.IUniform> {
     uOrigin: GLOBAL_UNIFORMS.uOrigin,
     uWind: GLOBAL_UNIFORMS.uWind,
     uLightning: GLOBAL_UNIFORMS.uLightning,
+    uFogDensity: GLOBAL_UNIFORMS.uFogDensity,
     ...SKY_UNIFORMS,
   };
 }
@@ -64,6 +65,7 @@ uniform float uFogFar;
 uniform vec3 uOrigin;
 uniform vec3 uWind;
 uniform float uLightning;
+uniform float uFogDensity;
 uniform vec3 uZenith;
 uniform vec3 uSkyMid;
 uniform vec3 uHorizon;
@@ -132,7 +134,7 @@ vec3 envHaze(vec3 col, vec3 viewDir, float amount) {
   vec3 hz = skyColor(normalize(vec3(viewDir.x, max(viewDir.y, 0.0) * 0.35, viewDir.z)));
   hz = mix(hz, uFogColor, smoothstep(0.4, 1.0, uCover) * 0.7);
   col = mix(col, hz, clamp(amount, 0.0, 1.0));
-  return mix(col, uFogColor, uWhiteout);
+  return mix(col, uFogColor, max(uWhiteout, uFogDensity * smoothstep(0.0, 0.5, amount)));
 }
 `;
 

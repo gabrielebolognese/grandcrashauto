@@ -123,8 +123,8 @@ export class NightLights {
       const pi = CONFIG.props.poolIntensity;
       const a = this.poolA.array as Float32Array;
       a[i * 4] = 1.0;
-      a[i * 4 + 1] = 0.76;
-      a[i * 4 + 2] = 0.48;
+      a[i * 4 + 1] = 0.66;
+      a[i * 4 + 2] = 0.34;
       a[i * 4 + 3] = pi;
     }
     if (candidate && this.nCand < CAND_CAP) {

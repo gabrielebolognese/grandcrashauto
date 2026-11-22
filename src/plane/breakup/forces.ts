@@ -40,6 +40,8 @@ export interface WaterResult {
 }
 
 export class ForceModel {
+  /** Gear retracted: gear part boxes (at the extended position) take no air/water loads. Set per plane by the caller. */
+  gearUp = false;
   readonly F = new THREE.Vector3();
   readonly T = new THREE.Vector3();
   private Fd = new THREE.Vector3();
@@ -100,6 +102,7 @@ export class ForceModel {
     for (const pi of asm.parts) if (s.parts[pi].kind === 'wing') hasWing = true;
     for (const pi of asm.parts) {
       const p = s.parts[pi];
+      if (this.gearUp && p.kind === 'gear') continue;
       // part (box) centre velocity
       this.cW.copy(p.bc).applyQuaternion(q).add(asm.pos);
       this.r.subVectors(this.cW, asm.comW);
@@ -232,6 +235,7 @@ export class ForceModel {
     let wsum = 0;
     for (const pi of asm.parts) {
       const p = s.parts[pi];
+      if (this.gearUp && p.kind === 'gear') continue;
       volTot += p.volume;
       this.cW.copy(p.bc).applyQuaternion(q).add(asm.pos);
       // vertical half extent of the rotated box

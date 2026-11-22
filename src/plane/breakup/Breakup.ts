@@ -92,6 +92,8 @@ interface PlaneRT {
   patches: number;
   t: number;
   airborneAtSplit: boolean;
+  /** Gear retracted when last known (gear boxes ignored by the force models). */
+  gearUp: boolean;
 }
 
 export interface SplitStats {
@@ -248,6 +250,7 @@ export class Breakup implements IBreakup {
       patches: 0,
       t: 0,
       airborneAtSplit: false,
+      gearUp: false,
     };
     for (let i = 0; i < n; i++) {
       const p = s.parts[i];
@@ -499,6 +502,14 @@ export class Breakup implements IBreakup {
     for (const rt of this.planes) {
       rt.t += dt;
       this.syncTracked(rt);
+      if (rt.registered && rt.tracked) {
+        try {
+          rt.gearUp = !rt.plane.isGearDown();
+        } catch {
+          rt.gearUp = false;
+        }
+      }
+      this.forces.gearUp = rt.gearUp;
       for (const a of rt.asms) {
         if (a.removed) continue;
         a.read();
@@ -1261,6 +1272,7 @@ export class Breakup implements IBreakup {
     if (surface !== 'self' && !(a.tracked && pk === 'gear')) {
       const vh = this.v4.copy(a.vel).addScaledVector(a.cNormal, -a.vel.dot(a.cNormal)).length();
       a.sliding = vh > 2;
+      a.slidePart = a.cPart;
       if (a.sliding) this.slideStep(rt, a, vh, surface, material, dt);
       if (a.tracked && !rt.crashed && !rt.belly && vh > 5 && (surface === 'runway' || surface === 'ground')) {
         let gearDown = true;
@@ -1322,7 +1334,7 @@ export class Breakup implements IBreakup {
         this.reportCrash(rt, outcome, info);
         this.emitImpact(rt, a, point, vpt, outcome, info.surface, energy, vn, false);
       }
-      if ((outcome === 'groundCrash' || outcome === 'building') && !rt.ignited && this.fuelLeft(rt) > 1 && (vn > 9 || energy > 0.5 * rt.s.mass * 900)) {
+      if ((outcome === 'groundCrash' || outcome === 'building') && !rt.ignited && this.fuelLeft(rt) > 1 && vn > CONFIG.breakup.fire.igniteVn) {
         // main fireball rolls on with the wreck's tangential velocity
         this.v4.copy(vpt).addScaledVector(normal, -vpt.dot(normal)).multiplyScalar(0.9);
         this.ignite(rt, point, this.v4, 'ground', THREE.MathUtils.clamp(0.6 + vn / 60, 0.6, 1.1));
@@ -1412,6 +1424,20 @@ export class Breakup implements IBreakup {
       if (dmg <= 0) continue;
       rt.damage[j.i] += dmg;
       if (rt.damage[j.i] >= 1 && !rt.pendingDamage.includes(j.i)) rt.pendingDamage.push(j.i);
+    }
+  }
+
+  /** Scraping wears the joints of the part that drags on the ground (engines/tips tear off); the fuselage only cracks slowly. */
+  private scrapeDamage(rt: PlaneRT, a: Assembly, part: number, sev: number): void {
+    const s = rt.s;
+    const cfg = CONFIG.breakup.damage;
+    for (const ji of s.adj[part]) {
+      const j = s.joints[ji];
+      if (rt.broken[ji] || !a.has[j.a] || !a.has[j.b]) continue;
+      const fus = (k: string) => k === 'fuselage' || k === 'cockpit';
+      const k = fus(s.parts[j.a].kind) && fus(s.parts[j.b].kind) ? cfg.scrapeFuselage : 1;
+      rt.damage[ji] += (sev * k) / (cfg.vBreak * j.strength);
+      if (rt.damage[ji] >= 1 && !rt.pendingDamage.includes(ji)) rt.pendingDamage.push(ji);
     }
   }
 
@@ -1661,7 +1687,7 @@ export class Breakup implements IBreakup {
 
   private plough(rt: PlaneRT, a: Assembly): void {
     const soft = SOFT[a.cMaterial as SurfaceMaterial] ?? 0;
-    if (soft <= 0 || a.cPart < 0) return;
+    if (soft <= 0 || a.slidePart < 0 || !a.has[a.slidePart]) return;
     const g = Math.abs(CONFIG.physics.gravity);
     const vh = this.v1.set(a.vel.x, 0, a.vel.z);
     const sp = vh.length();
@@ -1669,7 +1695,7 @@ export class Breakup implements IBreakup {
     vh.multiplyScalar(-1 / sp);
     const mag = soft * a.mp.mass * g * Math.min(1, sp / 6) * (1 + Math.min(1.5, sp / 40));
     const f = vh.multiplyScalar(mag);
-    const p = this.lowestCorner(rt, a, a.cPart, this.v2);
+    const p = this.lowestCorner(rt, a, a.slidePart, this.v2);
     this.sumF.add(f);
     this.sumT.add(this.v3.subVectors(p, a.comW).cross(f));
   }
@@ -1681,7 +1707,7 @@ export class Breakup implements IBreakup {
     // scrape damage near the contacting part (engines scraping off, progressive belly-slide breakup)
     const hard = HARD[material] ?? 1;
     const sev = (vh / cfg.damage.scrapeV) * dt * hard * cfg.damage.vBreak;
-    if (sev > 0) this.accumulateDamage(rt, a, a.cPoint, sev, false);
+    if (sev > 0) this.scrapeDamage(rt, a, a.cPart, sev);
     const p = a.cPoint;
     a.fxT -= dt;
     if (a.fxT <= 0) {

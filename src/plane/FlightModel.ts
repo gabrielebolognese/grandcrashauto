@@ -275,13 +275,13 @@ export class FlightModel {
     // References.
     const vRef = 1.6 * this.vStall;
     this.qRef = 0.5 * this.rho * vRef * vRef;
-    const qnT = (qT / this.qRef);
+    const qnT = Math.min(this.qnMax[0], qT / this.qRef);
     // Pitch: full stick must hold the stall AoA (+3°) from trim at trim speed, with margin.
     const da = this.alphaStallBody + 3 * DEG - aT;
     const dM = this.pitchMomentAt(aT, vT) - this.pitchMomentAt(aT + da, vT);
     this.Ap = (cfg.pitchAuthority * Math.max(0, dM)) / (this.inertia.x * qnT);
     // … and rotate the plane about its main gear at Vr.
-    const qnR = Math.min(this.qnMax, (0.5 * this.rho * this.vRot * this.vRot) / this.qRef);
+    const qnR = Math.min(this.qnMax[0], (0.5 * this.rho * this.vRot * this.vRot) / this.qRef);
     this.Ap = Math.max(this.Ap, (1.25 * W * this.mainGearArm) / (this.inertia.x * qnR));
     // Roll: full stick = rollRateDeg steady roll at vRef (wing damping ½ρ V S a yw²).
     const yw = Math.abs(this.surfaces[0].base.x);
@@ -294,7 +294,8 @@ export class FlightModel {
     this.Ay = Math.max(cfg.yawAccel, (1.05 * worst) / (this.inertia.y * qnMc));
   }
 
-  readonly qnMax = 2.2;
+  /** Control authority clamp (× qRef) per axis: pitch, roll, yaw — limits g at speed, keeps roll crisp. */
+  readonly qnMax = [1.3, 2.5, 2.0];
 
   private setTailIncidence(inc: number): void {
     this.tailIncidence = inc;
@@ -332,6 +333,18 @@ export class FlightModel {
     }
     this.comOffset.set(0, 0, 0);
     this.mass = this.cfg.mass;
+  }
+
+  get htailAlive(): number {
+    let a = 0;
+    let n = 0;
+    for (const s of this.surfaces) if (s.kind === 'htail') { a += s.alive; n++; }
+    return n ? a / n : 0;
+  }
+
+  get finAlive(): number {
+    for (const s of this.surfaces) if (s.kind === 'fin') return s.alive;
+    return 0;
   }
 
   get tailAlive(): number {
@@ -479,7 +492,7 @@ export class FlightModel {
     pitchUp -= dmp[0] * hv * this.chord * this.chord * -wl.x * 4;
     const rollRight = -dmp[1] * hv * this.span * this.span * wl.z;
     yawRight -= dmp[2] * hv * this.span * this.span * -wl.y;
-    if (inp.tailLost) pitchUp += qSc * 0.05; // centre of pressure moved forward
+    if (inp.tailLost) pitchUp += qSc * 0.025 * (1 - this.htailAlive); // centre of pressure moved forward
     M.x -= pitchUp;
     M.y -= yawRight;
     M.z += rollRight;
@@ -503,7 +516,7 @@ export class FlightModel {
     const V = _vl.length();
     this.airspeed = V;
     this.qdyn = 0.5 * this.rho * V * V;
-    this.qn = Math.min(this.qnMax, this.qdyn / this.qRef);
+    this.qn = this.qdyn / this.qRef;
     _fwd.set(0, 0, 1).applyQuaternion(_q);
     _up.set(0, 1, 0).applyQuaternion(_q);
     _right.set(-1, 0, 0).applyQuaternion(_q);
@@ -523,8 +536,6 @@ export class FlightModel {
     this.wasStalled = this.stall;
 
     this.aero(_vl, _wl, inp, _F, _M);
-    const aeroPitchUp = -_M.x;
-    const aeroRoll = _M.z;
 
     // Thrust at each engine, along the body forward axis.
     for (let i = 0; i < this.engines.length; i++) {
@@ -534,6 +545,9 @@ export class FlightModel {
       _F.add(_f);
       _M.add(_t.crossVectors(this.engines[i].point, _f));
     }
+    // Everything the assists must fight (aero + thrust line); yaw is deliberately not cancelled (engine-out felt).
+    const aeroPitchUp = -_M.x;
+    const aeroRoll = _M.z;
 
     // ---------------- controls ----------------
     const I = this.inertia;
@@ -550,9 +564,9 @@ export class FlightModel {
     const alphaWarn = this.alphaStallBody - A.stallMarginDeg * DEG;
     this.stallWarning = !inp.onGround && V > 5 && (this.alpha > alphaWarn || V < vsCur * 1.05);
     if (af > 0 && V > 2) {
-      const ctlP = Math.max(1e-3, this.Ap * I.x * qn);
-      const ctlR = Math.max(1e-3, this.Ar * I.z * qn);
-      const ctlY = Math.max(1e-3, this.Ay * I.y * qn);
+      const ctlP = Math.max(1e-3, this.Ap * I.x * Math.min(qn, this.qnMax[0]));
+      const ctlR = Math.max(1e-3, this.Ar * I.z * Math.min(qn, this.qnMax[1]));
+      const ctlY = Math.max(1e-3, this.Ay * I.y * Math.min(qn, this.qnMax[2]));
       const pitchMax = cfg.pitchRateDeg * DEG;
       const thMax = A.pitchLimitDeg * DEG;
       const active = Math.abs(sP) > 0.06;
@@ -630,9 +644,9 @@ export class FlightModel {
     this.controls.elevator = de;
     this.controls.aileron = da;
     this.controls.rudder = dr;
-    const pitchT = de * this.Ap * I.x * qn * cs.x + pitchHelp;
-    const rollT = da * this.Ar * I.z * qn * cs.z;
-    const yawT = dr * this.Ay * I.y * qn * cs.y;
+    const pitchT = de * this.Ap * I.x * Math.min(qn, this.qnMax[0]) * cs.x + pitchHelp;
+    const rollT = da * this.Ar * I.z * Math.min(qn, this.qnMax[1]) * cs.z;
+    const yawT = dr * this.Ay * I.y * Math.min(qn, this.qnMax[2]) * cs.y;
     _M.x -= pitchT;
     _M.z += rollT;
     _M.y -= yawT;

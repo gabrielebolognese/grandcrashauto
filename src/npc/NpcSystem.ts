@@ -47,6 +47,7 @@ interface LodMesh {
   extra: THREE.InstancedBufferAttribute;
   count: number;
   tris: number;
+  attrs: THREE.InstancedBufferAttribute[];
 }
 
 /** A staggered reaction (explosion shockwave, crowd take-over). kind: 0 knock, 1 panic flee, 2 calm step-aside, 3 dive, 4 hop. */
@@ -200,7 +201,8 @@ export class NpcSystem implements INpcSystem {
         a.setUsage(THREE.DynamicDrawUsage);
         return a;
       };
-      const L: LodMesh = { mesh, animA: mk(), animB: mk(), col0: mk(), col1: mk(), extra: mk(), count: 0, tris: (g.index?.count ?? 0) / 3 };
+      const L: LodMesh = { mesh, animA: mk(), animB: mk(), col0: mk(), col1: mk(), extra: mk(), count: 0, tris: (g.index?.count ?? 0) / 3, attrs: [] };
+      L.attrs = [L.animA, L.animB, L.col0, L.col1, L.extra];
       g.setAttribute('iAnimA', L.animA);
       g.setAttribute('iAnimB', L.animB);
       g.setAttribute('iCol0', L.col0);
@@ -2844,7 +2846,7 @@ export class NpcSystem implements INpcSystem {
     for (const L of this.lods) {
       L.mesh.count = L.count;
       if (L.count > 0) {
-        for (const a of [L.animA, L.animB, L.col0, L.col1, L.extra]) {
+        for (const a of L.attrs) {
           a.clearUpdateRanges();
           a.addUpdateRange(0, L.count * 4);
           a.needsUpdate = true;

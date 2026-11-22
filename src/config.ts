@@ -250,7 +250,7 @@ export const CONFIG = {
     traffic: { green: 7, amber: 2, allRed: 1 }, // s, per direction (2-phase intersections)
     // night lights
     glowIntensity: 1.0,
-    poolIntensity: 0.32,
+    poolIntensity: 0.24,
     lightIntensity: 55, // pooled real PointLight intensity (candela-ish, decay 2)
     lightDistance: 24,
     lightUpdate: 0.5, // s between nearest-streetlight reassignments
@@ -554,6 +554,10 @@ export const CONFIG = {
       height: 0.62, // m above the car origin
       inset: 0.12, // m behind the front of the chassis box
       spread: 0.58, // m from the centre line
+    },
+    /** Wheel visuals while driving. */
+    wheelVisual: {
+      camberMaxDeg: 8, // stance.camber = 1 → tops tilted inward by this (matches the garage preview)
     },
     /** Frozen chassis after reset/teleport until terrain colliders are ready. */
     freeze: {
@@ -1115,7 +1119,7 @@ export const CONFIG = {
     prop: {
       mass: 1100, rotationKmh: 105, stallKmh: 85, topKmh: 280, takeoffRollM: 250, takeoffS: 8, engines: 1, fuelKg: 150, explosionRadius: 10, glideRatio: 9,
       cruiseKmh: 210, wingArea: 18, span: 11, oswald: 0.75, cl0: 0.35, clAlpha: 5.0, stallDeg: 16, cd0: 0.0489, cm0: -0.04,
-      incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.6, finVolume: 0.07, munkPitch: 0.35, munkYaw: 0.07,
+      incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.6, finVolume: 0.07, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.04, gearCD: 0, retractable: false, flapsUpKmh: 150, flapsLandKmh: 120,
       thrust: 5933, propV0: 180, thrustLapse: 0, waveDrag: 0, spoolS: 1, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.35, rollRateDeg: 85, yawAccel: 1.6, damping: [0.05, 0.02, 0.04],
@@ -1125,7 +1129,7 @@ export const CONFIG = {
     bizjet: {
       mass: 16000, rotationKmh: 200, stallKmh: 170, topKmh: 850, takeoffRollM: 900, takeoffS: 16, engines: 2, fuelKg: 4000, explosionRadius: 25, glideRatio: 15,
       cruiseKmh: 520, wingArea: 70, span: 16, oswald: 0.8, cl0: 0.25, clAlpha: 4.6, stallDeg: 17.5, cd0: 0.0102, cm0: -0.04,
-      incidenceDeg: 2, dihedralDeg: 4, wingAcFrac: 0.08, tailVolume: 0.65, finVolume: 0.07, munkPitch: 0.35, munkYaw: 0.07,
+      incidenceDeg: 2, dihedralDeg: 4, wingAcFrac: 0.08, tailVolume: 0.65, finVolume: 0.07, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 290, flapsLandKmh: 235,
       thrust: 34900, propV0: 0, thrustLapse: 0.3, waveDrag: 0.156, spoolS: 2.5, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.35, rollRateDeg: 65, yawAccel: 1.0, damping: [0.05, 0.02, 0.04],
@@ -1135,7 +1139,7 @@ export const CONFIG = {
     airliner: {
       mass: 70000, rotationKmh: 260, stallKmh: 215, topKmh: 880, takeoffRollM: 1500, takeoffS: 22, engines: 2, fuelKg: 18000, explosionRadius: 45, glideRatio: 15,
       cruiseKmh: 520, wingArea: 180, span: 35, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 17.2, cd0: 0.019, cm0: -0.04,
-      incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.7, finVolume: 0.075, munkPitch: 0.35, munkYaw: 0.07,
+      incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.7, finVolume: 0.075, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 350, flapsLandKmh: 290,
       thrust: 142000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.169, spoolS: 3.5, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.3, rollRateDeg: 32, yawAccel: 0.6, damping: [0.06, 0.03, 0.05],
@@ -1145,7 +1149,7 @@ export const CONFIG = {
     jumbo: {
       mass: 330000, rotationKmh: 295, stallKmh: 245, topKmh: 920, takeoffRollM: 1900, takeoffS: 30, engines: 4, fuelKg: 150000, explosionRadius: 70, glideRatio: 15,
       cruiseKmh: 540, wingArea: 650, span: 64, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 17.2, cd0: 0.0176, cm0: -0.04,
-      incidenceDeg: 2, dihedralDeg: 6, wingAcFrac: 0.08, tailVolume: 0.75, finVolume: 0.08, munkPitch: 0.35, munkYaw: 0.07,
+      incidenceDeg: 2, dihedralDeg: 6, wingAcFrac: 0.08, tailVolume: 0.75, finVolume: 0.08, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 390, flapsLandKmh: 320,
       thrust: 280000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.185, spoolS: 4, idle: 0.06,
       inertiaScale: [1.15, 1.1, 1.35], pitchAuthority: 1.25, rollRateDeg: 17, yawAccel: 0.35, damping: [0.07, 0.04, 0.06],
@@ -1181,7 +1185,8 @@ export const CONFIG = {
       globalFrac: 0.15,
       radiusFrac: 0.22, // damage fall-off radius = × plane length
       tangentFactor: 0.12, // share of the sliding speed that counts as impact severity
-      scrapeV: 260, // sliding: m of travel at 1 m/s… (rate = v/scrapeV × vBreak per s, × hardness)
+      scrapeV: 420, // sliding wear of the dragging part's joints: rate = v/scrapeV × vBreak per s × hardness
+      scrapeFuselage: 0.2, // fuselage-to-fuselage joints wear this much slower
       waterAccel0: 32, // m/s² of hydrodynamic deceleration before water damages joints
       waterScale: 1.0,
       waterTangent: 0.05,
@@ -1244,6 +1249,7 @@ export const CONFIG = {
       secondaries: [2, 4],
       secInterval: [0.3, 1.5],
       hardHitSecondary: 15, // m/s impact of a fuel piece → secondary explosion
+      igniteVn: 9, // m/s normal impact speed that ignites the fuel (main fireball)
       tornEdgeTime: 3.5,
     },
     fx: {
@@ -1300,7 +1306,7 @@ export const CONFIG = {
   // Pure generation (src/highway/net, also run inside terrain workers) reads the network block in ABSOLUTE coords.
   highway: {
     cell: 4000, // m macro lattice cell: one junction node per cell → branches ≥ 3 km apart
-    rowZ0: 2300, // lattice row j centre z = rowZ0 − j·cell (row 1 ≈ −1700: north of the city and the airport)
+    rowZ0: 1300, // lattice row j centre z = rowZ0 − j·cell (row 1 ≈ −2700: north of the city and the airport)
     jitter: 0.11, // node jitter (fraction of a cell)
     lowSearch: 340, // m radius of the low-point/pass search around each jittered node
     edgeChance: 0.5, // probability of an optional lattice edge (nodes always keep ≥ 2)

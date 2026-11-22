@@ -130,8 +130,8 @@ export class MapRenderer {
   private drawTiles(): void {
     const g = this.g;
     const size = CONFIG.nav.mapTilePx;
-    const devPpm = this.view.ppm * this.dpr;
-    const L = Math.max(0, Math.min(8, Math.floor(Math.log2(1 / devPpm) + 0.35)));
+    // one tile pixel ≈ 1–2 CSS pixels: terrain is soft, and it keeps generation fast (4× fewer tiles than 1:1 on HiDPI)
+    const L = mapLevel(this.view.ppm);
     const minX = this.wx(0);
     const maxX = this.wx(this.W);
     const minZ = this.wz(0);
@@ -155,13 +155,15 @@ export class MapRenderer {
         const S2 = Math.ceil(x + s) - X;
         const S3 = Math.ceil(y + s) - Y;
         const c = this.tiles.get(L, tx, tz);
-        if (c) {
-          g.drawImage(c, X, Y, S2, S3);
-          continue;
-        }
         const cxw = (tx + 0.5) * tw - this.view.cx;
         const czw = (tz + 0.5) * tw - this.view.cz;
-        this.tiles.need(L, tx, tz, Math.hypot(cxw, czw) * this.view.ppm);
+        const prio = Math.hypot(cxw, czw) * this.view.ppm;
+        if (c) {
+          g.drawImage(c, X, Y, S2, S3);
+          this.tiles.needRoads(L, tx, tz, prio);
+          continue;
+        }
+        this.tiles.need(L, tx, tz, prio);
         // placeholder: the closest cached ancestor
         for (let up = 1; up <= 5 && L + up <= 8; up++) {
           const f = 1 << up;
@@ -544,6 +546,11 @@ export class MapRenderer {
       g.fillText('✈️', x, y - 24);
     }
   }
+}
+
+/** Tile level for a zoom (CSS px per metre): level L = 2^L metres per tile pixel. */
+export function mapLevel(ppm: number): number {
+  return Math.max(0, Math.min(8, Math.floor(Math.log2(1 / ppm) + 0.5)));
 }
 
 function rank(p: NavPoi, sel: NavPoi | null, dest: NavPoi | null): number {

@@ -39,14 +39,14 @@ vec3 beads(vec2 uv, vec2 grid, float t, float seed) {
   float r = h21(id + seed);
   float r2 = h21(id + seed + 7.7);
   float life = fract(t * (0.12 + 0.22 * r2) + r);
-  float exist = step(0.42, r) * smoothstep(0.0, 0.06, life) * (1.0 - smoothstep(0.75, 1.0, life));
+  float exist = step(0.62, r) * smoothstep(0.0, 0.06, life) * (1.0 - smoothstep(0.75, 1.0, life));
   vec2 c = (vec2(h21(id + seed + 1.3), h21(id + seed + 2.9)) - 0.5) * 0.55;
   float slide = step(0.78, r2);
   c.y += slide * (0.25 - life * 1.4);
   vec2 d = f - c;
   d.x *= grid.y / grid.x * uAspect;
   d.y *= 1.0 + slide * 0.6;
-  float rad = 0.16 + 0.14 * r2;
+  float rad = 0.12 + 0.16 * r2 * r2;
   float dist = length(d);
   float m = (1.0 - smoothstep(rad * 0.75, rad, dist)) * exist;
   float hl = (1.0 - smoothstep(0.0, rad * 0.45, length(d - vec2(-0.3, 0.35) * rad))) * m;
@@ -58,12 +58,12 @@ void main() {
   vec3 col = vec3(0.0);
   float a = 0.0;
   if (uDrops > 0.001) {
-    vec3 b1 = beads(vUv, vec2(11.0, 6.0), uTime, 0.0);
-    vec3 b2 = beads(vUv * 1.7 + 0.31, vec2(15.0, 8.0), uTime * 1.3, 17.0);
+    vec3 b1 = beads(vUv, vec2(24.0, 13.0), uTime, 0.0);
+    vec3 b2 = beads(vUv * 1.7 + 0.31, vec2(38.0, 20.0), uTime * 1.3, 17.0);
     vec3 b = max(b1, b2 * 0.85);
     // Beads: darker rim, bright speck, faint body.
     col = mix(uLight * 0.25, uLight * 1.6, b.y);
-    a = (b.x * 0.16 + b.z * 0.28 + b.y * 0.45) * uDrops;
+    a = (b.x * 0.1 + b.z * 0.22 + b.y * 0.4) * uDrops;
   }
   if (uSnow > 0.001) {
     float s = 0.0;

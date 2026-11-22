@@ -84,7 +84,7 @@ export const STOCK_BUILD: CarBuild = {
   wheels: { rim: 0, rimColor: '#c9ccd2', tyre: 'mid', size: 1 },
   kit: { splitter: false, skirts: false, spoiler: 'none', scoop: false },
   stance: { rideHeight: 0, camber: 0 },
-  extras: { tint: 0.35, headlightColor: '#fff6e0', underglow: null, plate: 'CSTL 01' },
+  extras: { tint: 0.35, headlightColor: '#fff6e0', underglow: null, plate: 'GCA LOL' },
   perf: { engine: 0, tyres: 0, brakes: 0, suspension: 0, turbo: 0 },
 };
 

@@ -115,6 +115,7 @@ export class PlaneSystem implements IPlaneSystem {
   private gearCollapsed = false;
   private autoGearUpDone = false;
   private manualGearT = -99;
+  private autoGearUpT = -99;
   private parking = true;
   private holdStillT = 0;
   private onGround = true;
@@ -142,7 +143,7 @@ export class PlaneSystem implements IPlaneSystem {
   private lastPieces: WreckPiece[] = [];
   private submergedT = 0;
   private stallWarnOn = false;
-  private oom = { state: 'ok' as 'ok' | 'warning' | 'failing', countdown: 0, distance: 0, failT: 0, nextT: 0, failed: 0, lastEngineT: -1, liftScale: 1, checkT: 0 };
+  private oom = { state: 'ok' as 'ok' | 'warning' | 'failing', countdown: 0, distance: 0, failT: 0, nextT: 0, failed: 0, lastEngineT: -1, aglAtLast: 0, liftScale: 1, checkT: 0 };
   private turbT = 0;
   private busy = false;
   private pending: { type: PlaneTypeId; air: boolean } | null = null;
@@ -370,7 +371,7 @@ export class PlaneSystem implements IPlaneSystem {
         air = true;
         const dir = rw ? rw.dir : new THREE.Vector3(-1, 0, 0);
         const from = rw ? rw.start : new THREE.Vector3(-1100, 0, -300);
-        pos.copy(from).addScaledVector(dir, -5000);
+        pos.copy(from).addScaledVector(dir, -9000);
         yaw = Math.atan2(dir.x, dir.z);
         pos.y = Math.max(0, this.groundAt(pos.x, pos.z, 1500)) + 500;
         vel.set(Math.sin(yaw), 0, Math.cos(yaw)).multiplyScalar(cfg.cruiseKmh / KMH);
@@ -409,7 +410,7 @@ export class PlaneSystem implements IPlaneSystem {
 
     // Engines.
     this.engines = visual.engines.map((info) => ({
-      drag: { point: info.thrustPoint.clone(), cdA: 1.1 * Math.PI * Math.max(0.3, info.radius) ** 2 },
+      drag: { point: info.thrustPoint.clone(), cdA: 0.3 * Math.PI * Math.max(0.3, info.radius) ** 2 },
       info, st: { status: 'ok', spool: 0, thrust: 0, fire: 0 }, propAngle: 0, propSpeed: 0, windmill: false, trail: null, trailSize: 1,
       spreadAt: Infinity, spreadWill: false, spread: false, tearAt: Infinity,
     }));
@@ -445,7 +446,7 @@ export class PlaneSystem implements IPlaneSystem {
     this.crashed = false;
     this.crashTime = 0;
     this.inCockpitSequence = false;
-    this.oom = { state: 'ok', countdown: 0, distance: 0, failT: 0, nextT: 0, failed: 0, lastEngineT: -1, liftScale: 1, checkT: 0 };
+    this.oom = { state: 'ok', countdown: 0, distance: 0, failT: 0, nextT: 0, failed: 0, lastEngineT: -1, aglAtLast: 0, liftScale: 1, checkT: 0 };
     this.lightsKey = -1;
     this.lodLevel = -1;
     if (air) {
@@ -1097,8 +1098,9 @@ export class PlaneSystem implements IPlaneSystem {
       if (!this.onGround && this.gearTarget === 1 && !this.autoGearUpDone && this.agl > A.autoGearUpAgl && vyPre > 0) {
         this.gearTarget = 0;
         this.autoGearUpDone = true;
+        this.autoGearUpT = this.simTime;
       }
-      if (!this.onGround && this.gearTarget === 0 && this.agl < A.autoGearDownAgl && (vyPre < -1 || this.agl < 150) && V < A.autoGearDownSpeed * model.vStall && this.simTime - this.manualGearT > 8) {
+      if (!this.onGround && this.gearTarget === 0 && this.agl < A.autoGearDownAgl && vyPre < -1.5 && V < A.autoGearDownSpeed * model.vStall && this.simTime - this.manualGearT > 8 && this.simTime - this.autoGearUpT > 12) {
         this.gearTarget = 1;
       }
     }
@@ -1184,7 +1186,9 @@ export class PlaneSystem implements IPlaneSystem {
     if (this.oom.state === 'failing' && this.oom.lastEngineT >= 0) {
       const tau = this.simTime - this.oom.lastEngineT;
       const within = CONFIG.planes.outOfMap.crashWithin;
-      const remaining = Math.max(3, within - 5 - tau);
+      // ~40 s after the last engine; from very high up the dive is capped at ~30 m/s sink instead
+      const total = Math.max(within, this.oom.aglAtLast / 30 + 5);
+      const remaining = Math.max(3, total - 5 - tau);
       const vsReq = -this.agl / remaining;
       const Vg = Math.max(20, V);
       const gReq = Math.asin(clamp(vsReq / Vg, -0.7, 0));
@@ -1214,7 +1218,9 @@ export class PlaneSystem implements IPlaneSystem {
     fi.yaw = controllable ? inp.yaw : 0;
     fi.assisted = assisted && !this.crashed;
     const failFade = this.oom.state === 'failing' && this.oom.lastEngineT >= 0 ? Math.max(0.4, 1 - (this.simTime - this.oom.lastEngineT) / 60) : 1;
-    fi.assistFactor = this.tailLost ? 0 : clamp(1 - this.assistPenalty, 0, 1) * failFade;
+    const ht = model.htailAlive;
+    const fin = model.finAlive;
+    fi.assistFactor = clamp(1 - this.assistPenalty, 0, 1) * failFade * (this.tailLost ? 0.35 * ht : 1);
     fi.onGround = this.onGround;
     fi.agl = Math.max(0, t.y - this.groundY + (model.surfaces[0]?.pos.y ?? 0));
     fi.wheelAgl = this.agl;
@@ -1233,7 +1239,7 @@ export class PlaneSystem implements IPlaneSystem {
     fi.gammaCap = gammaCap;
     fi.tailLost = this.tailLost;
     fi.tailTime = this.tailT;
-    fi.controlScale.set(this.tailLost ? 0.25 : 1, this.tailLost ? 0 : 1, this.tailLost ? 0.6 : 1);
+    fi.controlScale.set(0.3 + 0.7 * ht, fin, this.tailLost ? 0.6 + 0.3 * ht : 1);
     fi.rotationHelp = true;
     model.step(dt, body, fi);
 
@@ -1366,9 +1372,11 @@ export class PlaneSystem implements IPlaneSystem {
           this.explodeEngine(next + 1, true);
           events.emit('masterCaution', { text: `ENGINE FAILURE — ${o.failed}/${this.engines.length}`, level: 'warning' });
         }
-        if (o.lastEngineT < 0 && !this.engines.some((e) => e.st.status === 'ok')) o.lastEngineT = this.simTime;
       }
-      if (o.lastEngineT < 0 && !this.engines.some((e) => e.st.status === 'ok')) o.lastEngineT = this.simTime;
+      if (o.lastEngineT < 0 && !this.engines.some((e) => e.st.status === 'ok')) {
+        o.lastEngineT = this.simTime;
+        o.aglAtLast = this.agl;
+      }
     }
   }
 

@@ -30,3 +30,12 @@ Smoke runs: machine-wide limit of 2 concurrent (lock files in %TEMP%, PID-checke
 - After each report: typecheck, smoke, review screenshots, fix cross-module issues, commit.
 - Final: smoke default/menu/garage/mobile, tour, leak (50× explode/reset), plane leak (30× crash/respawn),
   inland memory plateau, origin-shift test (drive > 2 km, no jumps), perf numbers (calls/tris), README, CREDITS.
+
+## Completed modules
+- camera, fx, audio, garage (all pushed via commits / live auto-push).
+## Integration follow-ups
+- audio: cockpit detection uses `cameraRig.mode === 'hood'` → switch to optional `ICameraRig.view` ('cockpit'|'wing'…).
+- audio: re-run `node scripts/smoke.mjs --tag audio --script src/audio/smoke-audio.mjs` on a quiet machine.
+- UI must forward touch drags to cameraRig.orbitDrag (camera note). Camber while driving → vehicle (sent).
+- Repo: github.com/gabrielebolognese/grandcrashauto (main). Netlify via netlify.toml, domain grandcrashauto.lol.
+  live.mjs runs with --autopush 15 (commits+pushes passing builds) and archives builds to %USERPROFILE%\crashgame-timelapse\builds.

@@ -29,6 +29,7 @@ export class Stunts {
   private rollPtr: number | null = null;
   private rollX0 = 0;
   private rollShown = false;
+  private linesReady = false;
 
   constructor(private host: UIHost) {
     const { ctx } = host;
@@ -130,12 +131,47 @@ export class Stunts {
     window.setTimeout(() => p.remove(), 1900);
   }
 
+  /** Radial streaks near the screen edges, drawn once into a small bitmap (scaled by the GPU afterwards). */
+  private buildLines(): void {
+    this.linesReady = true;
+    try {
+      const N = 512;
+      const c = document.createElement('canvas');
+      c.width = c.height = N;
+      const g = c.getContext('2d')!;
+      const R = N * 0.72;
+      g.translate(N / 2, N / 2);
+      for (let i = 0; i < 110; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r0 = R * (0.5 + Math.random() * 0.3);
+        const r1 = R * (0.85 + Math.random() * 0.25);
+        const w = 0.6 + Math.random() * 1.8;
+        const grad = g.createLinearGradient(Math.cos(a) * r0, Math.sin(a) * r0, Math.cos(a) * r1, Math.sin(a) * r1);
+        grad.addColorStop(0, 'rgba(255,255,255,0)');
+        grad.addColorStop(0.5, `rgba(255,255,255,${(0.35 + Math.random() * 0.45).toFixed(2)})`);
+        grad.addColorStop(1, 'rgba(255,240,220,0)');
+        g.strokeStyle = grad;
+        g.lineWidth = w;
+        g.beginPath();
+        g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
+        g.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
+        g.stroke();
+      }
+      const url = `url(${c.toDataURL('image/png')})`;
+      for (const el of Array.from(this.lines.children)) (el as HTMLElement).style.backgroundImage = url;
+    } catch {
+      /* canvas unavailable: no speed lines */
+    }
+  }
+
   update(): void {
     if (!this.visible) return;
     const { ctx } = this.host;
     const car = ctx.game.mode !== 'plane';
     const s = ctx.vehicle.state;
-    this.lines.classList.toggle('on', car && !!s.turboActive && !s.exploded);
+    const lines = car && !!s.turboActive && !s.exploded;
+    if (lines && !this.linesReady) this.buildLines();
+    this.lines.classList.toggle('on', lines);
     const a = car ? s.airborne3 : undefined;
     const airOn = !!a?.active && a.time > 0.25 && !s.exploded;
     this.air.classList.toggle('show', airOn);

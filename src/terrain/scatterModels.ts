@@ -8,7 +8,7 @@ import { Rng } from '../core/rng';
 
 const C = (hex: number) => new THREE.Color(hex);
 
-class Geo {
+export class Geo {
   pos: number[] = [];
   nor: number[] = [];
   col: number[] = [];
@@ -331,9 +331,9 @@ export function hayGeometry(): THREE.BufferGeometry {
     const a1 = ((i + 1) / seg) * Math.PI * 2;
     const y0 = r + Math.sin(a0) * r, z0 = Math.cos(a0) * r;
     const y1 = r + Math.sin(a1) * r, z1 = Math.cos(a1) * r;
-    g.quadV(v(-0.7, y0, z0), v(-0.7, y1, z1), v(0.7, y1, z1), v(0.7, y0, z0), straw, (i % 2) * 0.05);
-    g.triV(v(0.7, r, 0), v(0.7, y0, z0), v(0.7, y1, z1), end);
-    g.triV(v(-0.7, r, 0), v(-0.7, y1, z1), v(-0.7, y0, z0), end);
+    g.quadV(v(0.7, y0, z0), v(0.7, y1, z1), v(-0.7, y1, z1), v(-0.7, y0, z0), straw, (i % 2) * 0.05);
+    g.triV(v(0.7, r, 0), v(0.7, y1, z1), v(0.7, y0, z0), end);
+    g.triV(v(-0.7, r, 0), v(-0.7, y0, z0), v(-0.7, y1, z1), end);
   }
   return g.build();
 }
@@ -394,12 +394,15 @@ export function pylonGeometry(): THREE.BufferGeometry {
       g.quadV(a, b, nb, na, steel);
       g.quadV(na, nb, b, a, steel, -0.2);
       // diagonal brace
-      const m0 = a.clone().lerp(c0[k], 0.5);
       const d0 = b.clone();
       const d1 = c1[k].clone();
-      void m0;
-      g.triV(a, d1, a.clone().add(v(0, 0.5, 0)), C(0x80868e));
-      g.triV(c0[k], d0, c0[k].clone().add(v(0, 0.5, 0)), C(0x80868e));
+      const brace = C(0x80868e);
+      const a2 = a.clone().add(v(0, 0.5, 0));
+      const k2 = c0[k].clone().add(v(0, 0.5, 0));
+      g.triV(a, d1, a2, brace);
+      g.triV(a, a2, d1, brace);
+      g.triV(c0[k], d0, k2, brace);
+      g.triV(c0[k], k2, d0, brace);
     }
   }
   // cross arms (along X — the line runs along Z after the instance yaw)

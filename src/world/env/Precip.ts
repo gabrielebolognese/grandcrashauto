@@ -39,10 +39,10 @@ void main() {
   vec3 camRight = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
   vec3 camUp = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
   float len = clamp(rl * uStreak, 0.35, 4.0);
-  float w = 0.018 + 0.01 * aOff.w;
+  float w = 0.028 + 0.016 * aOff.w;
   vec3 wp;
   if (isSnow > 0.5) {
-    float s = 0.05 + 0.04 * aOff.w;
+    float s = 0.1 + 0.08 * aOff.w;
     wp = centre + camRight * position.x * s + camUp * position.y * s;
   } else {
     wp = centre + side * position.x * w + dir * position.y * len;

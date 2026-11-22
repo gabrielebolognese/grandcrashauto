@@ -268,21 +268,11 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
               // the pivot of the flap hinge line passes through both ends (shifted down)
               return { tmp: h.surf, id: sid };
             });
-            pb.lod[0].fx.forEach((_, j, arr) => {
-              if (j % 4 === 0) {
-                const m = ids.find((q) => q.tmp === arr[j]);
-                if (m) arr[j] = m.id;
-              }
-            });
+            for (const q of ids) pb.lod[0].remapSurf(q.tmp, q.id);
             (pb as PB & { _ids?: { tmp: number; id: number }[] })._ids = ids;
           } else if (l === 1) {
             const ids = (pb as PB & { _ids?: { tmp: number; id: number }[] })._ids ?? [];
-            pb.lod[1].fx.forEach((_, j, arr) => {
-              if (j % 4 === 0) {
-                const m = ids.find((q) => q.tmp === arr[j]);
-                if (m) arr[j] = m.id;
-              }
-            });
+            for (const q of ids) pb.lod[1].remapSurf(q.tmp, q.id);
           }
         }
         // planform for the collision box / lift area
@@ -328,7 +318,7 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
         const h = hinges[0];
         rid = allocSurf('rudder', 0, h.p0, h.p1.clone().sub(h.p0).normalize(), 0.45);
       }
-      if (rid) pb.lod[l].fx.forEach((v, j, arr) => { if (j % 4 === 0 && v === 900) arr[j] = rid; });
+      if (rid) pb.lod[l].remapSurf(900, rid);
     }
     if (D.tTail) {
       // bullet fairing at the T junction
@@ -490,22 +480,7 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
   const wsum = names.reduce((a, n) => a + (D.weights[n] ?? 0.5), 0);
   const fsum = names.reduce((a, n) => a + (D.fuelFrac[n] ?? 0), 0) || 1;
   const massOf = (n: string) => (structMass * (D.weights[n] ?? 0.5)) / wsum + (fuelTotal * (D.fuelFrac[n] ?? 0)) / fsum;
-  const centroid = (b: GeoBuilder): THREE.Vector3 => {
-    const c = new THREE.Vector3();
-    let A = 0;
-    const p = b.pos;
-    const ia = new THREE.Vector3(), ib = new THREE.Vector3(), ic = new THREE.Vector3();
-    for (let i = 0; i < b.idx.length; i += 3) {
-      if (b.fx[b.idx[i] * 4 + 1] > 4.5 && b.fx[b.idx[i] * 4 + 1] < 8.5) continue; // skip damaged variants
-      ia.fromArray(p, b.idx[i] * 3);
-      ib.fromArray(p, b.idx[i + 1] * 3);
-      ic.fromArray(p, b.idx[i + 2] * 3);
-      const area = ib.clone().sub(ia).cross(ic.clone().sub(ia)).length() * 0.5;
-      c.addScaledVector(ia.add(ib).add(ic), area / 3);
-      A += area;
-    }
-    return A > 0 ? c.multiplyScalar(1 / A) : c;
-  };
+  const centroid = (b: GeoBuilder): THREE.Vector3 => b.areaCentroid();
   const designCom = new Map<string, THREE.Vector3>();
   const com = new THREE.Vector3();
   for (const n of names) {

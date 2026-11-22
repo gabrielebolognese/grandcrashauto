@@ -114,8 +114,8 @@
   inset: 0;
   border-radius: 50%;
   background: repeating-conic-gradient(from -1.5deg, rgba(226, 88, 76, 0.85) 0 3deg, transparent 3deg 45deg);
-  -webkit-mask: radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 3px));
-  mask: radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 3px));
+  -webkit-mask: radial-gradient(circle closest-side, transparent calc(100% - 4.5px), #000 calc(100% - 4.5px));
+  mask: radial-gradient(circle closest-side, transparent calc(100% - 4.5px), #000 calc(100% - 4.5px));
 }
 .mm-north {
   position: absolute;
@@ -219,11 +219,11 @@
 }
 #ui-root[data-state='driving'] .fps-counter {
   right: auto;
-  left: calc(var(--gl) + var(--mm) + 10px);
-  top: var(--gt);
+  left: var(--gl);
+  top: calc(var(--gt) + var(--mm) + 38px);
 }
 #ui-root[data-state='driving']:has(.minimap.nodata) .fps-counter {
-  left: var(--gl);
+  top: calc(var(--gt) + 30px);
 }
 
 /* ───────────────────────────── top-right: speed card ───────────────────────────── */

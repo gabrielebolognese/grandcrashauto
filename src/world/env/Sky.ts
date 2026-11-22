@@ -100,7 +100,9 @@ void main() {
     // Environment capture: below the horizon a soft "ground" so cars reflect a ground, not more sky.
     col = mix(col, uSkyGround, smoothstep(0.0, -0.18, h));
   }
-  col = mix(col, uFogColor, uWhiteout * (1.0 - uEnvPass));
+  // Weather fog veils the whole sky (strongest at the horizon); whiteout inside clouds.
+  float skyFog = uFogDensity * (0.55 + 0.45 * (1.0 - smoothstep(0.0, 0.6, h)));
+  col = mix(col, uFogColor, max(uWhiteout * (1.0 - uEnvPass), skyFog));
   gl_FragColor = vec4(col, 1.0);
   ${GLSL_OUTPUT}
   // Dither (kills gradient banding in 8-bit output).

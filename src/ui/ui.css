@@ -28,9 +28,9 @@ html body #boot.boot-out {
   position: absolute;
   left: 50%;
   top: 60%;
-  width: 240vmax;
-  height: 240vmax;
-  margin: -120vmax 0 0 -120vmax;
+  width: 150vmax;
+  height: 150vmax;
+  margin: -75vmax 0 0 -75vmax;
   background: repeating-conic-gradient(from 0deg, rgba(255, 255, 255, 0.2) 0deg 4deg, transparent 4deg 11deg);
   -webkit-mask: radial-gradient(circle, #000 0%, transparent 38%);
   mask: radial-gradient(circle, #000 0%, transparent 38%);

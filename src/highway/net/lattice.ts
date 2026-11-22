@@ -426,7 +426,7 @@ export function nodeFrame(key: string): Map<string, EdgeEnd> {
     const tl = Math.hypot(tx, tz) || 1;
     tx /= tl;
     tz /= tl;
-    const FORK = 230;
+    const FORK = 260;
     out.set(q.e.key, { dir: { x: tx, z: tz }, grade: 0, lin: FORK, main: true, fork: FORK, lanes: lanesOf(q.e), exit: false });
     out.set(p.e.key, { dir: { x: -tx, z: -tz }, grade: 0, lin: FORK, main: true, fork: FORK, lanes: lanesOf(p.e), exit: false });
     const branches = u.filter((_, k) => k !== bp && k !== bq);

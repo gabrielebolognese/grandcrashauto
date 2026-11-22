@@ -287,9 +287,23 @@ export class Props implements IProps {
     const L = bb.max.z - bb.min.z, W = bb.max.x - bb.min.x, H = bb.max.y - Math.max(0, bb.min.y);
     if (!(L > 1 && W > 0.8 && H > 0.5)) return;
     this.render?.setKindGeometry(def, geo);
-    geo.dispose(); // the batch keeps its own clone
     def.colliders[0] = carCollider(L, W, H);
     def.carLamps = carLampsFor(L, W, H);
+    // glow anchors from the lamp lenses (paintMask 0.25: warm-white front, red rear)
+    const pm = geo.getAttribute('paintMask') as THREE.BufferAttribute;
+    const pa = geo.getAttribute('position') as THREE.BufferAttribute;
+    const fr = [0, 0, -1e9, 0], rr = [0, 0, 1e9, 0];
+    for (let v = 0; v < pa.count; v++) {
+      if (Math.abs(pm.getX(v) - 0.25) > 0.1) continue;
+      const x = Math.abs(pa.getX(v)), y = pa.getY(v), z = pa.getZ(v);
+      const a = z > 0 ? fr : rr;
+      a[0] += x;
+      a[1] += y;
+      a[2] = z > 0 ? Math.max(a[2], z) : Math.min(a[2], z);
+      a[3]++;
+    }
+    if (fr[3] > 0) def.carLamps.front = [fr[0] / fr[3], fr[1] / fr[3], fr[2] + 0.03];
+    if (rr[3] > 0) def.carLamps.rear = [rr[0] / rr[3], rr[1] / rr[3], rr[2] - 0.03];
     def.radius = L / 2;
     def.height = H;
     const { store } = this;
@@ -299,6 +313,7 @@ export class Props implements IProps {
       if (store.rec[i] >= 0) this.phys?.release(i, true);
     }
     this.phys?.dropPool(def);
+    geo.dispose(); // the batch keeps its own clone
   }
 
   // ───────────────────────────── loop ─────────────────────────────

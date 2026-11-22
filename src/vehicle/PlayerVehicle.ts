@@ -1000,7 +1000,7 @@ export class PlayerVehicle implements IPlayerVehicle, DamageHost, StuntHost {
 
     // Wheels: suspension travel, steering, spin, camber; world contact points for fx
     const P = this.params;
-    const camber = clamp(this.build.stance?.camber ?? 0, 0, 1) * 0.14;
+    const camber = (clamp(this.build.stance?.camber ?? 0, 0, 1) * CONFIG.vehicle.wheelVisual.camberMaxDeg * Math.PI) / 180;
     for (let i = 0; i < 4; i++) {
       const wv = visual.wheels[i];
       const ws = s.wheels[i];
@@ -1009,7 +1009,7 @@ export class PlayerVehicle implements IPlayerVehicle, DamageHost, StuntHost {
       if (wv) {
         wv.pivot.position.y = this.hardY[i] - len;
         wv.pivot.rotation.y = i < 2 ? this.steerAngle : 0;
-        wv.pivot.rotation.z = i % 2 === 0 ? camber : -camber;
+        wv.pivot.rotation.z = wp.x > 0 ? camber : -camber; // left (+X) wheels: + tilts the top inward
         this.spinAngle[i] = (this.spinAngle[i] + this.spinVel[i] * dt) % (Math.PI * 2);
         wv.spin.rotation.x = this.spinAngle[i];
       }

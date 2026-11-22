@@ -1,11 +1,13 @@
 import './map.css';
+import * as THREE from 'three';
+import type { RenderView } from '../../core/Engine';
 import { CONFIG } from '../../config';
 import type { GameContext } from '../../game/contracts';
 import { formatDistance, niceScale } from '../../nav/format';
 import { navIcon, type NavIconName } from '../../nav/icons';
 import type { Nav } from '../../nav/Nav';
 import type { NavPoi } from '../../nav/pois';
-import { MapRenderer } from './MapRenderer';
+import { MapRenderer, mapLevel } from './MapRenderer';
 import { TileCache } from './TileCache';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] => {
@@ -59,6 +61,10 @@ export class MapScreen {
   private keysHeld = new Set<string>();
   private padPrev: boolean[] = [];
   private savedPpm = CONFIG.nav.mapStartPpm;
+  /** The 3D view while the (opaque) map covers it: an empty scene saves the GPU/battery and keeps panning smooth. */
+  private savedView: RenderView | null = null;
+  private blankScene: THREE.Scene | null = null;
+  private blankTimer = 0;
 
   constructor(
     private nav: Nav,
@@ -208,6 +214,8 @@ export class MapScreen {
     this.lastT = performance.now();
     cancelAnimationFrame(this.raf);
     this.raf = requestAnimationFrame(this.loop);
+    clearTimeout(this.blankTimer);
+    this.blankTimer = window.setTimeout(() => this.blank3D(true), 320); // after the fade-in
     try {
       this.ctx.audio?.ui?.('confirm');
     } catch {
@@ -218,6 +226,8 @@ export class MapScreen {
   close(): void {
     if (!this.built) return;
     this.isOpen = false;
+    clearTimeout(this.blankTimer);
+    this.blank3D(false);
     this.root.classList.remove('visible');
     this.root.setAttribute('aria-hidden', 'true');
     document.getElementById('ui-root')?.classList.remove('nav-map-open');
@@ -235,6 +245,23 @@ export class MapScreen {
     this.dirty = true;
   }
 
+  private blank3D(on: boolean): void {
+    const engine = this.ctx.engine;
+    try {
+      if (on && this.isOpen && !this.savedView) {
+        this.blankScene ??= new THREE.Scene();
+        this.savedView = engine.view;
+        engine.setView({ scene: this.blankScene, camera: engine.view.camera });
+      } else if (!on && this.savedView) {
+        if (engine.view.scene === this.blankScene) engine.setView(this.savedView);
+        this.savedView = null;
+      }
+    } catch (err) {
+      console.warn('[map] view swap failed', err);
+      this.savedView = null;
+    }
+  }
+
   /**
    * Warm the tile cache in the background (workers) around the player at the default zoom, so the first open is
    * instant. Called by Nav a few seconds into driving.
@@ -246,7 +273,7 @@ export class MapScreen {
     const f = this.nav.focusAbs();
     const ppm = this.savedPpm;
     const size = CONFIG.nav.mapTilePx;
-    const L = Math.max(0, Math.min(8, Math.floor(Math.log2(1 / (ppm * Math.min(2, window.devicePixelRatio || 1))) + 0.35)));
+    const L = mapLevel(ppm);
     const halfW = window.innerWidth / 2 / ppm;
     const halfH = window.innerHeight / 2 / ppm;
     tiles.beginFrame();

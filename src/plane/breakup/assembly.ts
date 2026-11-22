@@ -118,6 +118,7 @@ export class Assembly {
   readonly lastPatch = new THREE.Vector3();
   patchValid = false;
   sliding = false;
+  slidePart = -1;
   slideT = 0;
   restT = 0;
 

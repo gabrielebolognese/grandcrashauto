@@ -81,7 +81,6 @@ export function patchMaterial(material: THREE.Material, kind: PatchKind): void {
   if (!m || m.__envPatched) return;
   m.__envPatched = kind;
   const k = KIND[kind] ?? KIND.ground;
-  const isPBR = (m as THREE.MeshStandardMaterial).isMeshStandardMaterial === true;
   const prev = m.onBeforeCompile;
   const prevKey = m.customProgramCacheKey?.bind(m);
   m.onBeforeCompile = (shader, renderer) => {
@@ -116,10 +115,9 @@ export function patchMaterial(material: THREE.Material, kind: PatchKind): void {
   }`,
       );
     const f = (n: number) => n.toFixed(3);
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        `#include <common>
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>
 varying vec3 vEnvWorld;
 varying vec3 vEnvNormal;
 uniform float uWetness;
@@ -130,50 +128,48 @@ uniform float uRain;
 uniform float uTime;
 uniform float uPuddles;
 ${GLSL_NOISE}`,
-      )
-      .replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-  vec2 envPA = vEnvWorld.xz + uOrigin.xz;
-  float envUp = clamp(normalize(vEnvNormal).y, 0.0, 1.0);
-  float envN1 = envPuddleNoise(envPA);
-  float envWet = uWetness * mix(0.35, 1.0, envUp);
-  float envTh = 1.0 - 0.36 * uWetness;
-  float envPuddle = smoothstep(envTh, envTh + 0.06, envN1) * min(1.0, uWetness * 1.5) * ${f(k[2])} * uPuddles * step(0.9, envUp);
-  diffuseColor.rgb *= mix(1.0, ${f(k[0])}, envWet);
-  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, envPuddle);
-  // Snow: above the snow line on up-facing faces (ragged edge), plus settled snow while it snows.
-  float envSnowEdge = (envVN(envPA * 0.045) - 0.5) * 70.0;
-  float envAlt = smoothstep(uSnowLine - 45.0, uSnowLine + 25.0, vEnvWorld.y + envSnowEdge) * ${f(k[3])};
-  float envSet = uSnow * ${f(k[4])} * smoothstep(0.25, 0.65, envVN(envPA * 0.37 + 3.0) + uSnow * 0.5);
-  float envSnow = max(envAlt, envSet) * smoothstep(${f(k[5])}, ${f(Math.min(0.99, k[5] + 0.2))}, envUp) * (1.0 - envPuddle);
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.95, 1.0), envSnow);`,
-      );
-    if (isPBR) {
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <roughnessmap_fragment>',
-          `#include <roughnessmap_fragment>
-  roughnessFactor = mix(roughnessFactor, min(roughnessFactor, ${f(k[1])}), envWet);
-  roughnessFactor = mix(roughnessFactor, 0.04, envPuddle);
-  roughnessFactor = mix(roughnessFactor, 0.85, envSnow);`,
-        )
-        .replace(
-          '#include <normal_fragment_maps>',
-          `#include <normal_fragment_maps>
+    );
+    // Applied right before the lighting chunk, i.e. AFTER every other patch (owners' own onBeforeCompile code
+    // that sets diffuse/roughness on the standard chunks) — so wetness/snow always win.
+    const anchors = ['#include <lights_physical_fragment>', '#include <lights_lambert_fragment>', '#include <lights_phong_fragment>', '#include <lights_toon_fragment>'];
+    const anchor = anchors.find((a) => shader.fragmentShader.includes(a));
+    if (!anchor) return;
+    const pbr = anchor === anchors[0];
+    const block = `
   {
-    vec3 envUpV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
-    // Rain rings on the puddles (two drifting cells of expanding ripples).
-    vec2 rp = envPA * 1.7;
-    vec2 rc = floor(rp);
-    float rr = fract(uTime * 0.9 + envVH(rc) * 7.0);
-    float rd = length(fract(rp) - 0.5 - (vec2(envVH(rc + 1.3), envVH(rc + 2.1)) - 0.5) * 0.5);
-    float ring = sin((rd - rr * 0.5) * 40.0) * (1.0 - rr) * smoothstep(0.5 * rr + 0.06, 0.5 * rr, rd) * uRain;
-    vec3 envFlat = normalize(envUpV + vec3(ring * 0.08, 0.0, ring * 0.08));
-    normal = normalize(mix(normal, envFlat, envPuddle * 0.92));
-  }`,
-        );
-    }
+    vec2 envPA = vEnvWorld.xz + uOrigin.xz;
+    float envUp = clamp(normalize(vEnvNormal).y, 0.0, 1.0);
+    float envBright = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+    float envWet = uWetness * mix(0.35, 1.0, envUp);
+    float envTh = 1.0 - 0.36 * uWetness;
+    // Puddles only on darker flat surfaces (asphalt, not sand or paint).
+    float envPuddle = smoothstep(envTh, envTh + 0.06, envPuddleNoise(envPA)) * min(1.0, uWetness * 1.5) * ${f(k[2])}
+      * uPuddles * step(0.9, envUp) * (1.0 - smoothstep(0.22, 0.45, envBright));
+    diffuseColor.rgb *= mix(1.0, ${f(k[0])}, envWet);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.7, envPuddle);
+    // Snow: above the snow line on up-facing faces (ragged edge), plus settled snow while it snows.
+    float envSnowEdge = (envVN(envPA * 0.045) - 0.5) * 70.0;
+    float envAlt = smoothstep(uSnowLine - 45.0, uSnowLine + 25.0, vEnvWorld.y + envSnowEdge) * ${f(k[3])};
+    float envSet = uSnow * ${f(k[4])} * smoothstep(0.25, 0.65, envVN(envPA * 0.37 + 3.0) + uSnow * 0.5);
+    float envSnow = max(envAlt, envSet) * smoothstep(${f(k[5])}, ${f(Math.min(0.99, k[5] + 0.2))}, envUp) * (1.0 - envPuddle);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.95, 1.0), envSnow);
+    ${pbr ? `roughnessFactor = mix(roughnessFactor, min(roughnessFactor, ${f(k[1])}), envWet);
+    roughnessFactor = mix(roughnessFactor, 0.035, envPuddle);
+    roughnessFactor = mix(roughnessFactor, 0.85, envSnow);
+    {
+      vec3 envUpV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+      // Rain rings on the puddles (expanding ripples in drifting cells).
+      vec2 rp = envPA * 1.7;
+      vec2 rc = floor(rp);
+      float rr = fract(uTime * 0.9 + envVH(rc) * 7.0);
+      float rd = length(fract(rp) - 0.5 - (vec2(envVH(rc + 1.3), envVH(rc + 2.1)) - 0.5) * 0.5);
+      float ring = sin((rd - rr * 0.5) * 40.0) * (1.0 - rr) * smoothstep(0.5 * rr + 0.06, 0.5 * rr, rd) * uRain;
+      vec3 envFlat = normalize(envUpV + vec3(ring * 0.08, 0.0, ring * 0.08));
+      normal = normalize(mix(normal, envFlat, envPuddle * 0.92));
+    }` : ''}
+  }
+  `;
+    shader.fragmentShader = shader.fragmentShader.replace(anchor, block + anchor);
   };
   m.customProgramCacheKey = () => (prevKey ? prevKey() : '') + '|envwx:' + kind;
   m.needsUpdate = true;

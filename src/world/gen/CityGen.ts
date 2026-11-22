@@ -219,7 +219,7 @@ export function generateCity(seed: number): { layout: CityLayout; hf: HeightFiel
     pts.push({ ...R.nodes[hn].p });
     addEdge(rampNodes[k], hn, 'ramp', 2, 2 * L.RAMP_HALFW, 0, pts, false, 60, 1.8);
     const s = nearestS(hw, r.def.mx, r.def.mz);
-    hw.innerGaps.push([s - (r.def.name === 'north' ? 38 : 40), s + 8]);
+    hw.innerGaps.push([s - (r.def.name === 'north' ? 45 : 62), s + 10]);
   });
   // spur
   {
