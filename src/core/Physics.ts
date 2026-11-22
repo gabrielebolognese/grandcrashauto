@@ -16,7 +16,8 @@ export { RAPIER };
  */
 
 export type ColliderKind =
-  | 'ground' | 'road' | 'building' | 'prop' | 'staticProp' | 'parkedCar' | 'player' | 'npc' | 'debris' | 'water' | 'misc';
+  | 'ground' | 'road' | 'building' | 'prop' | 'staticProp' | 'parkedCar' | 'player' | 'npc' | 'debris' | 'water' | 'misc'
+  | 'plane' | 'wreck'; // part 2: intact player plane parts (data: { part }), free wreck pieces
 export type SurfaceMaterial =
   | 'concrete' | 'asphalt' | 'metal' | 'plastic' | 'glass' | 'wood' | 'foliage' | 'flesh' | 'sand' | 'grass' | 'water';
 
@@ -38,6 +39,7 @@ export const G = {
   NPC: 1 << 4, // pedestrian capsules / ragdolls
   DEBRIS: 1 << 5, // detached car parts, explosion debris
   SENSOR: 1 << 6,
+  PLANE: 1 << 7, // part 2: intact planes + wreck pieces
   ALL: 0xffff,
 } as const;
 
@@ -159,11 +161,31 @@ export class Physics {
  * Helper for render interpolation (spec §14): call capture() in postStep, apply() in update(alpha).
  */
 export class BodyInterpolator {
+  /** Weak registry so the floating origin (core/Origin) can shift every interpolator's samples. */
+  private static registry = new Set<WeakRef<BodyInterpolator>>();
+  static shiftAll(dx: number, dz: number): void {
+    for (const ref of BodyInterpolator.registry) {
+      const bi = ref.deref();
+      if (!bi) {
+        BodyInterpolator.registry.delete(ref);
+        continue;
+      }
+      bi.prevP.x -= dx;
+      bi.prevP.z -= dz;
+      bi.currP.x -= dx;
+      bi.currP.z -= dz;
+    }
+  }
+
   private prevP = new THREE.Vector3();
   private currP = new THREE.Vector3();
   private prevQ = new THREE.Quaternion();
   private currQ = new THREE.Quaternion();
   private primed = false;
+
+  constructor() {
+    BodyInterpolator.registry.add(new WeakRef(this));
+  }
 
   capture(body: RAPIER.RigidBody): void {
     const t = body.translation();

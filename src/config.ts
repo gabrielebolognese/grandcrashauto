@@ -84,7 +84,7 @@ export const CONFIG = {
     // Azimuth convention: degrees about +Y, 0 = toward +Z (south, over the ocean), 90 = toward +X (east).
     exposure: 1.0, // global exposure multiplier (× the time-of-day preset's exposure)
     todTransition: 2.0, // s, smooth blend when the time-of-day setting changes
-    fogNearFrac: 0.16, // linear fog near = viewDistance × this
+    fogNearFrac: 0.3, // linear fog near = viewDistance × this
     fogFarMul: 1.05, // linear fog far = viewDistance × this
     envMapSize: 256, // PMREM cube size (regenerated only on time-of-day change)
     envRefreshInterval: 0.35, // s between PMREM refreshes while a time-of-day transition runs
@@ -105,18 +105,27 @@ export const CONFIG = {
       shallowDepth: 2.5, // m, turquoise shallows → mid blue
       deepDepth: 14, // m, mid blue → deep blue
       clearDepth: 1.4, // m, water becomes fully opaque past this depth (sand visible under the shallows)
-      foamWidth: 0.55, // m of depth covered by the shoreline foam band
+      foamWidth: 0.2, // m of depth covered by the shoreline foam band (beach slope ~1:30 → ~6 m)
       glitter: 1.0,
     },
     clouds: {
-      count: 26,
+      count: 49, // clouds in the field (Medium draws 70 % of them; Low has none)
       puffsMin: 6,
-      puffsMax: 11,
-      altitudeMin: 150,
-      altitudeMax: 250,
-      spread: 1100, // m, half size of the wrapping cloud field around the camera
-      wind: 3.0, // m/s drift
+      puffsMax: 10,
+      altitudeMin: 560, // m, cloud base (fly under / through / above them)
+      altitudeMax: 820,
+      spread: 4200, // m, half size of the wrapping cloud field around the camera (layout is fixed at init)
+      wind: 4.0, // m/s drift
       windAngleDeg: 70,
+    },
+    scenery: {
+      hazeDist: 1500, // m, e-folding distance of the haze on islands / boats (grows with altitude)
+      boats: 7,
+      islands: [
+        { x: -980, z: 1320, radius: 210, height: 64, elong: 1.5, seed: 11, lighthouse: false },
+        { x: 760, z: 1180, radius: 115, height: 34, elong: 1.2, seed: 23, lighthouse: false },
+        { x: 230, z: 900, radius: 38, height: 9, elong: 1.0, seed: 37, lighthouse: true },
+      ],
     },
     bloom: {
       radius: 0.45,
@@ -124,10 +133,10 @@ export const CONFIG = {
     tod: {
       day: {
         sunElevation: 47, sunAzimuth: -28, sunColor: '#fff1dc', sunIntensity: 3.3,
-        hemiSky: '#bfe0ff', hemiGround: '#8a86b0', hemiIntensity: 1.05, envIntensity: 0.42,
-        zenith: '#3f8fd8', skyMid: '#86c6ea', horizon: '#d3eaf2', fog: '#cfe6f0', ground: '#a9b8c4', glow: '#fff1d6',
+        hemiSky: '#bfe0ff', hemiGround: '#8a86b0', hemiIntensity: 1.5, envIntensity: 0.55,
+        zenith: '#2a7bd2', skyMid: '#68b3e6', horizon: '#cde6f1', fog: '#cfe6f0', ground: '#a9b8c4', glow: '#fff1d6',
         glowStrength: 0.55, sunDisk: 26, sunSize: 1.0, moon: 0, stars: 0,
-        exposure: 1.0, night: 0,
+        exposure: 0.94, night: 0,
         cloudLit: '#ffffff', cloudShade: '#b4b5d8',
         waterDeep: '#0f5f8c', waterMid: '#1f97bd', waterShallow: '#47d3c6',
         bloomStrength: 0.3, bloomThreshold: 1.6,
@@ -263,6 +272,8 @@ export const CONFIG = {
       highSpeedSide: 0.85, // side stiffness multiplier at top speed (calmer at speed)
       slipLatStart: 1.2, // m/s lateral slip at which skid output begins
       slipLatFull: 6, // m/s lateral slip for full skid
+      launchSlip: 0.65, // wheelspin/smoke intensity when launching flat out in 1st
+      launchSlipSpeed: 7, // m/s below which launch wheelspin happens
       surface: { asphalt: 1, concrete: 1, metal: 0.9, wood: 0.95, plastic: 0.9, glass: 0.85, foliage: 0.75, grass: 0.72, sand: 0.62, water: 0.45, flesh: 0.8 },
       surfaceDrag: { sand: 2.2, grass: 1.0, water: 5, foliage: 1.2 }, // extra m/s² rolling drag
     },
@@ -339,9 +350,110 @@ export const CONFIG = {
 
   // ───────────────────────────── camera (owner: src/camera) ─────────────────────
   camera: {
-    fov: 62,
+    fov: 62, // chase FOV at rest (vertical, designed for 16:9 — see aspect* below). Engine reads fov/near/far at boot.
     near: 0.1,
     far: 1500,
+    // chase
+    fovMax: 78, // chase FOV at speedRef
+    speedRef: 55, // m/s (~200 km/h) where speed-driven effects max out
+    distance: 6.3, // m behind the car's center at rest (scaled by car length)
+    distanceMax: 8.6, // at speedRef
+    height: 1.7, // m above the car's center at rest (scaled by car height)
+    heightMax: 2.05,
+    lookHeight: 0.5, // aim point above the car's center
+    lookAhead: 1.5, // m ahead of the car at rest
+    lookAheadMax: 6.5,
+    headingSmooth: 0.22, // s, heading spring at speed
+    headingSmoothSlow: 0.42, // s, heading spring at low speed
+    headingSmoothAir: 0.65, // s, airborne / tumbling (follows the flight path)
+    velFollow: 0.22, // 0..1 lean toward the velocity direction while gripping
+    driftFollow: 0.62, // 0..1 lean toward the velocity direction while sliding (shows the drift angle)
+    turnLead: 0.14, // s of yaw rate → aim into the turn
+    turnLeadMax: 0.12, // rad
+    turnRoll: 0.03, // rad max bank into turns
+    inertia: 5.5, // 1/s stiffness of the inertia offset (crash surge, acceleration lag, landing dip)
+    inertiaMax: 1.5, // m soft limit of the inertia offset
+    inertiaVertical: 0.55, // vertical share of the inertia
+    pivotSmooth: 0.07, // s vertical filtering of the follow point (suspension jitter)
+    pivotSmoothAir: 0.14,
+    distSmooth: 2.2, // 1/s distance/height response
+    fovSmooth: 2.4, // 1/s FOV response
+    boostFov: 3, // extra degrees at full turbo boost
+    airPullback: 0.14, // extra distance fraction on long jumps
+    sizeScale: 1, // global multiplier for car-size distance scaling
+    zoomMin: 0.75, // mouse-wheel zoom range (multiplier on distance)
+    zoomMax: 1.6,
+    zoomStep: 0.1, // per 100 px of wheel delta
+    wreckDistance: 1.35, // distance multiplier around a burning wreck
+    wreckHeight: 1.55,
+    wreckOrbit: 0.1, // rad/s slow orbit around the wreck
+    // occlusion & ground
+    occlusionMargin: 0.35, // m kept between the camera and a wall
+    occlusionMinDist: 1.6, // m closest pull-in
+    occlusionIn: 22, // 1/s pull-in speed
+    occlusionOut: 2.0, // 1/s ease-back speed
+    occlusionLift: 1.0, // m raised when fully pulled in (look over the car)
+    groundClearance: 0.45, // m above ground / water
+    // hood
+    hoodFov: 70,
+    hoodFovMax: 84,
+    hoodHeight: 0.17, // m above the hood surface (auto-detected)
+    hoodForward: 0.25, // m forward of the windshield base
+    hoodPitch: 0.03, // rad look-down
+    hoodSmooth: 18, // 1/s pitch/roll smoothing
+    hoodStabilize: 0.55, // 0..1 roll horizon stabilization
+    hoodShake: 0.45, // shake multiplier in the hood cam
+    freeLookReturn: 1.6, // s idle before hood free-look recenters
+    // orbit / look-back
+    orbitSensitivity: 0.0055, // rad per pixel dragged
+    orbitReturnDelay: 2.5, // s idle before returning to chase
+    orbitBlend: 0.9, // s glide back to chase
+    orbitAutoRotate: 0.14, // rad/s turntable when parked in orbit mode
+    orbitPitchMin: -0.05,
+    orbitPitchMax: 1.25,
+    lookBackBlend: 0.16, // s whip-around (0 = cut)
+    // explosion cinematic
+    cineEnabled: 1, // 0 = no cinematic, shake only
+    cineDuration: 3.0, // s (real time)
+    cineRadius: 8, // m orbit radius at start
+    cineRadiusEnd: 13,
+    cineHeight: 0.9, // m above the blast at start (low angle)
+    cineHeightEnd: 3.2,
+    cineSpin: 0.5, // rad/s orbit speed
+    cineFov: 64,
+    cineFovEnd: 52,
+    cineRoll: 0.07, // rad dutch tilt at mid-shot
+    cineBlendIn: 0.35, // s
+    cineBlendOut: 1.0, // s back to chase
+    // shake
+    shakeDecay: 1.1, // trauma per second
+    shakeFreq: 16, // Hz-ish noise speed
+    shakeMaxAngle: 0.05, // rad yaw/pitch at full trauma
+    shakeMaxRoll: 0.07, // rad
+    shakeMaxOffset: 0.18, // m
+    explosionShake: 1.0, // trauma added by a point-blank explosion
+    explosionShakeRange: 70, // m where explosion shake fades out
+    explosionShakeTime: 1.6, // s for that trauma to decay
+    fovKick: 9, // degrees punched out by a point-blank blast
+    fovKickDecay: 4, // 1/s
+    impactShake: 0.55, // trauma per unit impact strength
+    impactMin: 0.06, // ignore weaker impacts
+    landingShake: 0.4, // trauma for a hard landing
+    vibrationFreq: 30,
+    vibrationAngle: 0.0035, // rad at full vibration
+    vibrationOffset: 0.012, // m
+    speedShake: 1, // vibration amount at top speed
+    speedShakeStart: 0.6, // fraction of speedRef where vibration starts
+    offroadShake: 0.8, // vibration on grass / sand
+    // showcase (title / menu tour)
+    showcaseShot: 8.5, // s per shot
+    showcaseFadeOut: 0.6,
+    showcaseHold: 0.3, // s held dark at a cut (lets streaming catch up)
+    showcaseFadeIn: 0.9,
+    // aspect-aware FOV
+    aspectRef: 1.7778, // aspect the FOVs are designed for
+    aspectWideK: 0.5, // 0 = keep vertical FOV, 1 = keep horizontal FOV (wider screens)
+    aspectNarrowK: 0.6, // same, for narrower screens (tablets)
   },
 
   // ───────────────────────────── car models (owner: src/vehicle/models) ─────────
@@ -376,7 +488,73 @@ export const CONFIG = {
   npc: {},
 
   // ───────────────────────────── effects (owner: src/fx) ────────────────────────
-  fx: {},
+  fx: {
+    // particle caps per quality level (total, split main/glow), skid segments; pools are resized on quality change
+    caps: { low: 3000, medium: 8000, high: 20000 },
+    glowShare: 0.45, // fraction of the cap given to the glow pool (fire, sparks, embers)
+    decalCap: 32,
+    skidCap: { low: 1000, medium: 1600, high: 2000 },
+    lights: { low: 1, medium: 2, high: 3 }, // pooled point lights, created once at init (count fixed per session)
+    nearFade: [0.4, 2.5], // m: particles fade out when closer than this to the camera (fill-rate + clipping)
+    nightDim: 0.2, // lit smoke brightness at full night
+    wind: [0.9, 0, 0.45], // m/s smoke drift
+    ambient: '#7d7fa6', // smoke shade colour (lavender, never black)
+    clearJump: 12, // s the fx clock jumps on clearAll (> max spawn delay)
+    explosion: {
+      refRadius: 14, // event blast radius that maps to fireballRadius (fireball scales with sqrt of the ratio)
+      fireballRadius: 6, // m, car explosion fireball radius at scale 1
+      counts: { fireball: 34, smoke: 26, sparks: 72, debris: 34, embers: 46, dust: 34, streamers: 7, secondary: 2 },
+      fireballSpeed: 2.4, // × radius m/s radial expansion speed
+      fireballDrag: 3.6,
+      fireballLift: 2.8, // × radius^0.75 m/s² buoyancy
+      fireballLife: [1.1, 1.9],
+      fireballHeat: [2.2, 3.4],
+      smokeLife: [4.5, 7.5],
+      sparkSpeed: [9, 28],
+      debrisSpeed: [5, 17],
+      shockLife: 0.34,
+      shockGrow: 3.4, // × radius: shock dome final radius
+      ringLife: 1.25,
+      ringGrow: 4.2, // × radius: ground dust ring final radius
+      scorchSize: 1.15, // × radius (diameter)
+      scorchLife: 45,
+      columnSeconds: 9,
+      columnRate: 6, // puffs/s at start
+      flashIntensity: 2200, // candela at scale 1
+      flashDecay: 7, // 1/s
+      flashDistance: 12, // × radius light range
+      groundMaxHeight: 1.6, // × radius: no ground ring/scorch above this altitude
+      inherit: { fireball: 0.9, smoke: 0.6, sparks: 1.0, debris: 1.0 },
+    },
+    fire: {
+      flameRate: 40, // /s at size 1
+      smokeRate: 11,
+      emberRate: 7,
+      spread: 0.45, // × size jitter radius
+      flameSize: [0.85, 1.35],
+      flameLife: [0.45, 0.85],
+      smokeSize: [4.5, 6],
+      smokeLife: [3, 4.6],
+      inheritFlame: 0.85,
+      inheritSmoke: 0.6,
+      airStretch: 0.03, // s of motion stretch on flames when the emitter moves fast
+      fadeIn: 0.4,
+      fadeOut: 1.2,
+      glowIntensity: 35, // candela at size 1
+      maxFires: 8,
+      maxPerFrame: 40, // spawn cap per emitter per frame
+      autoWreckFire: true, // attach a fire to the exploded player car if nobody else does
+      autoDelay: 0.3,
+      autoOffset: [0, 0.55, 0.85],
+    },
+    skid: { slipThreshold: 0.32, minSegment: 0.2, maxSegment: 4, width: 0.24, lift: 0.025, opacity: 0.62, fadeTime: 22, color: '#141418' },
+    tyreSmoke: { slipThreshold: 0.45, rate: 26, size: [0.6, 3.2], life: [1.4, 2.6] },
+    dust: { rate: 24, minSpeed: 2.5, size: [0.5, 2.6], life: [0.9, 1.8], sand: '#e6d1a4', grass: '#a69a6c', other: '#c9bfae' },
+    spray: { rate: 30, minSpeed: 2 },
+    sparks: { impactThreshold: 0.22, impactCount: 26, scrapeRate: 110, size: [0.05, 0.09], stretch: 0.035, life: [0.3, 0.85] },
+    glass: { life: [1.3, 2.4] },
+    propBits: 7,
+  },
 
   // ───────────────────────────── audio (owner: src/audio) ───────────────────────
   audio: {

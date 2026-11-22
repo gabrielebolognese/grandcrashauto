@@ -1,0 +1,1392 @@
+/* Garage UI (owner: garage). Sunny pastel art-deco. Every class is prefixed `gar-`.
+   Theme variables fall back to our own values so the garage looks right with or without the global UI theme. */
+
+.gar-root {
+  --gar-coral: var(--c-coral, #ff7a6b);
+  --gar-coral-d: #ec5d4f;
+  --gar-peach: var(--c-peach, #ffb38a);
+  --gar-mint: var(--c-mint, #9ee0c8);
+  --gar-aqua: var(--c-aqua, #5cc8d6);
+  --gar-lilac: var(--c-lilac, #b8a6e8);
+  --gar-butter: var(--c-butter, #ffe39a);
+  --gar-cream: var(--c-cream, #fff4e0);
+  --gar-ink: var(--c-ink, #26304a);
+  --gar-ink2: rgba(38, 48, 74, 0.6);
+  --gar-gold: #c9974a;
+  --gar-gold-l: #ecd3a2;
+  --gar-panel: rgba(255, 250, 243, 0.94);
+  --gar-chipbg: #fffaf4;
+  --gar-line: rgba(38, 48, 74, 0.13);
+  --gar-ch: 44px;
+  --gar-gap: 6px;
+  --gar-fs: 13px;
+  --gar-pad: 8px;
+  --gar-font: var(--font-ui, 'Avenir Next', Avenir, 'Futura', 'Century Gothic', 'Segoe UI', Roboto, system-ui, sans-serif);
+  --gar-display: var(--font-display, 'Futura', 'Avenir Next', 'Century Gothic', 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif);
+  --gar-ease: cubic-bezier(0.2, 0.9, 0.25, 1);
+
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  font-family: var(--gar-font);
+  color: var(--gar-ink);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  visibility: visible;
+  transition: visibility 0s linear 0s;
+}
+.gar-root *,
+.gar-root *::before,
+.gar-root *::after {
+  box-sizing: border-box;
+}
+.gar-root.gar-hidden {
+  visibility: hidden;
+  transition: visibility 0s linear 0.42s;
+}
+.gar-root button {
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  margin: 0;
+}
+.gar-root button:focus-visible,
+.gar-root .gar-sl-track:focus-visible {
+  outline: 2.5px solid var(--gar-aqua);
+  outline-offset: 2px;
+}
+.gar-ico {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+
+/* ───────── stage (orbit input) ───────── */
+.gar-stage {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+}
+.gar-stage:active {
+  cursor: grabbing;
+}
+.gar-hidden .gar-stage {
+  pointer-events: none;
+}
+
+/* ───────── top bar ───────── */
+.gar-top {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+  pointer-events: none;
+  transition: transform 0.5s var(--gar-ease), opacity 0.35s;
+}
+.gar-hidden .gar-top {
+  transform: translateY(-130%);
+  opacity: 0;
+}
+.gar-tl,
+.gar-tr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+  min-width: 0;
+}
+.gar-iconbtn {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--gar-ink);
+  background: var(--gar-panel);
+  border: 1.5px solid var(--gar-gold-l);
+  box-shadow: 0 4px 14px rgba(80, 45, 90, 0.16), inset 0 0 0 2px rgba(255, 255, 255, 0.8);
+  transition: transform 0.15s, background 0.2s;
+}
+.gar-iconbtn:active {
+  transform: scale(0.92);
+}
+.gar-iconbtn.is-spin .gar-ico {
+  animation: gar-spin 0.5s var(--gar-ease);
+}
+@keyframes gar-spin {
+  from { transform: rotate(-200deg) scale(0.7); }
+  to { transform: none; }
+}
+.gar-title {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 44px;
+  padding: 2px 18px 3px 14px;
+  min-width: 0;
+  background: var(--gar-panel);
+  border: 1.5px solid var(--gar-gold-l);
+  border-radius: 22px;
+  box-shadow: 0 4px 14px rgba(80, 45, 90, 0.14), inset 0 0 0 2px rgba(255, 255, 255, 0.8);
+  line-height: 1.05;
+}
+.gar-kicker {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.34em;
+  color: var(--gar-gold);
+}
+.gar-carname {
+  font-family: var(--gar-display);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gar-drive {
+  position: relative;
+  overflow: hidden;
+  flex: none;
+  height: 48px;
+  margin-left: 4px;
+  padding: 0 16px 0 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 26px;
+  border: 2px solid #fff;
+  color: #fff;
+  font-family: var(--gar-display);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  background: linear-gradient(180deg, #ff958a 0%, #ff7262 52%, #ef5a4c 100%);
+  box-shadow: 0 0 0 2px var(--gar-coral), 0 8px 22px rgba(232, 87, 74, 0.42);
+  text-shadow: 0 1px 0 rgba(150, 40, 30, 0.35);
+  transition: transform 0.15s, box-shadow 0.2s;
+}
+.gar-drive .gar-ico {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2.6;
+}
+.gar-drive::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -70%;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  transform: skewX(-20deg);
+  animation: gar-shine 4s ease-in-out 1.2s infinite;
+  pointer-events: none;
+}
+@keyframes gar-shine {
+  0%, 70% { left: -70%; }
+  100% { left: 130%; }
+}
+.gar-drive:active {
+  transform: scale(0.95);
+}
+
+/* ───────── hint ───────── */
+.gar-hint {
+  position: absolute;
+  left: 50%;
+  top: max(64px, calc(env(safe-area-inset-top) + 58px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: rgba(38, 48, 74, 0.55);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: opacity 0.6s, transform 0.6s var(--gar-ease);
+}
+.gar-hint i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--gar-butter);
+}
+.gar-hint.is-gone,
+.gar-hidden .gar-hint {
+  opacity: 0;
+  transform: translate(-50%, -8px);
+}
+
+/* ───────── dock ───────── */
+.gar-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0 max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  pointer-events: none;
+  transition: transform 0.55s var(--gar-ease) 0.04s, opacity 0.35s;
+}
+.gar-hidden .gar-dock {
+  transform: translateY(115%);
+  opacity: 0;
+}
+.gar-panel,
+.gar-tabs {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 1060px;
+}
+.gar-panel {
+  position: relative;
+  height: calc(var(--gar-ch) * 2 + var(--gar-gap) + var(--gar-pad) * 2);
+  background: var(--gar-panel);
+  border: 1.5px solid var(--gar-gold-l);
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(80, 45, 90, 0.18), inset 0 0 0 3px rgba(255, 255, 255, 0.6);
+  overflow: hidden;
+  transition: height 0.38s var(--gar-ease), opacity 0.25s, margin 0.38s var(--gar-ease), border-width 0.38s;
+}
+.gar-collapsed .gar-panel {
+  height: 0;
+  opacity: 0;
+  border-width: 0;
+  margin-bottom: -6px;
+}
+/* art-deco ziggurat ornament on the top edge */
+.gar-deco {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 64px;
+  height: 7px;
+  transform: translateX(-50%);
+  background: linear-gradient(var(--gar-gold-l), var(--gar-gold-l)) center 0 / 64px 2px no-repeat,
+    linear-gradient(var(--gar-gold-l), var(--gar-gold-l)) center 3px / 40px 2px no-repeat,
+    linear-gradient(var(--gar-gold-l), var(--gar-gold-l)) center 6px / 16px 1.5px no-repeat;
+  pointer-events: none;
+}
+.gar-page {
+  position: absolute;
+  inset: var(--gar-pad) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gar-gap);
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.2s, transform 0.3s var(--gar-ease), visibility 0s linear 0.3s;
+}
+.gar-page.is-active {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  visibility: visible;
+  transition: opacity 0.25s 0.04s, transform 0.35s var(--gar-ease) 0.04s, visibility 0s;
+}
+.gar-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--gar-ch);
+  padding: 0 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding: 0 14px;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 10px, #000 calc(100% - 22px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 10px, #000 calc(100% - 22px), transparent 100%);
+}
+.gar-row::-webkit-scrollbar {
+  display: none;
+}
+.gar-row::after {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 1px;
+}
+.gar-row-tall {
+  height: calc(var(--gar-ch) * 2 + var(--gar-gap));
+}
+.gar-chips,
+.gar-ctx {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.gar-ctx[hidden],
+.gar-chips[hidden] {
+  display: none;
+}
+.gar-glabel {
+  flex: none;
+  max-width: 70px;
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gar-ink2);
+}
+.gar-note {
+  flex: none;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--gar-ink2);
+  white-space: nowrap;
+}
+.gar-sep {
+  flex: none;
+  width: 1.5px;
+  height: 26px;
+  margin: 0 3px;
+  border-radius: 1px;
+  background: linear-gradient(var(--gar-gold-l), var(--gar-gold-l)) center / 100% 100%;
+  opacity: 0.9;
+}
+
+/* chips */
+.gar-chip {
+  flex: none;
+  height: var(--gar-ch);
+  min-width: 44px;
+  padding: 0 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 13px;
+  border: 1.5px solid var(--gar-line);
+  background: var(--gar-chipbg);
+  color: var(--gar-ink);
+  font-size: var(--gar-fs);
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background 0.18s, color 0.18s, border-color 0.18s, box-shadow 0.2s, transform 0.12s;
+}
+.gar-chip:active {
+  transform: scale(0.95);
+}
+.gar-chip.is-on {
+  background: var(--gar-coral);
+  border-color: var(--gar-coral);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(255, 122, 107, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  animation: gar-pop 0.28s var(--gar-ease);
+}
+@keyframes gar-pop {
+  0% { transform: scale(0.92); }
+  60% { transform: scale(1.04); }
+  100% { transform: none; }
+}
+.gar-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.gar-sq {
+  width: 44px;
+  padding: 0;
+  font-family: var(--gar-display);
+  font-weight: 800;
+  font-size: 14px;
+}
+/* toggle chip with a tiny switch */
+.gar-toggle .gar-switch {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 9px;
+  background: rgba(38, 48, 74, 0.18);
+  transition: background 0.2s;
+}
+.gar-toggle .gar-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.22s var(--gar-ease);
+}
+.gar-toggle.is-on .gar-switch {
+  background: rgba(255, 255, 255, 0.45);
+}
+.gar-toggle.is-on .gar-switch::after {
+  transform: translateX(12px);
+}
+.gar-kitico {
+  width: 40px;
+  height: 24px;
+  flex: none;
+}
+.gar-kitchip {
+  padding: 0 12px 0 9px;
+}
+.gar-stripeico {
+  width: 15px;
+  height: 22px;
+  flex: none;
+}
+
+/* colour dots used by target chips / segments */
+.gar-dot {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--sw, #ccc);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--gar-line);
+}
+.gar-dot.is-off {
+  background: repeating-linear-gradient(135deg, #fff 0 3px, #e4dfe9 3px 6px);
+}
+.gar-target.is-sel,
+.gar-segbtn.is-on {
+  border-color: var(--gar-coral);
+  box-shadow: 0 0 0 1.5px var(--gar-coral) inset, 0 3px 10px rgba(255, 122, 107, 0.22);
+  color: var(--gar-coral-d);
+}
+
+/* segmented control */
+.gar-seg {
+  flex: none;
+  display: flex;
+  height: var(--gar-ch);
+  padding: 3px;
+  gap: 3px;
+  border-radius: 15px;
+  background: rgba(38, 48, 74, 0.07);
+}
+.gar-segbtn {
+  height: 100%;
+  padding: 0 12px 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 12px;
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--gar-ink);
+  font-size: var(--gar-fs);
+  font-weight: 700;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+.gar-segbtn.is-on {
+  background: #fff;
+}
+
+/* paint finish previews */
+.gar-fin {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--sw, #e8574a);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95);
+}
+.gar-fin-gloss {
+  background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.95) 0 14%, transparent 30%), var(--sw);
+}
+.gar-fin-metallic {
+  background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.9) 0 10%, transparent 26%),
+    repeating-conic-gradient(rgba(255, 255, 255, 0.25) 0 6deg, rgba(0, 0, 0, 0.12) 6deg 14deg), var(--sw);
+}
+.gar-fin-matte {
+  background: var(--sw);
+  filter: saturate(0.75) brightness(0.92);
+}
+.gar-fin-pearl {
+  background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.95) 0 12%, transparent 30%),
+    linear-gradient(135deg, rgba(255, 220, 245, 0.55), rgba(200, 255, 245, 0.35) 50%, transparent), var(--sw);
+}
+.gar-fin-shift {
+  background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.85) 0 10%, transparent 26%),
+    linear-gradient(135deg, var(--sw) 25%, var(--sw2, #6a4cff) 80%);
+}
+
+/* tyre profile icons */
+.gar-tyre {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  background: radial-gradient(circle, currentColor 0 30%, transparent 32%);
+}
+.gar-tyre-low { border-width: 2px; }
+.gar-tyre-mid { border-width: 3.5px; }
+.gar-tyre-high { border-width: 5px; background: radial-gradient(circle, currentColor 0 26%, transparent 28%); }
+
+/* rims */
+.gar-rim {
+  padding: 0 12px 0 6px;
+  --rim: #c9ccd2;
+}
+.gar-rimico {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  color: color-mix(in srgb, var(--rim) 70%, #4a4f5c);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.15));
+}
+.gar-chips[style*='--rim'] .gar-rimico {
+  color: color-mix(in srgb, var(--rim) 72%, #3d4250);
+}
+.gar-rim.is-on .gar-rimico {
+  color: #fff;
+  --gar-chipbg: var(--gar-coral);
+}
+
+/* palette rows */
+.gar-palette {
+  gap: 6px;
+}
+.gar-rowlabel {
+  position: sticky;
+  left: -14px;
+  z-index: 2;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 92px;
+  height: 100%;
+  margin-left: -14px;
+  padding: 0 6px 0 16px;
+  background: linear-gradient(90deg, var(--gar-panel) 82%, rgba(255, 250, 243, 0));
+  line-height: 1.15;
+}
+.gar-rowlabel small {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--gar-ink2);
+  white-space: nowrap;
+}
+.gar-rowlabel b {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gar-swatches {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.gar-swatch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  color: var(--gar-ink);
+}
+.gar-swatch::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--sw, transparent);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 4.5px var(--gar-line), 0 3px 6px rgba(40, 30, 60, 0.18);
+  transition: transform 0.18s var(--gar-ease), box-shadow 0.18s;
+}
+.gar-swatch:active::before {
+  transform: scale(0.88);
+}
+.gar-swatch.is-on::before {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 5.5px var(--gar-coral), 0 4px 10px rgba(255, 122, 107, 0.35);
+}
+.gar-swatch.is-on::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 8px;
+  margin-top: -3px;
+  border-left: 3px solid #fff;
+  border-bottom: 3px solid #fff;
+  transform: rotate(-45deg);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+}
+.gar-swatch.is-light.is-on::after {
+  border-color: var(--gar-ink);
+  filter: none;
+}
+.gar-swatch-off::before {
+  background: #fff;
+}
+.gar-swatch-off .gar-ico {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  color: var(--gar-ink2);
+}
+.gar-swatch-off.is-on::after {
+  display: none;
+}
+.gar-swatch-off.is-on .gar-ico {
+  color: var(--gar-coral);
+}
+.gar-custom {
+  cursor: pointer;
+  margin-right: 4px;
+}
+.gar-custom::before {
+  background: conic-gradient(#ff6b6b, #ffd36b, #8be36b, #6be3d5, #6b9bff, #c56bff, #ff6bb5, #ff6b6b);
+}
+.gar-custom.is-on::before {
+  background: radial-gradient(circle, var(--sw) 0 52%, transparent 54%), conic-gradient(#ff6b6b, #ffd36b, #8be36b, #6be3d5, #6b9bff, #c56bff, #ff6bb5, #ff6b6b);
+}
+.gar-custom .gar-ico {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  color: #fff;
+  stroke-width: 3;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.45));
+}
+.gar-custom.is-on .gar-ico {
+  display: none;
+}
+.gar-colorinput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+}
+
+/* sliders */
+.gar-slider {
+  flex: none;
+  width: 260px;
+  height: var(--gar-ch);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.gar-slider-wide {
+  width: min(460px, 52vw);
+}
+.gar-slider-compact {
+  width: 190px;
+}
+.gar-sl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 12px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--gar-ink2);
+  line-height: 1;
+}
+.gar-sl-head b {
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--gar-ink);
+  font-weight: 750;
+}
+.gar-sl-track {
+  position: relative;
+  height: 30px;
+  touch-action: none;
+  cursor: pointer;
+  border-radius: 15px;
+}
+.gar-sl-rail {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 50%;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 3px;
+  background: rgba(38, 48, 74, 0.12);
+  box-shadow: inset 0 1px 2px rgba(38, 48, 74, 0.12);
+}
+.gar-sl-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--gar-peach), var(--gar-coral));
+}
+.gar-sl-mark {
+  position: absolute;
+  top: -5px;
+  width: 2px;
+  height: 16px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--gar-gold);
+}
+.gar-sl-thumb {
+  position: absolute;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--gar-coral);
+  box-shadow: 0 2px 8px rgba(232, 87, 74, 0.35);
+  transition: box-shadow 0.15s;
+  pointer-events: none;
+}
+.gar-slider.is-drag .gar-sl-thumb {
+  box-shadow: 0 0 0 7px rgba(255, 122, 107, 0.2), 0 2px 8px rgba(232, 87, 74, 0.35);
+}
+
+/* stats */
+.gar-stats {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+}
+.gar-stat {
+  display: grid;
+  grid-template-columns: 92px 1fr 66px;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gar-ink2);
+}
+.gar-stat b {
+  text-align: right;
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--gar-ink);
+  font-variant-numeric: tabular-nums;
+}
+.gar-bar {
+  position: relative;
+  height: 9px;
+  border-radius: 5px;
+  background: rgba(38, 48, 74, 0.1);
+  overflow: hidden;
+}
+.gar-bar i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 5px;
+  transition: width 0.55s var(--gar-ease);
+}
+.gar-bar-fill {
+  background: linear-gradient(90deg, var(--gar-aqua), #4fb6c9);
+}
+.gar-bar-fill.is-up {
+  background: linear-gradient(90deg, var(--gar-aqua) 0%, var(--gar-mint) 50%, var(--gar-coral) 100%);
+}
+.gar-bar-base {
+  background: rgba(38, 48, 74, 0.16);
+  z-index: 1;
+  mix-blend-mode: multiply;
+}
+.gar-stats-mini {
+  gap: 3px;
+  margin-top: 5px;
+}
+.gar-stats-mini .gar-stat {
+  grid-template-columns: 62px 1fr;
+  gap: 6px;
+  font-size: 7.5px;
+}
+.gar-stats-mini .gar-stat b {
+  display: none;
+}
+.gar-stats-mini .gar-bar {
+  height: 4px;
+}
+
+/* car model cards */
+.gar-models {
+  gap: 9px;
+}
+.gar-model {
+  position: relative;
+  flex: none;
+  width: 212px;
+  height: 100%;
+  padding: 7px 10px 7px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  border-radius: 16px;
+  border: 1.5px solid var(--gar-line);
+  background: var(--gar-chipbg);
+  color: var(--gar-ink);
+  transition: border-color 0.2s, box-shadow 0.25s, transform 0.15s, background 0.2s;
+}
+.gar-model:active {
+  transform: scale(0.97);
+}
+.gar-model.is-on {
+  border-color: var(--gar-coral);
+  background: #fff;
+  box-shadow: 0 0 0 1.5px var(--gar-coral) inset, 0 6px 16px rgba(255, 122, 107, 0.25);
+}
+.gar-model-art {
+  flex: none;
+  width: 78px;
+  display: grid;
+  place-items: center;
+}
+.gar-sil {
+  width: 78px;
+  height: 30px;
+  overflow: visible;
+}
+.gar-sil-body {
+  fill: var(--sw, #c9c3d6);
+  stroke: rgba(38, 48, 74, 0.45);
+  stroke-width: 1;
+  transition: fill 0.35s;
+}
+.gar-sil-glass {
+  fill: #2b3550;
+  opacity: 0.8;
+}
+.gar-sil-tyre {
+  fill: #2a2d36;
+}
+.gar-sil-rim {
+  fill: #d9dbe1;
+}
+.gar-sil-shadow {
+  fill: rgba(38, 48, 74, 0.15);
+}
+.gar-model-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gar-model-text b {
+  font-family: var(--gar-display);
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gar-model-text small {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--gar-ink2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.gar-model-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--gar-coral);
+  color: #fff;
+  transform: scale(0);
+  transition: transform 0.25s var(--gar-ease);
+}
+.gar-model-check .gar-ico {
+  width: 13px;
+  height: 13px;
+  stroke-width: 3.2;
+}
+.gar-model.is-on .gar-model-check {
+  transform: scale(1);
+}
+
+/* performance */
+.gar-perf {
+  flex-direction: row !important;
+  align-items: stretch;
+  gap: 14px !important;
+  padding: 0 14px;
+}
+.gar-perfgrid {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: var(--gar-ch) var(--gar-ch);
+  gap: var(--gar-gap) 14px;
+}
+.gar-perfctl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gar-perflabel {
+  width: 56px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gar-ink2);
+}
+.gar-perfctl .gar-chips {
+  gap: 4px;
+}
+.gar-perfchip {
+  padding: 0 8px;
+  gap: 5px;
+  font-size: 11.5px;
+  border-radius: 11px;
+  flex-direction: column;
+  min-width: 52px;
+}
+.gar-pips {
+  display: flex;
+  gap: 2px;
+}
+.gar-pips i {
+  width: 6px;
+  height: 4px;
+  border-radius: 1px;
+  background: rgba(38, 48, 74, 0.18);
+}
+.gar-pips-0 i:nth-child(-n + 1),
+.gar-pips-1 i:nth-child(-n + 2),
+.gar-pips-2 i:nth-child(-n + 3) {
+  background: var(--gar-aqua);
+}
+.gar-perfchip.is-on .gar-pips i {
+  background: rgba(255, 255, 255, 0.4);
+}
+.gar-perfchip.is-on .gar-pips-0 i:nth-child(-n + 1),
+.gar-perfchip.is-on .gar-pips-1 i:nth-child(-n + 2),
+.gar-perfchip.is-on .gar-pips-2 i:nth-child(-n + 3) {
+  background: #fff;
+}
+.gar-perf .gar-stats {
+  flex: 1;
+  min-width: 230px;
+  padding: 4px 12px;
+  border-radius: 14px;
+  background: rgba(38, 48, 74, 0.045);
+  border: 1px solid var(--gar-line);
+}
+
+/* save slots */
+.gar-slots {
+  gap: 9px;
+}
+.gar-slot {
+  flex: none;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 8px;
+  border-radius: 14px;
+  border: 1.5px solid var(--gar-line);
+  background: var(--gar-chipbg);
+  transition: border-color 0.2s, box-shadow 0.3s;
+}
+.gar-slot.is-flash {
+  animation: gar-flash 0.9s var(--gar-ease);
+}
+@keyframes gar-flash {
+  0% { box-shadow: 0 0 0 0 rgba(92, 200, 214, 0.75); border-color: var(--gar-aqua); }
+  100% { box-shadow: 0 0 0 10px rgba(92, 200, 214, 0); }
+}
+.gar-slot-chip {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--c1, #eee) 0 55%, var(--c2, var(--c1, #eee)) 55%);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--gar-line);
+}
+.gar-slot.is-empty .gar-slot-chip {
+  background: repeating-linear-gradient(135deg, #fff 0 4px, #ece7ef 4px 8px);
+}
+.gar-slot-text {
+  display: flex;
+  flex-direction: column;
+  width: 104px;
+  margin: 0 2px 0 6px;
+  line-height: 1.15;
+}
+.gar-slot-text b {
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gar-slot-text small {
+  font-size: 10px;
+  color: var(--gar-ink2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+.gar-slot.is-empty .gar-slot-text small {
+  font-family: inherit;
+  font-style: italic;
+}
+.gar-mini {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--gar-ink);
+  transition: background 0.18s, color 0.18s, transform 0.12s;
+}
+.gar-mini .gar-ico {
+  width: 19px;
+  height: 19px;
+}
+.gar-mini:active {
+  transform: scale(0.9);
+}
+.gar-mini:not(:disabled):hover {
+  background: rgba(38, 48, 74, 0.07);
+}
+.gar-mini:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+.gar-mini-save {
+  color: var(--gar-coral-d);
+}
+.gar-mini-clear.is-armed {
+  background: var(--gar-coral);
+  color: #fff;
+  animation: gar-pop 0.28s var(--gar-ease);
+}
+.gar-code {
+  flex: none;
+  max-width: 260px;
+  height: 34px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+  border: 1.5px dashed var(--gar-gold-l);
+  background: #fff;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--gar-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: all;
+  -webkit-user-select: all;
+}
+.gar-paste,
+.gar-plate-input {
+  flex: none;
+  height: 38px;
+  border-radius: 11px;
+  border: 1.5px solid var(--gar-line);
+  background: #fff;
+  color: var(--gar-ink);
+  font-size: 13px;
+  padding: 0 10px;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: manipulation;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.gar-paste {
+  width: 190px;
+}
+.gar-paste:focus,
+.gar-plate-input:focus {
+  border-color: var(--gar-aqua);
+  box-shadow: 0 0 0 3px rgba(92, 200, 214, 0.25);
+}
+.gar-paste.is-bad {
+  animation: gar-shake 0.45s;
+  border-color: var(--gar-coral);
+}
+@keyframes gar-shake {
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+.gar-copy.is-done,
+.gar-loadcode.is-done {
+  background: var(--gar-mint);
+  border-color: var(--gar-mint);
+  color: var(--gar-ink);
+}
+.gar-copy.is-bad {
+  background: var(--gar-butter);
+}
+
+/* licence plate */
+.gar-plate {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gar-plate-label {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gar-ink2);
+}
+.gar-plate-input {
+  width: 128px;
+  text-align: center;
+  font-family: var(--gar-display);
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  border: 2px solid var(--gar-ink);
+  background: linear-gradient(#fffdf6, #f6efdc);
+  box-shadow: inset 0 0 0 2px #fff;
+}
+
+/* ───────── tab bar ───────── */
+.gar-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 20px;
+  background: rgba(38, 48, 74, 0.86);
+  box-shadow: 0 8px 24px rgba(40, 25, 60, 0.28), inset 0 0 0 1.5px rgba(236, 211, 162, 0.45);
+}
+.gar-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 46px;
+  padding: 3px 2px 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+  border-radius: 15px;
+  background: transparent;
+  color: rgba(255, 244, 224, 0.72);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: background 0.22s, color 0.22s, transform 0.12s;
+}
+.gar-tab .gar-ico {
+  width: 21px;
+  height: 21px;
+  transition: transform 0.25s var(--gar-ease);
+}
+.gar-tab:active {
+  transform: scale(0.94);
+}
+.gar-tab.is-on {
+  color: var(--gar-ink);
+  background: linear-gradient(180deg, #fff6e8, #ffe2c8);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 0 0 1.5px var(--gar-gold-l);
+}
+.gar-tab.is-on .gar-ico {
+  color: var(--gar-coral-d);
+  transform: translateY(-1px) scale(1.06);
+}
+.gar-tl-short {
+  display: none;
+}
+.gar-tab span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.gar-collapsed .gar-tab.is-on {
+  background: rgba(255, 244, 224, 0.16);
+  color: #fff;
+  box-shadow: inset 0 0 0 1.5px rgba(236, 211, 162, 0.5);
+}
+.gar-collapsed .gar-tab.is-on .gar-ico {
+  color: #fff;
+}
+
+/* ───────── responsive ───────── */
+@media (max-width: 760px) {
+  .gar-tl-long {
+    display: none;
+  }
+  .gar-tl-short {
+    display: inline;
+  }
+}
+@media (max-width: 600px) {
+  .gar-title {
+    display: none;
+  }
+}
+@media (max-height: 360px) {
+  .gar-root {
+    --gar-ch: 42px;
+    --gar-pad: 6px;
+  }
+  .gar-tab {
+    height: 42px;
+  }
+  .gar-tab span {
+    font-size: 9px;
+  }
+}
+@media (min-width: 1000px) and (min-height: 620px) {
+  .gar-root {
+    --gar-ch: 50px;
+    --gar-gap: 8px;
+    --gar-fs: 14px;
+    --gar-pad: 10px;
+  }
+  .gar-tab {
+    height: 54px;
+    font-size: 11px;
+  }
+  .gar-tab .gar-ico {
+    width: 23px;
+    height: 23px;
+  }
+  .gar-iconbtn {
+    width: 48px;
+    height: 48px;
+  }
+  .gar-title {
+    height: 48px;
+  }
+  .gar-carname {
+    font-size: 19px;
+  }
+  .gar-drive {
+    height: 52px;
+    font-size: 17px;
+    padding: 0 18px 0 26px;
+  }
+  .gar-swatch {
+    width: 48px;
+    height: 48px;
+  }
+  .gar-model {
+    width: 236px;
+  }
+  .gar-sil {
+    width: 92px;
+    height: 36px;
+  }
+  .gar-model-art {
+    width: 92px;
+  }
+  .gar-stat {
+    font-size: 11px;
+  }
+  .gar-top {
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-left: max(18px, env(safe-area-inset-left));
+    padding-right: max(18px, env(safe-area-inset-right));
+  }
+  .gar-dock {
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .gar-chip:not(.is-on):not(:disabled):hover,
+  .gar-model:not(.is-on):hover {
+    border-color: rgba(255, 122, 107, 0.55);
+  }
+  .gar-tab:not(.is-on):hover {
+    color: #fff;
+    background: rgba(255, 244, 224, 0.1);
+  }
+  .gar-iconbtn:hover {
+    background: #fff;
+  }
+  .gar-drive:hover {
+    box-shadow: 0 0 0 2px var(--gar-coral), 0 10px 28px rgba(232, 87, 74, 0.55);
+  }
+  .gar-panel {
+    -webkit-backdrop-filter: blur(10px) saturate(1.2);
+    backdrop-filter: blur(10px) saturate(1.2);
+    background: rgba(255, 250, 243, 0.88);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gar-root *,
+  .gar-root *::before,
+  .gar-root *::after {
+    animation: none !important;
+    transition-duration: 0.01s !important;
+  }
+}

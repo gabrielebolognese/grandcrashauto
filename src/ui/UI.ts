@@ -1,54 +1,384 @@
+import './theme.css';
+import './ui.css';
+import { CONFIG } from '../config';
+import type { GameState } from '../core/events';
+import type { InputDevice } from '../core/Input';
+import { isMobileDevice } from '../core/Quality';
+import { toggleFullscreen } from '../game/Game';
 import type { GameContext, IUI } from '../game/contracts';
+import { DebugPanel } from './debug/DebugPanel';
+import { h, isTouchPrimary } from './dom';
+import { installGestureGuards } from './gestures';
+import type { ConfirmOpts, Screen, UIHost } from './host';
+import { Hud, Toasts } from './hud/Hud';
+import { fullscreenSupported, isFullscreen, TopBar } from './hud/TopBar';
+import { MenuNav } from './MenuNav';
+import { Fader, RotateOverlay, showFatal } from './overlays';
+import { BootScreen } from './screens/BootScreen';
+import { ConfirmDialog } from './screens/ConfirmDialog';
+import { CreditsScreen } from './screens/CreditsScreen';
+import { MainMenu } from './screens/MainMenu';
+import { PauseMenu } from './screens/PauseMenu';
+import { SettingsScreen } from './screens/SettingsScreen';
+import { TitleScreen } from './screens/TitleScreen';
+import { Tilt } from './touch/Tilt';
+import { TouchControls } from './touch/TouchControls';
+import { setWidgetSound } from './widgets';
 
-/** STUB — replaced by the UI module (HUD, minimap, menus, settings, touch controls, debug panel). */
-export class UI implements IUI {
+type SubScreen = { kind: 'settings' | 'credits'; parent: GameState };
+
+/**
+ * UI module (spec §9, §10, §13): loading/title, main & pause menus, settings, credits, HUD + minimap, touch
+ * controls, top bar (💥/↺), rotate overlay, reset fade, debug panel. Plain DOM + CSS inside #ui-root.
+ */
+export class UI implements IUI, UIHost {
   readonly name = 'ui';
-  private hud!: HTMLDivElement;
-  constructor(private ctx: GameContext) {}
+  readonly tilt = new Tilt();
+  readonly isMobile = isMobileDevice();
 
-  init(): void {
-    this.hud = document.createElement('div');
-    this.hud.style.cssText = 'position:fixed;right:12px;top:12px;color:#fff;font:600 18px system-ui;text-shadow:0 1px 3px #000;z-index:20';
-    document.body.appendChild(this.hud);
-    this.ctx.events.on('stateChanged', ({ to }) => {
-      if (to !== 'title') return;
-      document.getElementById('boot')!.style.display = 'none';
-      const tap = document.createElement('div');
-      tap.id = 'tap-to-start';
-      tap.textContent = 'Tap to start';
-      tap.style.cssText =
-        'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font:800 32px system-ui;color:#fff;text-shadow:0 2px 8px #000;z-index:50;pointer-events:auto';
-      tap.onclick = () => {
-        tap.remove();
-        this.ctx.game.titleDone();
-        this.ctx.game.play();
-      };
-      document.body.appendChild(tap);
-    });
+  private root!: HTMLElement;
+  private boot: BootScreen | null = null;
+  private title!: TitleScreen;
+  private menu!: MainMenu;
+  private pause!: PauseMenu;
+  private settings!: SettingsScreen;
+  private credits!: CreditsScreen;
+  private dialog!: ConfirmDialog;
+  private hud!: Hud;
+  private toasts!: Toasts;
+  private topbar!: TopBar;
+  private touch!: TouchControls;
+  private fader!: Fader;
+  private rotate!: RotateOverlay;
+  private debugPanel: DebugPanel | null = null;
+  private nav!: MenuNav;
+
+  private inited = false;
+  private state: GameState = 'boot';
+  private sub: SubScreen | null = null;
+  private device: InputDevice;
+  private seenInputDevice: InputDevice;
+  private touchOn = false;
+  private forceTouch = new URLSearchParams(location.search).has('touch');
+  private dragId: number | null = null;
+  private dragX = 0;
+  private dragY = 0;
+  private lastImpactVib = 0;
+  private rotateT = 0;
+  private padHeld = true;
+
+  constructor(readonly ctx: GameContext) {
+    this.device = isTouchPrimary() || this.isMobile ? 'touch' : 'keyboard';
+    this.seenInputDevice = 'keyboard';
   }
 
-  update(): void {
-    const s = this.ctx.vehicle.state;
-    const st = this.ctx.engine.stats;
-    this.hud.textContent = `${Math.round(s.speedKmh)} km/h · ${st.fps.toFixed(0)} fps · ${st.calls} calls`;
+  // ─────────────────────────────── IUI ───────────────────────────────
+  init(): void {
+    if (this.inited) return;
+    this.inited = true;
+    const { ctx } = this;
+    installGestureGuards();
+    setWidgetSound((k) => ctx.audio?.ui?.(k));
+    this.boot ??= new BootScreen();
+
+    let root = document.getElementById('ui-root');
+    if (!root) {
+      root = h('div', { id: 'ui-root' });
+      document.body.append(root);
+    }
+    this.root = root;
+    root.classList.toggle('is-mobile', this.isMobile);
+
+    this.nav = new MenuNav();
+    this.hud = new Hud(this);
+    this.toasts = new Toasts();
+    this.topbar = new TopBar(this);
+    this.touch = new TouchControls(this);
+    this.title = new TitleScreen(this, () => this.startFromTitle());
+    this.menu = new MainMenu(this);
+    this.pause = new PauseMenu(this);
+    this.settings = new SettingsScreen(this);
+    this.credits = new CreditsScreen(this);
+    this.dialog = new ConfirmDialog();
+    this.fader = new Fader();
+    this.rotate = new RotateOverlay(() => this.onRotateTap());
+    root.append(
+      this.hud.el,
+      this.touch.el,
+      this.topbar.el,
+      this.hud.fps,
+      this.toasts.el,
+      this.title.el,
+      this.menu.el,
+      this.pause.el,
+      this.settings.el,
+      this.credits.el,
+      this.dialog.el,
+      this.fader.el,
+      this.rotate.el,
+    );
+    if (ctx.debug) {
+      this.debugPanel = new DebugPanel(this);
+      root.append(this.debugPanel.el);
+    }
+
+    // ── events ──
+    ctx.events.on('stateChanged', ({ to }) => this.applyState(to));
+    ctx.events.on('settingsChanged', () => this.applySettings());
+    ctx.events.on('toast', ({ text, ms }) => this.toast(text, ms));
+    ctx.events.on('vibrate', ({ pattern }) => this.vibrate(pattern));
+    ctx.events.on('impact', ({ strength }) => {
+      if (this.state !== 'driving' || strength < CONFIG.ui.vibrateImpactMin) return;
+      const now = performance.now();
+      if (now - this.lastImpactVib < 140) return;
+      this.lastImpactVib = now;
+      this.vibrate(Math.round(12 + Math.min(1, strength) * 60));
+    });
+    ctx.events.on('explosion', () => this.vibrate([60, 40, 150]));
+
+    // ── title: any key / gamepad button also starts ──
+    window.addEventListener(
+      'keydown',
+      (e) => {
+        if (this.state === 'title' && !e.repeat && !e.metaKey && !e.altKey && e.key !== 'Tab') this.startFromTitle();
+      },
+      true,
+    );
+    // ── orbit drag on empty canvas while driving ──
+    this.bindOrbitDrag(ctx.engine.canvas);
+    // ── orientation / visibility ──
+    const onResize = () => this.checkRotate();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', () => window.setTimeout(onResize, 120));
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.state === 'driving') ctx.game.pause();
+    });
+
+    this.applySettings();
+    this.refreshTouchMode(true);
+    this.applyState(ctx.game.state);
   }
 
   setLoading(progress: number, label: string): void {
-    const bar = document.getElementById('boot-bar');
-    const lab = document.getElementById('boot-label');
-    if (bar) bar.style.width = `${Math.round(progress * 100)}%`;
-    if (lab) lab.textContent = label;
+    this.boot ??= new BootScreen();
+    this.boot.setLoading(progress, label);
   }
 
   fade(cb: () => void): void {
-    cb();
+    if (!this.fader) {
+      cb();
+      return;
+    }
+    this.fader.fade(cb);
   }
 
   showFatal(message: string): void {
-    const el = document.getElementById('fatal');
-    if (el) {
-      el.querySelector('p')!.textContent = message;
-      el.style.display = 'flex';
+    showFatal(message);
+  }
+
+  // ─────────────────────────────── UIHost ───────────────────────────────
+  touchMode(): boolean {
+    return this.forceTouch || this.device === 'touch';
+  }
+
+  openSettings(): void {
+    if (this.state !== 'menu' && this.state !== 'paused') return;
+    this.sub = { kind: 'settings', parent: this.state };
+    this.menu.setVisible(false);
+    this.pause.setVisible(false);
+    this.credits.setVisible(false);
+    this.settings.open(() => this.closeSub());
+    this.updateScope();
+  }
+
+  openCredits(): void {
+    if (this.state !== 'menu' && this.state !== 'paused') return;
+    this.sub = { kind: 'credits', parent: this.state };
+    this.menu.setVisible(false);
+    this.pause.setVisible(false);
+    this.settings.setVisible(false);
+    this.credits.open(() => this.closeSub());
+    this.updateScope();
+  }
+
+  closeSub(): void {
+    this.sub = null;
+    this.settings.setVisible(false);
+    this.credits.setVisible(false);
+    this.menu.setVisible(this.state === 'menu');
+    this.pause.setVisible(this.state === 'paused');
+    this.updateScope();
+  }
+
+  confirm(opts: ConfirmOpts): Promise<boolean> {
+    const p = this.dialog.ask(opts);
+    this.updateScope();
+    return p.finally(() => this.updateScope());
+  }
+
+  toast(text: string, ms?: number): void {
+    this.toasts?.show(text, ms ?? CONFIG.ui.toastMs);
+  }
+
+  vibrate(pattern: number | number[]): void {
+    if (!this.ctx.settings.values.vibration) return;
+    try {
+      navigator.vibrate?.(pattern);
+    } catch {
+      /* unsupported */
     }
+  }
+
+  // ─────────────────────────────── state & settings ───────────────────────────────
+  private applyState(to: GameState): void {
+    this.state = to;
+    this.root.dataset.state = to;
+    if (to !== 'boot') this.boot?.hide();
+    if (this.sub && this.sub.parent !== to) {
+      this.sub = null;
+      this.settings.setVisible(false);
+      this.credits.setVisible(false);
+    }
+    if (this.dialog.open && to !== 'menu' && to !== 'paused') this.dialog.back();
+    this.title.setVisible(to === 'title');
+    this.menu.setVisible(to === 'menu' && !this.sub);
+    this.pause.setVisible(to === 'paused' && !this.sub);
+    this.hud.setVisible(to === 'driving');
+    this.topbar.setVisible(to === 'driving');
+    this.dragId = null;
+    this.refreshTouchMode(true);
+    this.checkRotate();
+    this.updateScope();
+  }
+
+  private updateScope(): void {
+    let s: Screen | null = null;
+    if (this.dialog.open) s = this.dialog;
+    else if (this.sub) s = this.sub.kind === 'settings' ? this.settings : this.credits;
+    else if (this.state === 'menu') s = this.menu;
+    else if (this.state === 'paused') s = this.pause;
+    this.nav.setScope(s);
+  }
+
+  private applySettings(): void {
+    const s = this.ctx.settings.values;
+    this.root.style.setProperty('--cs', String(s.controlsScale));
+    this.root.style.setProperty('--co', String(s.controlsOpacity));
+    this.root.classList.toggle('lefty', s.leftHanded);
+    this.touch.applyMode();
+  }
+
+  /** Track the active input device; show touch controls only for touch play. */
+  private refreshTouchMode(force = false): void {
+    const ld = this.ctx.input.lastDevice;
+    if (ld !== this.seenInputDevice) {
+      this.seenInputDevice = ld;
+      this.device = ld;
+    }
+    const on = this.touchMode();
+    if (on !== this.touchOn || force) {
+      this.touchOn = on;
+      this.root.classList.toggle('is-touch', on);
+    }
+    this.touch.setVisible(this.state === 'driving' && on && !this.rotate.shown);
+  }
+
+  private checkRotate(): void {
+    const portrait = window.innerHeight > window.innerWidth * 1.08;
+    const show = portrait && (this.isMobile || this.device === 'touch') && this.state !== 'boot';
+    this.rotate.set(show);
+    if (show && this.state === 'driving') this.ctx.game.pause();
+    this.touch.setVisible(this.state === 'driving' && this.touchOn && !show);
+  }
+
+  private onRotateTap(): void {
+    if (fullscreenSupported() && !isFullscreen()) toggleFullscreen();
+    else lockLandscape();
+  }
+
+  private startFromTitle(): void {
+    if (this.state !== 'title') return;
+    const { ctx } = this;
+    if (this.touchMode() || this.isMobile) {
+      if (fullscreenSupported() && !isFullscreen()) toggleFullscreen();
+      else lockLandscape();
+    }
+    if (ctx.settings.values.steeringMode === 'tilt' && this.tilt.permission === 'unknown') void this.tilt.request();
+    try {
+      ctx.audio?.ui?.('confirm');
+    } catch {
+      /* audio not ready */
+    }
+    ctx.game.titleDone();
+  }
+
+  private bindOrbitDrag(cv: HTMLCanvasElement): void {
+    cv.addEventListener('pointerdown', (e) => {
+      if (this.state !== 'driving' || this.dragId !== null) return;
+      if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return;
+      this.dragId = e.pointerId;
+      this.dragX = e.clientX;
+      this.dragY = e.clientY;
+      try {
+        cv.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== this.dragId) return;
+      const dx = e.clientX - this.dragX;
+      const dy = e.clientY - this.dragY;
+      this.dragX = e.clientX;
+      this.dragY = e.clientY;
+      if ((dx || dy) && this.state === 'driving') {
+        const k = CONFIG.ui.orbitDragScale;
+        this.ctx.cameraRig.orbitDrag?.(dx * k, dy * k);
+      }
+    });
+    const end = (e: PointerEvent) => {
+      if (e.pointerId === this.dragId) this.dragId = null;
+    };
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+    cv.addEventListener('lostpointercapture', end);
+  }
+
+  // ─────────────────────────────── per frame ───────────────────────────────
+  update(dt: number): void {
+    if (!this.inited) return;
+    const st = this.state;
+    this.refreshTouchMode();
+    this.rotateT -= dt;
+    if (this.rotateT <= 0) {
+      this.rotateT = 0.5;
+      this.checkRotate();
+    }
+    this.nav.update(dt);
+    if (st === 'title') this.pollTitlePad();
+    if (st === 'driving') {
+      this.hud.update(dt);
+      this.topbar.update(dt);
+      this.touch.update(dt);
+    }
+    this.hud.updateFps(dt);
+    this.debugPanel?.update(dt);
+  }
+
+  private pollTitlePad(): void {
+    const pads = navigator.getGamepads?.() ?? [];
+    let any = false;
+    for (const g of pads) if (g && g.connected && g.buttons.some((b) => b.pressed)) any = true;
+    if (any && !this.padHeld) this.startFromTitle();
+    this.padHeld = any;
+  }
+}
+
+function lockLandscape(): void {
+  try {
+    const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+    o?.lock?.('landscape').catch(() => {});
+  } catch {
+    /* unsupported */
   }
 }
