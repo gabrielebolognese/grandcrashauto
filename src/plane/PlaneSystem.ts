@@ -1662,8 +1662,8 @@ export class PlaneSystem implements IPlaneSystem {
       this.camRestT = 0;
       this.preferPiece = null;
     }
-    this.camPiece = best ?? cur;
-    return this.camPiece;
+    this.camPiece = best ?? cur ?? this.camPiece; // keep the last one (its mesh may outlive its body)
+    return best ?? cur;
   }
 
   /** Distance from `p` to the farthest other big piece (framing both halves after a middle split). */
@@ -1706,6 +1706,10 @@ export class PlaneSystem implements IPlaneSystem {
         if (this.simTime - this.middleSplitT < 8) size = Math.max(size, this.spreadAround(focus) * 1.1, visual.dims.length * 0.8);
         tg.size = size;
         this.pieceVelocity(focus, tg.velocity);
+      } else if (this.camPiece && this.camPiece.object.parent) {
+        // every piece was frozen/removed by the breakup: stay on the last followed wreck
+        tg.object = this.camPiece.object;
+        tg.velocity.set(0, 0, 0);
       } else {
         tg.object = visual.root;
         tg.size = visual.dims.length;
@@ -1738,15 +1742,27 @@ export class PlaneSystem implements IPlaneSystem {
     const car = ctx.vehicle;
     if (!car.active || car.state.exploded || car.state.speedKmh > CONFIG.planes.boardMaxKmh) return;
     const cp = car.state.position;
-    let best = CONFIG.planes.boardRadius;
+    let best = Infinity;
     for (const rec of this.parked.values()) {
       if (rec.occupied) continue;
       const root = rec.visual.root;
-      _v.copy(rec.visual.boardPoint).applyQuaternion(root.quaternion).add(root.position);
-      const d = Math.hypot(_v.x - cp.x, _v.z - cp.z);
-      if (d < best) {
-        best = d;
-        this.boardCandidate = { type: rec.type, name: rec.visual.name };
+      const bp = rec.visual.boardPoint;
+      const dims = rec.visual.dims;
+      // Big planes: the left door often faces the jet bridge / terminal, so accept the door point on EITHER side and a
+      // spot in front of the nose, with a radius that grows with the plane (lead fix: user couldn't board airliner/jumbo).
+      const reach = Math.max(CONFIG.planes.boardRadius, dims.span * 0.22);
+      const spots: [number, number, number][] = [
+        [bp.x, bp.y, bp.z],
+        [-bp.x, bp.y, bp.z],
+        [0, bp.y, dims.length * 0.5 + 5],
+      ];
+      for (const [x, y, z] of spots) {
+        _v.set(x, y, z).applyQuaternion(root.quaternion).add(root.position);
+        const d = Math.hypot(_v.x - cp.x, _v.z - cp.z);
+        if (d < reach && d < best) {
+          best = d;
+          this.boardCandidate = { type: rec.type, name: rec.visual.name };
+        }
       }
     }
   }
