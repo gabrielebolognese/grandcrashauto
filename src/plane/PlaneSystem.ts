@@ -1113,6 +1113,7 @@ export class PlaneSystem implements IPlaneSystem {
     const cfg = this.cfg;
     const gear = this.gear;
     const visual = this.visual;
+    if (!body && this.split) this.updateEngulfAfterSplit(dt);
     if (!body || !model || !cfg || !gear || !visual) return;
     const { ctx } = this;
     if (!ctx.physics.world.bodies.contains(body.handle)) {
@@ -1339,7 +1340,7 @@ export class PlaneSystem implements IPlaneSystem {
     if (this.tailLost) {
       this.tailT += dt;
       this.updateTailFire(visual);
-      if (!this.onGround && !this.crashed && this.tailT >= this.tailExplodeAt) {
+      if (CONFIG.planes.engulf.tailExplodes && !this.onGround && !this.crashed && this.tailT >= this.tailExplodeAt) {
         this.explode();
         return;
       }
@@ -1901,6 +1902,26 @@ export class PlaneSystem implements IPlaneSystem {
   }
 
   /** Returns true if the intact body is gone (structural failure) and the caller must stop this step. */
+  /** After the airframe cracked (stage 2), the burning halves keep coming apart in the air — still no explosion. */
+  private updateEngulfAfterSplit(dt: number): void {
+    const visual = this.visual;
+    const tracked = this.tracked;
+    if (!visual || !tracked || this.engulfStage < 1 || this.engulfStage >= 3) return;
+    const E = CONFIG.planes.engulf;
+    this.engulf = Math.min(1.05, this.engulf + (E.selfSustain * 2 * dt) / E.secondsToFull);
+    const g = this.engulf;
+    const r = Math.max(1, visual.dims.span * 0.05);
+    for (const t of this.engulfTrails) t.setIntensity(0.7 + 0.3 * g, 1, r * (0.7 + 1.3 * g));
+    if (g < 1) return;
+    this.engulfStage = 3;
+    const ids = visual.joints.map((j) => j.id).filter((id) => !tracked.brokenJoints.has(id) && !/gear/i.test(id));
+    try {
+      this.ctx.breakup.breakJoints(tracked, ids);
+    } catch (err) {
+      reportError('[planes] structural failure failed', err);
+    }
+  }
+
   private updateEngulf(dt: number): boolean {
     const { ctx } = this;
     const visual = this.visual;
@@ -1915,6 +1936,8 @@ export class PlaneSystem implements IPlaneSystem {
       if (e.spread) spread++;
     }
     let drive = burning + spread * E.spreadBonus - 1; // one unspread engine fire alone never engulfs
+    // the fire spreading forward from a lost tail engulfs the airframe too
+    if (this.tailLost && this.tailT >= E.tailDelay) drive = Math.max(drive, E.tailDrive);
     // Once the airframe itself is burning it keeps going even after the burning engines tore off.
     if (this.engulfStage >= 1) drive = Math.max(drive, this.engulfStage >= 2 ? E.selfSustain * 2 : E.selfSustain);
     if (drive > 0) this.engulf = Math.min(1.05, this.engulf + (drive * dt) / E.secondsToFull);
@@ -1928,7 +1951,7 @@ export class PlaneSystem implements IPlaneSystem {
     // Stage 1: flames engulf wings + fuselage.
     if (this.engulfStage < 1 && g >= E.stage1) {
       this.engulfStage = 1;
-      for (const name of ['fuselageCenter', 'wingL1', 'wingR1', 'fuselageRear']) {
+      for (const name of this.tailLost ? ['wingL1', 'wingR1'] : ['fuselageCenter', 'wingL1', 'wingR1', 'fuselageRear']) {
         const part = visual.partByName[name];
         if (!part || this.lostParts.has(name) || !ctx.fx.attachTrail) continue;
         this.engulfTrails.push(ctx.fx.attachTrail(part.object, new THREE.Vector3(0, part.halfExtents.y * 0.6, 0), { fire: 0.8, smoke: 1, size: r * 0.7 }));
@@ -1964,9 +1987,13 @@ export class PlaneSystem implements IPlaneSystem {
         }
         if (best && bestN >= 3) ids.push(best);
       }
+      // tail fire: the burnt-through fuselage cracks in two
+      if (this.tailLost) for (const id of visual.breakModes.middle) if (!this.tracked!.brokenJoints.has(id)) ids.push(id);
+      const pops = this.engines.some((e) => e.st.status === 'fire');
       if (ids.length) {
         try {
-          ctx.breakup.breakJoints(this.tracked, ids, { center: this.state.position.clone(), energy: this.blastEnergy(0.02), kind: 'engine' });
+          if (pops) ctx.breakup.breakJoints(this.tracked, ids, { center: this.state.position.clone(), energy: this.blastEnergy(0.02), kind: 'engine' });
+          else ctx.breakup.breakJoints(this.tracked, ids); // no blast, no kick: it just comes apart
         } catch (err) {
           reportError('[planes] engulf dismantle failed', err);
         }

@@ -1099,7 +1099,9 @@ export const CONFIG = {
   planes: {
     airDensity: 1.225,
     // Fire escalation (user idea): with 2+ burning engines (or a spread fire) the airframe engulfs, then comes apart.
-    engulf: { secondsToFull: 26, spreadBonus: 0.6, stage1: 0.3, stage2: 0.62, flameGrow: 1.6, selfSustain: 0.8 },
+    engulf: { secondsToFull: 26, spreadBonus: 0.6, stage1: 0.3, stage2: 0.62, flameGrow: 1.6, selfSustain: 0.8,
+        // Tail lost (user feedback): the tail fire feeds the escalation and the plane slowly comes apart — no final explosion.
+        tailDelay: 3, tailDrive: 1.0, tailExplodes: false },
     // Crippled fall (user feedback): doomed planes lose lift and gravity ramps up so they accelerate into the ground.
     fall: { startSinkMs: 4, rampS: 6, liftLoss: 0.85, maxGravityScale: 1.7 },
     // Plane bodies fly with real gravity (gravityScale = gravity / |physics.gravity|) even though the arcade world uses -14.

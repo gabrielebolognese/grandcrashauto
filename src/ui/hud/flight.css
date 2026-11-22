@@ -654,3 +654,5 @@
 .switch-part-btn { animation: none; background: linear-gradient(180deg, #ff9784, #ff7a6b); box-shadow: 0 3px 0 #c24a3e, 0 6px 16px rgba(194, 74, 62, .35); }
 .switch-part-btn:not(.visible) { display: none !important; }
 .switch-part-btn .pb-key { margin-left: 4px; opacity: .8; font-size: 10px; }
+/* Switch-part sits below the caution banner (both are top-centre). */
+.switch-part-btn { top: calc(env(safe-area-inset-top, 0px) + 104px); }
