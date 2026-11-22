@@ -135,8 +135,9 @@ export class Assembly {
   ghostT = 0;
   age = 0;
   removed = false;
-  /** Set when we deliberately kicked this body this step (blast / secondary) → the energy guard lets it pass. */
-  kicked = false;
+  /** Decaying max of recent speeds (energy guard). */
+  recentSpeed = 0;
+  readonly recentVel = new THREE.Vector3();
   /** Spin sign for the severed-wing autorotation helper. */
   spinSign = 1;
 

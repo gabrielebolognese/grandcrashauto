@@ -123,48 +123,50 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
       if (y > maxY) maxY = y;
     }
   }
-  // colours for provoking vertices: vertex (i, j) with i ≥ 1 provokes T1 of cell (i-1, j) and T2 of cell (i-1, j-1)
+  // per-CELL colours: both triangles of cell (i, j) use vertex c = (i, j+1) as their provoking vertex
   const latticeX = Math.round(x0 / cell);
   const latticeZ = Math.round(z0 / cell);
-  for (let j = 0; j <= N; j++) {
-    for (let i = 1; i <= N; i++) {
-      let ny = 0;
-      let cnt = 0;
-      if (j < N) {
-        // T1 of cell (i-1, j): a(i-1,j) c(i-1,j+1) b(i,j)
-        const ha = hAt(i - 1, j);
-        const gx = (hAt(i, j) - ha) / cell;
-        const gz = (hAt(i - 1, j + 1) - ha) / cell;
-        ny += 1 / Math.sqrt(1 + gx * gx + gz * gz);
-        cnt++;
-      }
-      if (j > 0) {
-        // T2 of cell (i-1, j-1): b(i,j-1) c(i-1,j) d(i,j)
-        const hd = hAt(i, j);
-        const gx = (hd - hAt(i - 1, j)) / cell;
-        const gz = (hd - hAt(i, j - 1)) / cell;
-        ny += 1 / Math.sqrt(1 + gx * gx + gz * gz);
-        cnt++;
-      }
-      ny /= cnt;
-      const v = j * V + i;
-      INFO.h = hAt(i, j);
-      INFO.coast = coast[v];
-      INFO.cliff = cliff[v];
-      INFO.mtn = mtn[v];
-      INFO.flat = flat[v];
-      INFO.city = city[v];
-      INFO.lake = lake[v];
-      INFO.lakeR = lakeR[v];
-      INFO.zone = zone[v];
-      INFO.dune = dune[v];
+  const cellCol = new Uint8Array(N * N * 3);
+  const cellSnow = new Uint8Array(N * N * 2);
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const ha = hAt(i, j);
+      const hb = hAt(i + 1, j);
+      const hc = hAt(i, j + 1);
+      const hd = hAt(i + 1, j + 1);
+      let gx = (hb - ha) / cell;
+      let gz = (hc - ha) / cell;
+      let ny = 1 / Math.sqrt(1 + gx * gx + gz * gz);
+      gx = (hd - hc) / cell;
+      gz = (hd - hb) / cell;
+      ny = (ny + 1 / Math.sqrt(1 + gx * gx + gz * gz)) * 0.5;
+      const v = (j + 1) * V + i; // provoking vertex
+      const va = j * V + i;
+      INFO.h = (ha + hb + hc + hd) * 0.25;
+      INFO.coast = coast[va];
+      INFO.cliff = cliff[va];
+      INFO.mtn = mtn[va];
+      INFO.flat = flat[va];
+      INFO.city = city[va];
+      INFO.lake = lake[va];
+      INFO.lakeR = lakeR[va];
+      INFO.zone = zone[va];
+      INFO.dune = dune[va];
+      let ck = carve[v];
+      if (carve[va] === CARVE.road || carve[va + 1] === CARVE.road || carve[v] === CARVE.road || carve[v + 1] === CARVE.road) ck = CARVE.road;
       const jit = hash2(seed, latticeX + i, latticeZ + j, 77 + level);
-      const s = shadeAt(x0 + i * cell, z0 + j * cell, INFO, ny, carve[v], cell, jit, seed);
-      colors[v * 3] = s.r < 0 ? 0 : s.r > 255 ? 255 : s.r;
-      colors[v * 3 + 1] = s.g < 0 ? 0 : s.g > 255 ? 255 : s.g;
-      colors[v * 3 + 2] = s.b < 0 ? 0 : s.b > 255 ? 255 : s.b;
-      snow[v * 2] = Math.round(Math.max(0, Math.min(1, (ny - 0.55) / 0.4)) * 255);
-      snow[v * 2 + 1] = Math.round(jit * 255);
+      const sh = shadeAt(x0 + (i + 0.5) * cell, z0 + (j + 0.5) * cell, INFO, ny, ck, cell, jit, seed);
+      const k3 = (j * N + i) * 3;
+      cellCol[k3] = sh.r < 0 ? 0 : sh.r > 255 ? 255 : sh.r;
+      cellCol[k3 + 1] = sh.g < 0 ? 0 : sh.g > 255 ? 255 : sh.g;
+      cellCol[k3 + 2] = sh.b < 0 ? 0 : sh.b > 255 ? 255 : sh.b;
+      cellSnow[(j * N + i) * 2] = Math.round(Math.max(0, Math.min(1, (ny - 0.55) / 0.4)) * 255);
+      cellSnow[(j * N + i) * 2 + 1] = Math.round(jit * 255);
+      colors[v * 3] = cellCol[k3];
+      colors[v * 3 + 1] = cellCol[k3 + 1];
+      colors[v * 3 + 2] = cellCol[k3 + 2];
+      snow[v * 2] = cellSnow[(j * N + i) * 2];
+      snow[v * 2 + 1] = cellSnow[(j * N + i) * 2 + 1];
     }
   }
 
@@ -178,18 +180,24 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
       const b = a + 1;
       const c = a + V;
       const d = c + 1;
-      index[ic++] = a;
-      index[ic++] = c;
-      index[ic++] = b; // T1, provoking b
       index[ic++] = b;
-      index[ic++] = c;
-      index[ic++] = d; // T2, provoking d
+      index[ic++] = a;
+      index[ic++] = c; // T1 (a, c, b) rotated: provoking c
+      index[ic++] = d;
+      index[ic++] = b;
+      index[ic++] = c; // T2 (b, c, d) rotated: provoking c
     }
   }
 
   // ── skirts (hide cracks between neighbouring LODs) ──
   const skirt = cell * 1.6 + 3;
   const base = V * V;
+  const adjCell = (e: number, k: number): number => {
+    if (e === 0) return 0 * N + k;
+    if (e === 1) return k * N + (N - 1);
+    if (e === 2) return (N - 1) * N + (N - 1 - k);
+    return (N - 1 - k) * N;
+  };
   // edge e: 0 north (j=0, +x), 1 east (i=N, +z), 2 south (j=N, -x), 3 west (i=0, -z) — outward winding
   for (let e = 0; e < 4; e++) {
     for (let k = 0; k <= N; k++) {
@@ -212,31 +220,16 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
       positions[bv * 3] = positions[top * 3];
       positions[bv * 3 + 1] = positions[top * 3 + 1] - skirt;
       positions[bv * 3 + 2] = positions[top * 3 + 2];
-      // colour: nearest provoking interior vertex (i ≥ 1), darkened
-      const src = j * V + Math.max(1, i);
-      colors[bv * 3] = colors[src * 3] * 0.82;
-      colors[bv * 3 + 1] = colors[src * 3 + 1] * 0.82;
-      colors[bv * 3 + 2] = colors[src * 3 + 2] * 0.82;
+      const cc = adjCell(e, Math.min(k, N - 1));
+      colors[bv * 3] = cellCol[cc * 3] * 0.82;
+      colors[bv * 3 + 1] = cellCol[cc * 3 + 1] * 0.82;
+      colors[bv * 3 + 2] = cellCol[cc * 3 + 2] * 0.82;
       snow[bv * 2] = 0;
-      snow[bv * 2 + 1] = snow[src * 2 + 1];
+      snow[bv * 2 + 1] = cellSnow[cc * 2 + 1];
     }
     for (let k = 0; k < N; k++) {
-      // the interior cell adjacent to this skirt segment
-      let ci: number, cj: number;
-      if (e === 0) {
-        ci = k;
-        cj = 0;
-      } else if (e === 1) {
-        ci = N - 1;
-        cj = k;
-      } else if (e === 2) {
-        ci = N - 1 - k;
-        cj = N - 1;
-      } else {
-        ci = 0;
-        cj = N - 1 - k;
-      }
-      if (!keep[cj * N + ci]) continue;
+      const cc = adjCell(e, k);
+      if (!keep[cc]) continue;
       const t0 = edgeVertex(e, k, N, V);
       const t1 = edgeVertex(e, k + 1, N, V);
       const b0 = base + e * V + k;

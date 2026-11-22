@@ -39,13 +39,9 @@ export class Route {
   /** Distance from the car to the route (m). */
   off = 0;
 
-  // dense track (smoothed, for the ribbon)
+  // ribbon track: samples every TRACK_STEP m, smoothed on the fly; ground heights cached lazily
   readonly trackN: number;
-  readonly tx: Float64Array;
-  readonly tz: Float64Array;
-  readonly ty: Float64Array; // route height (interpolated)
   readonly tGround: Float32Array; // NaN = not sampled yet
-  readonly tOff: Uint8Array;
 
   constructor(raw: RawPath, destX: number, destZ: number, graph: NavGraph | null, turnAngleDeg: number) {
     const n = raw.pts.length / 3;
@@ -108,41 +104,36 @@ export class Route {
     }
     if (!this.partial) this.maneuvers.push({ s: this.length, dir: 'arrive' });
 
-    // ── dense smoothed track ──
-    const tn = Math.max(2, Math.ceil(this.length / TRACK_STEP) + 1);
-    this.trackN = tn;
-    this.tx = new Float64Array(tn);
-    this.tz = new Float64Array(tn);
-    this.ty = new Float64Array(tn);
-    this.tGround = new Float32Array(tn).fill(NaN);
-    this.tOff = new Uint8Array(tn);
-    const raw2 = { x: 0, y: 0, z: 0 };
-    let seg = 0;
-    // pass 1: positions on the polyline
-    for (let i = 0; i < tn; i++) {
-      const s = Math.min(this.length, i * TRACK_STEP);
-      while (seg < n - 2 && this.cum[seg + 1] < s) seg++;
-      this.lerpSeg(seg, s, raw2);
-      this.tx[i] = raw2.x;
-      this.ty[i] = raw2.y;
-      this.tz[i] = raw2.z;
-      this.tOff[i] = n > 1 ? this.offroad[seg] : 0;
+    this.trackN = Math.max(2, Math.ceil(this.length / TRACK_STEP) + 1);
+    this.tGround = new Float32Array(this.trackN).fill(NaN);
+  }
+
+  private tmpP = { x: 0, y: 0, z: 0 };
+
+  /**
+   * Ribbon track sample i (s = i · TRACK_STEP): x/z rounded through corners (box filter ±4.5 m, ends anchored),
+   * y = route height, off = 1 on off-road legs.
+   */
+  trackSample(i: number, out: { x: number; y: number; z: number; off: number }): void {
+    const n = this.trackN;
+    i = Math.max(0, Math.min(n - 1, i));
+    const s = Math.min(this.length, i * TRACK_STEP);
+    const seg = this.pointAtSeg(s, this.tmpP);
+    out.y = this.tmpP.y;
+    out.off = this.n > 1 ? this.offroad[seg] : 0;
+    const r = Math.min(3, i, n - 1 - i);
+    let ax = this.tmpP.x;
+    let az = this.tmpP.z;
+    for (let k = 1; k <= r; k++) {
+      this.pointAtSeg(s - k * TRACK_STEP, this.tmpP);
+      ax += this.tmpP.x;
+      az += this.tmpP.z;
+      this.pointAtSeg(s + k * TRACK_STEP, this.tmpP);
+      ax += this.tmpP.x;
+      az += this.tmpP.z;
     }
-    // pass 2: round corners (box filter ±4.5 m on x/z; keeps the ends anchored)
-    const R = 3;
-    const sx = new Float64Array(this.tx);
-    const sz = new Float64Array(this.tz);
-    for (let i = 1; i < tn - 1; i++) {
-      const r = Math.min(R, i, tn - 1 - i);
-      let ax = 0;
-      let az = 0;
-      for (let k = -r; k <= r; k++) {
-        ax += sx[i + k];
-        az += sz[i + k];
-      }
-      this.tx[i] = ax / (2 * r + 1);
-      this.tz[i] = az / (2 * r + 1);
-    }
+    out.x = ax / (2 * r + 1);
+    out.z = az / (2 * r + 1);
   }
 
   get remaining(): number {
@@ -165,7 +156,15 @@ export class Route {
 
   /** Point at distance s along the route. */
   pointAt(s: number, out: { x: number; y: number; z: number }): void {
-    if (this.n < 2) return this.lerpSeg(0, 0, out);
+    this.pointAtSeg(s, out);
+  }
+
+  /** Point at distance s; returns the segment index. */
+  pointAtSeg(s: number, out: { x: number; y: number; z: number }): number {
+    if (this.n < 2) {
+      this.lerpSeg(0, 0, out);
+      return 0;
+    }
     s = Math.min(this.length, Math.max(0, s));
     let lo = 0;
     let hi = this.n - 1;
@@ -175,6 +174,7 @@ export class Route {
       else hi = mid;
     }
     this.lerpSeg(lo, s, out);
+    return lo;
   }
 
   private dirBetween(s0: number, s1: number): { x: number; z: number } | null {

@@ -50,6 +50,7 @@ export class MapScreen {
   private dirty = true;
   private raf = 0;
   private lastT = 0;
+  private lastDraw = 0;
   private listSig = '';
   // interaction
   private pointers = new Map<number, { x: number; y: number; sx: number; sy: number; t: number }>();
@@ -337,13 +338,14 @@ export class MapScreen {
       this.zoomAt(Math.pow(2, zoom * dt * 2.2), this.renderer.W / 2, this.renderer.H / 2);
       this.anim = null;
     }
-    // the route dots / player pulse animate slowly: refresh at ~10 fps when idle
+    // the route dots / player pulse animate slowly: refresh at ~5 fps when idle
     if (this.renderer.resize()) this.dirty = true;
-    if (this.dirty || now % 100 < 17) this.draw(now);
+    if (this.dirty || now - this.lastDraw > 200) this.draw(now);
   };
 
   private draw(now: number): void {
     this.dirty = false;
+    this.lastDraw = now;
     const v = this.renderer.view;
     v.ppm = Math.min(CONFIG.nav.mapMaxPpm, Math.max(CONFIG.nav.mapMinPpm, v.ppm));
     this.renderer.render(now);

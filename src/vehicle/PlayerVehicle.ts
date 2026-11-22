@@ -579,7 +579,9 @@ export class PlayerVehicle implements IPlayerVehicle, DamageHost, StuntHost {
       this.turbo.liftOffT = V.turbo.liftOffTime;
       body.applyTorqueImpulse(this.v1.copy(up).multiplyScalar(Math.sign(this.yawRate) * V.turbo.liftOffYaw * this.wild * this.inertia.y), true);
     }
-    let rearTarget = hb ? T.handbrakeRearSide : powerSlide ? Math.max(Math.min(this.rearSide, T.driftRearSide), T.handbrakeRearSide) : 1;
+    // drift assist: while power-sliding, rear grip follows the slip error so the drift holds ~driftTargetDeg instead of spinning
+    const driftGrip = clamp(T.driftRearSide + T.driftGripGain * (slipDeg - T.driftTargetDeg), T.handbrakeRearSide, 1);
+    let rearTarget = hb ? T.handbrakeRearSide : powerSlide ? driftGrip : 1;
     if (this.turbo.liftOffT > 0) rearTarget = Math.min(rearTarget, 1 - (1 - V.turbo.liftOffRearSide) * Math.min(1.6, this.wild));
     this.rearSide = rearTarget < this.rearSide ? approach(this.rearSide, rearTarget, T.gripDropRate * dt) : approach(this.rearSide, rearTarget, T.gripRecoverRate * dt);
     const hbBlend = clamp((1 - this.rearSide) / Math.max(0.01, 1 - T.handbrakeRearSide), 0, 1);

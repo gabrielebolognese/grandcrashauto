@@ -234,54 +234,102 @@ export class MapRenderer {
   }
 
   // ─────────────────────────────── city + airport ───────────────────────────────
-  private drawCity(): void {
+  /** Raster cache of the city layer (rebuilt when the zoom bucket or the city data change). */
+  private cityCache: { canvas: HTMLCanvasElement; k: number; sig: string; x0: number; z0: number } | null = null;
+
+  private citySig(): string {
     const d = this.ctx.world?.data;
-    const g = this.g;
-    const o = this.ctx.origin.offset;
+    if (!d) return 'none';
+    return `${d.seed}|${d.roads?.edges?.length ?? 0}|${d.buildings?.length ?? 0}|${d.wanderAreas?.length ?? 0}|${d.districtGrid?.length ?? 0}`;
+  }
+
+  private drawCity(): void {
     const b = CONFIG.world.cityBounds;
+    const g = this.g;
     const ppm = this.view.ppm;
     if (this.sx(b.maxX) < 0 || this.sx(b.minX) > this.W || this.sy(b.maxZ) < 0 || this.sy(b.minZ) > this.H) return;
-    // flat city ground
+    const devK = ppm * this.dpr;
+    const pad = 30;
+    if (devK <= 1.6) {
+      // cached raster at the next power-of-two scale (≥ the screen scale, ≤ 1.6 px/m)
+      const k = Math.min(1.6, Math.max(1 / 32, Math.pow(2, Math.ceil(Math.log2(devK)))));
+      const sig = `${k}|${this.citySig()}`;
+      let c = this.cityCache;
+      if (!c || c.sig !== sig) {
+        const canvas = c?.canvas ?? document.createElement('canvas');
+        const x0 = b.minX - pad;
+        const z0 = b.minZ - pad;
+        canvas.width = Math.max(8, Math.ceil((b.maxX - b.minX + pad * 2) * k));
+        canvas.height = Math.max(8, Math.ceil((b.maxZ - b.minZ + pad * 2) * k));
+        const cg = canvas.getContext('2d')!;
+        cg.setTransform(1, 0, 0, 1, 0, 0);
+        cg.clearRect(0, 0, canvas.width, canvas.height);
+        this.drawCityLayer(cg, k, x0, z0, -1e9, -1e9, 1e9, 1e9, k / Math.max(1, this.dpr));
+        c = this.cityCache = { canvas, k, sig, x0, z0 };
+      }
+      g.drawImage(c.canvas, this.sx(c.x0), this.sy(c.z0), (c.canvas.width / c.k) * ppm, (c.canvas.height / c.k) * ppm);
+    } else {
+      // zoomed in: vectors, culled to the view
+      this.drawCityLayer(g, ppm, this.wx(0), this.wz(0), this.wx(-30), this.wz(-30), this.wx(this.W + 30), this.wz(this.H + 30), ppm);
+    }
+  }
+
+  /**
+   * City layer in a generic frame: canvas x = (ax - x0) · k, y = (az - z0) · k; cull rect in absolute metres;
+   * `cssK` = CSS px per metre the result will be shown at (detail thresholds).
+   */
+  private drawCityLayer(g: CanvasRenderingContext2D, k: number, x0: number, z0: number, cx0: number, cz0: number, cx1: number, cz1: number, cssK: number): void {
+    const d = this.ctx.world?.data;
+    const o = this.ctx.origin.offset;
+    const b = CONFIG.world.cityBounds;
+    const X = (ax: number) => (ax - x0) * k;
+    const Z = (az: number) => (az - z0) * k;
     g.fillStyle = '#efe7d6';
-    roundRect(g, this.sx(b.minX), this.sy(b.minZ), (b.maxX - b.minX) * ppm, (b.maxZ - b.minZ) * ppm, Math.min(18, 40 * ppm));
+    roundRect(g, X(b.minX), Z(b.minZ), (b.maxX - b.minX) * k, (b.maxZ - b.minZ) * k, Math.min(18, 40 * k));
     g.fill();
     if (!d) return;
-    // districts (grid in ABSOLUTE space, cell = size / n, covering [-size/2, size/2])
+    // districts (grid in ABSOLUTE space, cell = size / n, covering [-size/2, size/2]) — merged into row runs
     const n = d.districtGridSize || 0;
     const size = d.size || CONFIG.world.size;
-    if (n > 1 && d.districtGrid?.length === n * n && ppm > 0.06) {
+    if (n > 1 && d.districtGrid?.length === n * n && cssK > 0.06) {
       const cell = size / n;
       const half = size / 2;
-      for (let iz = 0; iz < n; iz++)
-        for (let ix = 0; ix < n; ix++) {
+      for (let iz = 0; iz < n; iz++) {
+        const zA = -half + iz * cell;
+        if (zA > cz1 || zA + cell < cz0) continue;
+        let ix = 0;
+        while (ix < n) {
           const id = d.districtGrid[iz * n + ix];
-          if (id === 'water') continue;
-          g.fillStyle = DISTRICT_TINT[id] ?? '#efe7d6';
-          g.fillRect(this.sx(-half + ix * cell) - 0.5, this.sy(-half + iz * cell) - 0.5, cell * ppm + 1, cell * ppm + 1);
+          let jx = ix + 1;
+          while (jx < n && d.districtGrid[iz * n + jx] === id) jx++;
+          if (id !== 'water') {
+            g.fillStyle = DISTRICT_TINT[id] ?? '#efe7d6';
+            g.fillRect(X(-half + ix * cell) - 0.5, Z(zA) - 0.5, (jx - ix) * cell * k + 1, cell * k + 1);
+          }
+          ix = jx;
         }
+      }
     }
     // beach + wander areas
     for (const a of d.wanderAreas ?? []) {
       g.fillStyle = a.kind === 'park' ? '#b5dfa2' : a.kind === 'beach' ? '#f6dca4' : '#e9e1d2';
-      g.fillRect(this.sx(a.minX + o.x), this.sy(a.minZ + o.z), (a.maxX - a.minX) * ppm, (a.maxZ - a.minZ) * ppm);
+      g.fillRect(X(a.minX + o.x), Z(a.minZ + o.z), (a.maxX - a.minX) * k, (a.maxZ - a.minZ) * k);
     }
     // buildings
-    if (ppm > 0.22 && d.buildings?.length) {
-      const minX = this.wx(-20) - o.x;
-      const maxX = this.wx(this.W + 20) - o.x;
-      const minZ = this.wz(-20) - o.z;
-      const maxZ = this.wz(this.H + 20) - o.z;
+    if (cssK > 0.22 && d.buildings?.length) {
       for (const bl of d.buildings) {
-        if (bl.x < minX || bl.x > maxX || bl.z < minZ || bl.z > maxZ) continue;
+        const ax = bl.x + o.x;
+        const az = bl.z + o.z;
+        if (ax < cx0 || ax > cx1 || az < cz0 || az > cz1) continue;
         g.fillStyle = BUILDING_TINT[bl.district] ?? '#d8cbbb';
-        const x = this.sx(bl.x + o.x);
-        const y = this.sy(bl.z + o.z);
-        if (Math.abs(bl.yaw) < 1e-3 || Math.abs(Math.abs(bl.yaw) - Math.PI) < 1e-3) g.fillRect(x - (bl.w * ppm) / 2, y - (bl.d * ppm) / 2, bl.w * ppm, bl.d * ppm);
+        const x = X(ax);
+        const y = Z(az);
+        if (Math.abs(bl.yaw) < 1e-3 || Math.abs(Math.abs(bl.yaw) - Math.PI) < 1e-3) g.fillRect(x - (bl.w * k) / 2, y - (bl.d * k) / 2, bl.w * k, bl.d * k);
         else {
           g.save();
           g.translate(x, y);
           g.rotate(-bl.yaw);
-          g.fillRect((-bl.w * ppm) / 2, (-bl.d * ppm) / 2, bl.w * ppm, bl.d * ppm);
+          g.fillRect((-bl.w * k) / 2, (-bl.d * k) / 2, bl.w * k, bl.d * k);
           g.restore();
         }
       }
@@ -289,6 +337,7 @@ export class MapRenderer {
     // roads: casing then fill, by kind order
     const edges = d.roads?.edges ?? [];
     if (!edges.length) return;
+    const px = k / Math.max(1e-6, cssK); // canvas px per CSS px
     g.lineCap = 'round';
     g.lineJoin = 'round';
     for (let pass = 0; pass < 2; pass++) {
@@ -300,17 +349,17 @@ export class MapRenderer {
         for (const e of edges) {
           if (e.kind !== kind || !e.points?.length) continue;
           const p0 = e.points[0];
-          g.moveTo(this.sx(p0.x + o.x), this.sy(p0.z + o.z));
-          for (let i = 1; i < e.points.length; i++) g.lineTo(this.sx(e.points[i].x + o.x), this.sy(e.points[i].z + o.z));
+          g.moveTo(X(p0.x + o.x), Z(p0.z + o.z));
+          for (let i = 1; i < e.points.length; i++) g.lineTo(X(e.points[i].x + o.x), Z(e.points[i].z + o.z));
           any = true;
           wsum += e.width || 8;
           wn++;
         }
         if (!any) continue;
-        const w = Math.max(kind === 'highway' || kind === 'ramp' ? 2 : 1.1, ((wsum / wn) * ppm));
+        const w = Math.max((kind === 'highway' || kind === 'ramp' ? 2 : 1.1) * px, (wsum / wn) * k);
         if (pass === 0) {
           g.strokeStyle = kind === 'highway' || kind === 'ramp' ? 'rgba(160,86,44,0.6)' : 'rgba(90,96,120,0.38)';
-          g.lineWidth = w + (ppm > 0.3 ? 2 : 1);
+          g.lineWidth = w + (cssK > 0.3 ? 2 : 1) * px;
         } else {
           g.strokeStyle = ROAD_FILL[kind] ?? '#ffffff';
           g.lineWidth = w;

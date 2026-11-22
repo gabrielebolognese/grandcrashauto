@@ -157,8 +157,12 @@ export class PlaneSystem implements IPlaneSystem {
   constructor(private ctx: GameContext) {}
 
   // ─────────────────────────────── lifecycle ───────────────────────────────
+  /** ms spent in init (debug). */
+  initMs = 0;
+
   init(): void {
     const { ctx } = this;
+    const t0 = performance.now();
     this.ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
     this.setupAirfield();
     for (const type of PLANE_TYPES) {
@@ -177,6 +181,7 @@ export class PlaneSystem implements IPlaneSystem {
     const params = new URLSearchParams(location.search);
     const p = params.get('plane') as PlaneTypeId | null;
     if (p && (PLANE_TYPES as readonly string[]).includes(p)) this.pending = { type: p, air: params.has('air') };
+    this.initMs = performance.now() - t0;
   }
 
   dispose(): void {

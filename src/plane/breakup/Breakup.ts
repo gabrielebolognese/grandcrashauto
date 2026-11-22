@@ -146,6 +146,8 @@ export class Breakup implements IBreakup {
   private budgetSparks = 0;
   private budgetDust = 0;
   private budgetGouge = 0;
+  private budgetBubbles = 0;
+  private budgetSpray = 0;
   private mfFound = false;
   private mfNormal = new THREE.Vector3();
   private mfPoint = new THREE.Vector3();
@@ -499,6 +501,7 @@ export class Breakup implements IBreakup {
 
   fixedUpdate(dt: number): void {
     this.harness?.fixed?.(dt);
+    this.budgetSpray = 3;
     for (const rt of this.planes) {
       rt.t += dt;
       this.syncTracked(rt);
@@ -556,6 +559,7 @@ export class Breakup implements IBreakup {
     this.budgetSparks = cfx.maxSparksPerStep;
     this.budgetDust = cfx.maxDustPerStep;
     this.budgetGouge = cfx.maxGougePerStep;
+    this.budgetBubbles = 2;
     for (const rt of this.planes) {
       for (let i = 0; i < rt.asms.length; i++) {
         const a = rt.asms[i];
@@ -1028,7 +1032,6 @@ export class Breakup implements IBreakup {
       if (a.tracked) {
         a.body.applyImpulse(dv.multiplyScalar(a.mp.mass), true);
       } else {
-        a.kicked = true;
         const v = a.body.linvel();
         a.body.setLinvel({ x: v.x + dv.x, y: v.y + dv.y, z: v.z + dv.z }, true);
         const tumble = cfg.tumble / Math.cbrt(1 + a.mp.mass / 2000);
@@ -1141,7 +1144,6 @@ export class Breakup implements IBreakup {
   }
 
   private kickAsm(a: Assembly, dir: THREE.Vector3, dv: number): void {
-    a.kicked = true;
     const v = a.body.linvel();
     a.body.setLinvel({ x: v.x + dir.x * dv, y: v.y + dir.y * dv, z: v.z + dir.z * dv }, true);
     a.read();
@@ -1527,6 +1529,12 @@ export class Breakup implements IBreakup {
       this.waterEntry(rt, a, res.deepest, res.deepestVel, wy);
     }
     a.wetT += dt;
+    // skimming: spray sheet along the skid path
+    const vh = Math.hypot(a.vel.x, a.vel.z);
+    if (vh > 10 && res.wetFrac < 0.35 && this.budgetSpray-- > 0) {
+      this.v1.set(res.deepest.x, wy, res.deepest.z);
+      this.ctx.fx.spraySheet?.(this.v1, a.vel, THREE.MathUtils.clamp((vh / 50) * Math.min(1.5, 0.4 + a.radius * 0.05), 0.15, 1.5));
+    }
     // continuous hydrodynamic deceleration → joint damage (water ≈ concrete at speed)
     const cfgD = CONFIG.breakup.damage;
     const acc = res.dragMag / a.mp.mass;
@@ -1737,15 +1745,26 @@ export class Breakup implements IBreakup {
 
   /**
    * Crashes only dissipate energy: a piece wedged between other pieces and a wall can get shot out by the solver's
-   * depenetration. Unless we kicked it ourselves this step, its speed may not grow by more than gravity + a margin.
+   * depenetration: its speed may not grow by more than a margin per step, and a bounce-back against the recent direction of
+   * travel keeps only a small restitution of the impact speed.
    */
   private energyGuard(a: Assembly): void {
     const cfg = CONFIG.breakup;
-    if (a.kicked) {
-      a.kicked = false;
-      return;
-    }
+    // kicks are applied outside the physics step, so vPre (read before the step) already contains them
     const pre = a.vPre.length();
+    if (pre >= a.recentSpeed * 0.93) a.recentVel.copy(a.vPre);
+    a.recentSpeed = Math.max(pre, a.recentSpeed * 0.93);
+    // bounce-back against the recent direction of travel keeps only a small restitution of the impact speed
+    if (a.recentSpeed > 8) {
+      const r = this.v5.copy(a.recentVel).normalize();
+      const back = -a.vel.dot(r);
+      const cap = cfg.guardRestitution * a.recentSpeed + 2;
+      if (back > cap) {
+        a.vel.addScaledVector(r, back - cap);
+        a.body.setLinvel(a.vel, true);
+        a.speed = a.vel.length();
+      }
+    }
     const max = pre + cfg.guardGain;
     if (a.speed > max && a.speed > 1e-3) {
       const k = max / a.speed;
@@ -1767,7 +1786,7 @@ export class Breakup implements IBreakup {
     if (a.entered && a.waterY !== null) {
       const depth = a.waterY - a.comW.y;
       a.bubbleT -= dt;
-      if (depth > -a.radius * 0.4 && a.vel.y < -0.03 && a.bubbleT <= 0) {
+      if (depth > -a.radius * 0.4 && a.vel.y < -0.03 && a.bubbleT <= 0 && this.budgetBubbles-- > 0) {
         a.bubbleT = rnd(0.25, 0.5);
         this.ctx.fx.bubbles?.(this.v1.set(a.comW.x, a.waterY, a.comW.z), Math.min(4, 0.5 + a.radius * 0.3));
       }
@@ -2021,6 +2040,19 @@ export class Breakup implements IBreakup {
       if (f > 2) this.igniteAsm(rt, a, a.tracked ? 1 : 0.8, rnd(cfgF.coolMin, cfgF.coolMax));
     }
     if (surface === 'ground') this.pushProps(point, radius * 1.4, 10);
+    else {
+      // burning fuel slick spreading over the water from the impact, carried forward with the wreck
+      const fx = this.ctx.fx;
+      const n = Math.round(THREE.MathUtils.clamp(rt.s.length / 8, 3, 7));
+      for (let i = 0; i < n; i++) {
+        const ang = rnd(0, Math.PI * 2);
+        const sp = rnd(1, 4) + rt.s.length * 0.05;
+        this.v1.set(point.x + Math.cos(ang) * rnd(0, radius * 0.3), point.y, point.z + Math.sin(ang) * rnd(0, radius * 0.3));
+        this.v2.set(Math.cos(ang) * sp + vel.x * 0.15, 0, Math.sin(ang) * sp + vel.z * 0.15);
+        fx.fuelFire?.({ position: this.v1, velocity: this.v2, size: THREE.MathUtils.clamp(rt.s.length * 0.12, 2, 9) * rnd(0.7, 1.3), duration: rnd(cfgF.patchDur[0], cfgF.patchDur[1]), onWater: true });
+        rt.patches++;
+      }
+    }
   }
 
   private secondary(rt: PlaneRT, prefer?: Assembly): void {
@@ -2049,7 +2081,6 @@ export class Breakup implements IBreakup {
     for (const p of a.parts) rt.fuel[p] *= 0.6;
     if (!this.asmHasFire(rt, a) && this.asmFuel(rt, a) > 2) this.igniteAsm(rt, a, 0.8, rnd(CONFIG.breakup.fire.coolMin, CONFIG.breakup.fire.coolMax));
     if (!a.tracked) {
-      a.kicked = true;
       const k = Math.min(4, 25000 / a.mp.mass + 0.8);
       a.body.applyImpulse({ x: rnd(-0.5, 0.5) * k * a.mp.mass, y: rnd(0.4, 1) * k * a.mp.mass, z: rnd(-0.5, 0.5) * k * a.mp.mass }, true);
     }
@@ -2146,7 +2177,6 @@ export class Breakup implements IBreakup {
         if (owner && owner !== t) {
           // struts fold & snap: small sideways/backwards kick
           const v = owner.body.linvel();
-          owner.kicked = true;
           owner.body.setLinvel({ x: v.x + rnd(-2, 2), y: v.y + rnd(0.5, 2), z: v.z + rnd(-3, 0) }, true);
         }
       }

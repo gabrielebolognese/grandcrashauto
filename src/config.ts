@@ -212,7 +212,7 @@ export const CONFIG = {
       {
         el: 4, zenith: '#3a62ae', skyMid: '#b090c4', horizon: '#ffc08e', fog: '#e8b69e', ground: '#7d6a86', glow: '#ff9a52',
         glowStrength: 1.4, sunColor: '#ffa868', sunIntensity: 2.4, sunDisk: 20, sunSize: 1.6,
-        hemiSky: '#a9b6ee', hemiGround: '#9a6f8f', hemiIntensity: 1.0, envIntensity: 0.5, exposure: 1.04,
+        hemiSky: '#c6b6e8', hemiGround: '#b08690', hemiIntensity: 1.15, envIntensity: 0.5, exposure: 1.08,
         cloudLit: '#ffc09a', cloudShade: '#8f78a8', waterDeep: '#1d4a7a', waterMid: '#36709e', waterShallow: '#58a8b2',
         bloomStrength: 0.4, bloomThreshold: 1.3, stars: 0, night: 0.12,
       },
@@ -385,6 +385,8 @@ export const CONFIG = {
       handbrakeRearGrip: 0.45, // rear friction multiplier while the handbrake is held
       driftRearSide: 0.5, // rear side grip held while power-sliding (slip > driftSlipDeg, throttle, steering into the turn)
       driftSlipDeg: 9,
+      driftTargetDeg: 30, // drift assist: rear grip is modulated to hold about this slip angle while power-sliding
+      driftGripGain: 0.035, // rear side-grip change per degree of slip error
       gripDropRate: 10, // 1/s rear grip falls when the handbrake is pulled
       gripRecoverRate: 1.3, // 1/s rear grip returns after the handbrake/drift
       highSpeedSide: 0.85, // side stiffness multiplier at top speed (calmer at speed)
@@ -1178,7 +1180,8 @@ export const CONFIG = {
     impactTransmit: 0.55, // share of the impact deceleration a broken-off piece still received (× exp(-d/R))
     keeperTransmit: 0.6, // same for the surviving body when the contacting part tore off (cartwheel yank)
     blastFx: true, // breakJoints with a 'middle'/'tail' blast spawns the fireball + emits planeExplosion
-    guardGain: 4, // m/s a piece may gain per step without a kick (solver depenetration guard)
+    guardGain: 4, // m/s a piece may gain per physics step (solver depenetration guard)
+    guardRestitution: 0.12, // max bounce-back speed as a fraction of the recent impact speed
     maxAngvel: 30, // rad/s cap for wreck pieces
     damage: {
       vBreak: 14, // m/s of impact severity that breaks a strength-1 joint at the contact
@@ -1270,7 +1273,7 @@ export const CONFIG = {
     workers: 0, // 0 = auto (2–4 by navigator.hardwareConcurrency)
     tileCells: 32, // cells per render-tile edge; level L tile = tileCells × (2·2^L) m (L0: 64 m tiles of 2 m cells)
     maxLevel: 6, // coarsest render level (128 m cells, 4 km tiles)
-    lodRadius: { low: 120, medium: 170, high: 240 }, // m of 2 m cells around the camera; every level doubles it
+    lodRadius: { low: 90, medium: 115, high: 160 }, // m of 2 m cells around the camera; every level doubles it
     maxTiles: 420, // render-tile slots in the terrain BatchedMesh
     altitudeView: 1.6, // view distance × (1 + this × altitude/1000) when flying
     maxViewDistance: 9000, // m cap (flying)
@@ -1282,7 +1285,7 @@ export const CONFIG = {
     cacheChunks: 260, // LRU of collider chunks
     cacheScatter: 520, // LRU of scatter chunks
     carveMaxLevel: 3, // highway corridors carved up to this render level (16 m cells)
-    hazeMul: 0.62, // atmospheric haze e-folding distance = view distance × this
+    hazeMul: 0.72, // atmospheric haze e-folding distance = view distance × this
     snowJitter: 45, // m of per-face jitter of the snow line
     scatter: {
       radius: { low: 650, medium: 1000, high: 1400 }, // m: trees beyond this are not drawn

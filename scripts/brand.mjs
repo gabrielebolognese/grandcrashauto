@@ -31,12 +31,11 @@ function burst(cx, cy, rOut, rIn, n, rot = 0, jitter = 0.12) {
 }
 
 /** Wedge supercar side profile (faces right), ~600 × 155 units, ground at y=154. */
-function car(body = C.coralDeep) {
+function car(body = C.coralDeep, outline = true) {
   return `
   <g>
-    <ellipse cx="300" cy="166" rx="300" ry="14" fill="#000" opacity="0.18"/>
     <path d="M20,112 L10,86 L14,63 L2,52 L62,50 C122,46 172,30 222,14 C262,2 322,0 362,8 L432,44 C482,52 542,58 587,70 L599,87 L591,105 L516,113
-             A44,44 0 0 0 428,113 L192,113 A46,46 0 0 0 100,113 Z" fill="${body}"/>
+             A44,44 0 0 0 428,113 L192,113 A46,46 0 0 0 100,113 Z" fill="${body}" ${outline ? `stroke="${C.ink}" stroke-width="9" stroke-linejoin="round" paint-order="stroke"` : ""}/>
     <path d="M24,108 L16,88 L592,96 L588,104 L516,111 A44,44 0 0 0 428,111 L192,111 A46,46 0 0 0 100,111 Z" fill="#000" opacity="0.22"/>
     <path d="M70,52 C130,47 176,33 224,18 C262,7 318,5 356,12" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="5" stroke-linecap="round"/>
     <path d="M232,22 C266,11 320,10 352,15 L412,45 L252,48 Z" fill="${C.ink}"/>
@@ -45,8 +44,8 @@ function car(body = C.coralDeep) {
     <path d="M556,67 L593,76 L591,81 L553,74 Z" fill="${C.cream}"/>
     <path d="M6,57 L44,55 L44,62 L9,65 Z" fill="${C.butter}"/>
     <path d="M30,92 L120,94" stroke="${C.ink}" stroke-width="4" opacity="0.35"/>
-    <circle cx="146" cy="118" r="37" fill="#1b1d22"/><circle cx="146" cy="118" r="21" fill="#c9ccd2"/><circle cx="146" cy="118" r="7" fill="#1b1d22"/>
-    <circle cx="472" cy="118" r="35" fill="#1b1d22"/><circle cx="472" cy="118" r="20" fill="#c9ccd2"/><circle cx="472" cy="118" r="7" fill="#1b1d22"/>
+    <circle cx="146" cy="118" r="40" fill="#1b1d22"/><circle cx="146" cy="118" r="21" fill="#c9ccd2"/><circle cx="146" cy="118" r="7" fill="#1b1d22"/>
+    <circle cx="472" cy="118" r="38" fill="#1b1d22"/><circle cx="472" cy="118" r="20" fill="#c9ccd2"/><circle cx="472" cy="118" r="7" fill="#1b1d22"/>
   </g>`;
 }
 
@@ -92,7 +91,7 @@ function wordmarkSvg(w = 1600, h = 900, bg = true) {
   ${speedLines(980, 230)}
   <g transform="translate(860,170) scale(0.78) rotate(-9 300 90)">${car()}</g>
   <g transform="skewX(-10)">
-    <text x="250" y="500" ${font} font-size="96" fill="${C.ink}" letter-spacing="10">GRAND</text>
+    <text x="262" y="448" ${font} font-size="96" fill="${C.ink}" letter-spacing="10">GRAND</text>
     <text x="232" y="690" ${font} font-size="260" fill="${C.ink}" letter-spacing="4">CRASH</text>
     <text x="220" y="676" ${font} font-size="260" fill="url(#txt)" stroke="${C.coralDeep}" stroke-width="10" paint-order="stroke" letter-spacing="4">CRASH</text>
     <text x="1010" y="790" ${font} font-size="96" fill="${C.ink}" letter-spacing="10">AUTO</text>
@@ -144,11 +143,13 @@ for (const [src, dst, w, h] of renders) {
   console.log('rendered', dst);
 }
 // Circle preview at Instagram's real display size (~110 px) to check legibility.
+const { readFileSync } = await import("node:fs");
+const dataUrl = "data:image/png;base64," + readFileSync(join(out, "gca-profile-picture-1080.png")).toString("base64");
 const page = await browser.newPage({ viewport: { width: 360, height: 140 } });
 await page.setContent(`<body style="margin:0;background:#fff;display:flex;gap:24px;align-items:center;padding:14px">
-  <img src="${pathToFileURL(join(out, 'gca-profile-picture-1080.png')).href}" style="width:110px;height:110px;border-radius:50%">
-  <img src="${pathToFileURL(join(out, 'gca-profile-picture-1080.png')).href}" style="width:56px;height:56px;border-radius:50%">
-  <img src="${pathToFileURL(join(out, 'gca-profile-picture-1080.png')).href}" style="width:32px;height:32px;border-radius:50%"></body>`);
+  <img src="${dataUrl}" style="width:110px;height:110px;border-radius:50%">
+  <img src="${dataUrl}" style="width:56px;height:56px;border-radius:50%">
+  <img src="${dataUrl}" style="width:32px;height:32px;border-radius:50%"></body>`);
 await page.waitForTimeout(300);
 await page.screenshot({ path: join(out, 'preview-circle-sizes.png') });
 await browser.close();

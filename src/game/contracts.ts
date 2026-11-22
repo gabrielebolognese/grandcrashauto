@@ -119,6 +119,11 @@ export interface IWorld extends GameSystem {
   oceanDistance?(x: number, z: number): number;
   /** Is (x,z) on a highway carriageway (turbo recharge bonus)? */
   isOnHighway?(x: number, z: number): boolean;
+  /**
+   * (world) Drivable surface nearest below `y + 1.5` at x,z: the viaduct deck when on it, the street when under it.
+   * groundHeightAt() always returns the LOWEST surface (street under an elevated deck).
+   */
+  groundHeightNear?(x: number, y: number, z: number): number;
 }
 
 // ─────────────────────────── environment (src/world/env) ─────────────────────────

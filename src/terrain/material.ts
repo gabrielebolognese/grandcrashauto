@@ -51,13 +51,15 @@ varying float vTDist;
 vec3 terrainHaze(vec3 col) {
   float d = vTDist;
   vec3 V = (vTWorld - cameraPosition) / max(d, 1e-3);
-  float hd = max(min(uFogFar, uTHaze.y) * uTHaze.x, 22.0);
-  float hz = 1.0 - exp(-pow(d / hd, 1.35));
-  hz *= mix(1.0, 0.78, smoothstep(0.0, 1100.0, vTWorld.y));
+  // aerial perspective follows our view distance; dense weather fog / cloud whiteout (short env fog) takes over
+  float hd = uTHaze.y * uTHaze.x;
+  hd = mix(hd, max(uFogFar * 0.55, 22.0), 1.0 - smoothstep(0.35, 0.8, uFogFar / max(uTHaze.y, 1.0)));
+  float hz = 1.0 - exp(-pow(d / hd, 1.6));
+  hz *= mix(1.0, 0.8, smoothstep(0.0, 1100.0, vTWorld.y));
   hz = max(hz, smoothstep(uTHaze.y * 0.82, uTHaze.y, d));
   vec3 hazeCol = uFogColor + uSunColor * pow(max(dot(V, uSunDir), 0.0), 6.0) * (1.0 - uNight) * 0.2;
-  float mid = smoothstep(120.0, 1500.0, d) * (1.0 - uNight * 0.7);
-  col = mix(col, col * vec3(0.87, 0.93, 1.05) + hazeCol * 0.04, mid * 0.55);
+  float mid = smoothstep(200.0, 1800.0, d) * (1.0 - uNight * 0.7);
+  col = mix(col, col * vec3(0.9, 0.95, 1.04) + hazeCol * 0.03, mid * 0.4);
   return mix(col, hazeCol, clamp(hz, 0.0, 1.0));
 }
 `;

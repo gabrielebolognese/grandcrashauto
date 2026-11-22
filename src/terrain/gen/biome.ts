@@ -76,16 +76,17 @@ export interface FieldBlock {
   L: number;
   salt: number;
 }
-export const FIELD_BLOCK = 1400;
-export function fieldBlock(seed: number, bi: number, bj: number, out: FieldBlock = { bi: 0, bj: 0, angle: 0, cos: 1, sin: 0, W: 50, L: 90, salt: 0 }): FieldBlock {
-  const ang = (hash2(seed, bi, bj, 901) - 0.5) * 1.1;
+export const FIELD_BLOCK = 1408; // multiple of 16 m
+export function fieldBlock(seed: number, bi: number, bj: number, out: FieldBlock = { bi: 0, bj: 0, angle: 0, cos: 1, sin: 0, W: 48, L: 96, salt: 0 }): FieldBlock {
+  // grid-aligned (0° / 90°) fields with sizes that are multiples of 16 m: crisp edges at every LOD up to 16 m cells
+  const turn = hash2(seed, bi, bj, 901) < 0.5;
   out.bi = bi;
   out.bj = bj;
-  out.angle = ang;
-  out.cos = Math.cos(ang);
-  out.sin = Math.sin(ang);
-  out.W = 36 + 48 * hash2(seed, bi, bj, 902);
-  out.L = 60 + 90 * hash2(seed, bi, bj, 903);
+  out.angle = turn ? Math.PI / 2 : 0;
+  out.cos = turn ? 0 : 1;
+  out.sin = turn ? 1 : 0;
+  out.W = 16 * (3 + Math.floor(hash2(seed, bi, bj, 902) * 4)); // 48–96 m
+  out.L = 16 * (5 + Math.floor(hash2(seed, bi, bj, 903) * 6)); // 80–160 m
   out.salt = (bi * 7 + bj * 13) | 0;
   return out;
 }
@@ -236,7 +237,7 @@ export function shadeAt(ax: number, az: number, info: TerrainInfo, ny: number, c
     const f = fieldAt(ax, az, seed);
     let crop = CROPS[f.crop];
     let cropSurf: number = f.crop === 4 ? SURF.dirt : SURF.grass;
-    const hedge = f.hedge && f.edge < Math.max(1.4, cell * 0.55);
+    const hedge = f.hedge && cell <= 4 && f.edge < cell * 0.55 + 0.2;
     if (hedge) {
       crop = PAL.hedge;
       cropSurf = SURF.grass;

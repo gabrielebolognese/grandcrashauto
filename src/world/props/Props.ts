@@ -9,7 +9,7 @@ import { NightLights } from './NightLights';
 import { PropPhysics } from './PropPhysics';
 import { PropRender } from './PropRender';
 import { PROP_UNIFORMS, makeCarMaterial, makePropMaterial } from './materials';
-import { buildRegistry, carCollider, carLampsFor, kindByName, kinds, type KindDef, type VariantOut } from './registry';
+import { buildRegistry, carCollider, carLampsFor, disposeRegistry, kindByName, kinds, type KindDef, type VariantOut } from './registry';
 import { F, ItemStore } from './store';
 import { buildTestLayout } from './testLayout';
 
@@ -479,5 +479,6 @@ export class Props implements IProps {
     this.phys = null;
     this.render = null;
     this.lights = null;
+    disposeRegistry();
   }
 }

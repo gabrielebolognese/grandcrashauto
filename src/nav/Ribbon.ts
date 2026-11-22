@@ -59,6 +59,8 @@ export class Ribbon {
   private opacity = 0;
   private target = 0;
   private time = 0;
+  private tmp = new Float64Array((MAX_SAMPLES + 2) * 4);
+  private smp = { x: 0, y: 0, z: 0, off: 0 };
 
   constructor() {
     this.geo = new THREE.BufferGeometry();
@@ -138,28 +140,37 @@ export class Ribbon {
     }
     const P = this.pos;
     const U = this.uv;
-    const tx = route.tx;
-    const tz = route.tz;
+    // smoothed samples i0-1 … i1+1 (neighbours give the tangents)
+    const T = this.tmp;
+    for (let k = -1; k <= count; k++) {
+      route.trackSample(i0 + k, this.smp);
+      const o = (k + 1) * 4;
+      T[o] = this.smp.x;
+      T[o + 1] = this.smp.y;
+      T[o + 2] = this.smp.z;
+      T[o + 3] = this.smp.off;
+    }
     for (let k = 0; k < count; k++) {
       const i = i0 + k;
-      const ip = Math.max(0, i - 1);
-      const inx = Math.min(route.trackN - 1, i + 1);
-      let dx = tx[inx] - tx[ip];
-      let dz = tz[inx] - tz[ip];
+      const c = (k + 1) * 4;
+      const pv = k * 4;
+      const nx = (k + 2) * 4;
+      let dx = T[nx] - T[pv];
+      let dz = T[nx + 2] - T[pv + 2];
       const l = Math.hypot(dx, dz) || 1;
       dx /= l;
       dz /= l;
-      const lx = tx[i] - ox;
-      const lz = tz[i] - oz;
+      const lx = T[c] - ox;
+      const lz = T[c + 2] - oz;
+      const ry = T[c + 1];
       let gy = route.tGround[i];
       if (Number.isNaN(gy) && ground) {
         const g = ground(lx, lz);
-        gy = Number.isFinite(g) ? g : route.ty[i];
+        gy = Number.isFinite(g) ? g : ry;
         route.tGround[i] = gy;
       }
-      const ry = route.ty[i];
       let y: number;
-      if (route.tOff[i]) y = Number.isFinite(gy) ? gy : ry;
+      if (T[c + 3]) y = Number.isFinite(gy) ? gy : ry;
       else y = Number.isFinite(gy) && Math.abs(gy - ry) < 2 ? Math.max(gy, ry) : ry;
       y += lift;
       // side vector perpendicular to the tangent in XZ
