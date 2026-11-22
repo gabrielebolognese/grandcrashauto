@@ -184,29 +184,23 @@ export class Game implements GameActions {
     } catch (err) {
       reportError('[warmup] temp car failed', err);
     }
-    // Make hidden meshes visible for the compile pass (never lights: that would change the light count).
-    const hidden: THREE.Object3D[] = [];
-    scene.traverse((o) => {
-      if (!o.visible && !(o as THREE.Light).isLight) {
-        hidden.push(o);
-        o.visible = true;
+    // Compile only what is VISIBLE now (forcing hidden pools/LODs visible made phones and SwiftShader boot take minutes).
+    // Hidden effects compile in their own warmup() hooks or on first use. Hard cap: never hold the loading screen long.
+    const software = /swiftshader|llvmpipe|software/i.test(ctx.quality.gpuName);
+    if (!software) {
+      ctx.ui.setLoading(0.97, 'Compiling shaders');
+      try {
+        const comp = (renderer as unknown as { compileAsync?: (s: THREE.Object3D, c: THREE.Camera) => Promise<unknown> }).compileAsync;
+        if (comp) await Promise.race([comp.call(renderer, scene, camera), new Promise((r) => setTimeout(r, ctx.quality.isMobile ? 4000 : 6000))]);
+      } catch (err) {
+        reportError('[warmup] shader compile failed', err);
       }
-    });
-    ctx.ui.setLoading(0.97, 'Compiling shaders');
-    try {
-      const comp = (renderer as unknown as { compileAsync?: (s: THREE.Object3D, c: THREE.Camera) => Promise<unknown> }).compileAsync;
-      if (comp) await Promise.race([comp.call(renderer, scene, camera), new Promise((r) => setTimeout(r, 12000))]);
-      else renderer.compile(scene, camera);
-    } catch (err) {
-      reportError('[warmup] shader compile failed', err);
     }
-    // Restore visibility BEFORE rendering: drawing every hidden pool/LOD at once can exhaust phone GPU memory.
-    for (const o of hidden) o.visible = false;
     // A few hidden frames (the boot overlay covers the canvas) upload the visible buffers/textures + shadow maps.
     try {
       const prev = camera.position.clone();
       const prevQ = camera.quaternion.clone();
-      const frames = ctx.quality.isMobile ? 1 : 3;
+      const frames = software || ctx.quality.isMobile ? 1 : 2;
       for (let i = 0; i < frames; i++) {
         const a = (i / 3) * Math.PI * 2;
         camera.position.set(Math.cos(a) * 120, 60, Math.sin(a) * 120);
