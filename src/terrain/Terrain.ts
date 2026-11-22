@@ -49,6 +49,16 @@ export class Terrain implements ITerrain {
   private camAbs = new THREE.Vector3();
   private uploadMs = 0;
   private uploadMsMax = 0;
+  /** decaying per-section maxima (ms) for profiling */
+  private prof: Record<string, number> = { pump: 0, select: 0, upload: 0, vis: 0, colliders: 0, scatter: 0, ring: 0, features: 0 };
+  private profT = 0;
+  private tick(name: string): void {
+    const t = performance.now();
+    const ms = t - this.profT;
+    this.profT = t;
+    const p = this.prof[name] * 0.995;
+    this.prof[name] = ms > p ? ms : p;
+  }
 
   constructor(private ctx: GameContext) {}
 
@@ -143,22 +153,31 @@ export class Terrain implements ITerrain {
     const lvl = this.ctx.quality.level;
     const lod0 = lvl === 'low' ? T.lodRadius.low : lvl === 'high' ? T.lodRadius.high : T.lodRadius.medium;
 
+    this.profT = performance.now();
     this.pool.pump(budgetMs);
+    this.tick('pump');
     const deadline = performance.now() + budgetMs;
     if (this.frame % Math.max(1, T.selectEvery) === 1 || T.selectEvery <= 1) {
       this.tiles.select(camX, camY, camZ, this.groundUnderCam, this.viewDist, lod0);
     }
+    this.tick('select');
     this.tiles.upload(deadline, off.x, off.z);
+    this.tick('upload');
     this.tiles.updateVisibility(cam, off.x, off.z);
     this.tiles.prune();
+    this.tick('vis');
 
     const fx = (this.hasFocus ? this.focus.x : cam.position.x) + off.x;
     const fz = (this.hasFocus ? this.focus.z : cam.position.z) + off.z;
     this.colliders.update(fx, fz, off.x, off.z, deadline);
+    this.tick('colliders');
     this.scatter.update(camX, camY, camZ, this.groundUnderCam, off.x, off.z, deadline);
+    this.tick('scatter');
     this.ring.update(camX, camZ, this.viewDist);
+    this.tick('ring');
     this.features.update(dt, camX, camZ);
     updateTerrainUniforms(cam, this.viewDist);
+    this.tick('features');
   }
 
   private onResult(type: JobType, key: string, data: unknown, _ms: number): void {
@@ -327,6 +346,9 @@ export class Terrain implements ITerrain {
       viewDist: Math.round(this.viewDist),
       updateMsAvg: +this.uploadMs.toFixed(2),
       updateMsMax: +this.uploadMsMax.toFixed(2),
+      profMax: Object.fromEntries(Object.entries(this.prof).map(([k, v]) => [k, +v.toFixed(2)])),
+      fogFar: Math.round(GLOBAL_UNIFORMS.uFogFar.value),
+      far: Math.round(this.ctx.engine.camera.far),
     };
   }
 

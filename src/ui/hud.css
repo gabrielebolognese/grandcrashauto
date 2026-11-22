@@ -604,9 +604,9 @@
   opacity: 1;
 }
 .boom-btn .tb-key {
-  top: auto;
-  bottom: 100%;
-  transform: translate(-50%, -2px);
+  top: 100%;
+  bottom: auto;
+  transform: translate(-50%, -3px);
 }
 .boom-btn.charging .tb-key {
   opacity: 0;

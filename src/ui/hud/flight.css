@@ -592,3 +592,30 @@
     height: calc(150px * var(--cs));
   }
 }
+
+/* desktop: leave room for the key hints under the menu cluster */
+#ui-root:not(.is-touch) .fl-top {
+  top: calc(var(--gt) + 64px);
+}
+/* short phones: tapes sit lower so the alert banners never cover their headers */
+@media (max-height: 400px) {
+  .fl-tape {
+    transform: translateY(-30%);
+  }
+  .oom-banner {
+    font-size: 11px;
+    padding: 5px 6px 5px 11px;
+  }
+  .oom-count {
+    min-width: 22px;
+    height: 22px;
+    font-size: 12px;
+  }
+  .fl-caution {
+    font-size: 10.5px;
+    padding: 5px 11px;
+  }
+  .fl-stall {
+    font-size: 13px;
+  }
+}

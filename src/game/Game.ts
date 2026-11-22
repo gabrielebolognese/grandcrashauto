@@ -200,11 +200,14 @@ export class Game implements GameActions {
     } catch (err) {
       reportError('[warmup] shader compile failed', err);
     }
-    // A few hidden frames (the boot overlay covers the canvas) upload buffers/textures and build shadow maps.
+    // Restore visibility BEFORE rendering: drawing every hidden pool/LOD at once can exhaust phone GPU memory.
+    for (const o of hidden) o.visible = false;
+    // A few hidden frames (the boot overlay covers the canvas) upload the visible buffers/textures + shadow maps.
     try {
       const prev = camera.position.clone();
       const prevQ = camera.quaternion.clone();
-      for (let i = 0; i < 3; i++) {
+      const frames = ctx.quality.isMobile ? 1 : 3;
+      for (let i = 0; i < frames; i++) {
         const a = (i / 3) * Math.PI * 2;
         camera.position.set(Math.cos(a) * 120, 60, Math.sin(a) * 120);
         camera.lookAt(0, 0, 0);
@@ -217,7 +220,6 @@ export class Game implements GameActions {
     } catch (err) {
       reportError('[warmup] warm frames failed', err);
     }
-    for (const o of hidden) o.visible = false;
     if (tmpCar) {
       scene.remove(tmpCar.root);
       try {
