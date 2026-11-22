@@ -31,6 +31,8 @@ export class Quality {
   private slowT = 0;
   private fastT = 0;
   private dynScale = 1;
+  /** Seconds of simulated play seen so far: the probe and dynamic resolution ignore the warm-up period. */
+  private warmT = 0;
 
   constructor(
     private engine: Engine,
@@ -110,7 +112,11 @@ export class Quality {
   /** Per-frame: runs the first-launch probe and the dynamic resolution controller. */
   update(realDt: number, simulating: boolean): void {
     const ms = realDt * 1000;
+    if (simulating) this.warmT += realDt;
+    // Ignore the first seconds (streaming, late shader compiles) — measuring them picked too-low presets.
+    if (this.warmT < 4) return;
     if (this.probing && simulating) {
+      if (ms > 250) return; // single hitch: don't let it skew the probe
       this.probeT += realDt;
       if (this.probeT > 0.5) {
         // skip the first half-second (shader compiles)

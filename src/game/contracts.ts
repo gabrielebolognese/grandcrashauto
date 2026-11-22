@@ -32,6 +32,12 @@ export interface GameSystem {
   /** Every rendered frame. dt = game dt (scaled by slow-mo), alpha = interpolation factor in [0,1). */
   update?(dt: number, alpha: number): void;
   dispose?(): void;
+  /**
+   * Optional pre-warm hook, called once after every system's init() and before the title screen: make sure every
+   * material/pool you will use later EXISTS in the scene (even hidden) so the lead's shader pre-compilation covers it,
+   * and do any other one-time GPU work (texture uploads, PMREM). Avoids first-seconds hitches.
+   */
+  warmup?(): Promise<void> | void;
 }
 
 export interface GameContext {
@@ -220,6 +226,12 @@ export interface CarVisual {
   repair(): void;
   update(dt: number): void;
   dispose(): void;
+  /** Part 3 (carmodels): exhaust tip outlets in root-local space, pointing -Z (turbo flames). */
+  readonly exhaustPoints?: THREE.Vector3[];
+  /** Part 3 (carmodels): rear upper body corners (left, right) in root-local space (glide vapour trails). */
+  readonly rearCorners?: THREE.Vector3[];
+  /** Part 3 (carmodels): headlight lamp centres (left, right) in root-local space, facing +Z (spotlight mounts). */
+  readonly headlightPoints?: THREE.Vector3[];
 }
 
 export interface ICarFactory extends GameSystem {
@@ -231,6 +243,12 @@ export interface ICarFactory extends GameSystem {
    * instance; 0.5 = glass; 0 = other). Car faces +Z, origin on the ground under the car center. Return null if unsupported.
    */
   instancingGeometry?(model: CarModelId): THREE.BufferGeometry | null;
+  /**
+   * Part 3 (carmodels): fake headlight beams matching instancingGeometry (same local frame) for night traffic /
+   * parked cars: non-indexed position/normal/color (pre-faded intensity) — draw additive, depthWrite off.
+   * Note instancingGeometry's paintMask 0.25 marks lamp lenses (baked warm-white front / red rear): emissive at night.
+   */
+  instancingBeamGeometry?(model: CarModelId): THREE.BufferGeometry | null;
 }
 
 // ─────────────────────────── player vehicle (src/vehicle) ─────────────────────────
@@ -304,6 +322,11 @@ export interface ICameraRig extends GameSystem {
   snap(): void;
   /** Feed orbit-drag input (pixels) from UI pointer events in orbit mode. */
   orbitDrag?(dx: number, dy: number): void;
+  /**
+   * Part 2 (camera): the concrete view, for HUD labels. In plane mode `mode` maps cockpit/wing → 'hood' and
+   * crash/explosion shots → 'cinematic'; `view` names them exactly.
+   */
+  readonly view?: 'chase' | 'hood' | 'orbit' | 'cockpit' | 'wing' | 'cinematic' | 'showcase';
 }
 
 // ─────────────────────────────── effects (src/fx) ────────────────────────────────
@@ -494,6 +517,8 @@ export interface ITerrain extends GameSystem {
   isReady(x: number, z: number, radius: number): boolean;
   /** Points of interest discovered/generated so far (Lighthouse, Summit Viewpoint, Fishing Pier…), local poses. */
   readonly pois: { id: string; name: string; icon: string; pose: Pose }[];
+  /** Streaming focus (Game calls it every frame with the player/camera position, LOCAL). */
+  setFocus?(pos: THREE.Vector3): void;
 }
 
 /** Endless highway network + ramps + rest stops (src/highway). LOCAL coordinates. */
@@ -512,4 +537,5 @@ export interface IHighways extends GameSystem {
   readonly graphVersion: number;
   /** Points of interest so far (Mountain Pass, Coastal Bridge, Big Jump, Rest Stop n…), local poses on the road. */
   readonly pois: { id: string; name: string; icon: string; pose: Pose }[];
+  setFocus?(pos: THREE.Vector3): void;
 }

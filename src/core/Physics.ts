@@ -19,7 +19,8 @@ export type ColliderKind =
   | 'ground' | 'road' | 'building' | 'prop' | 'staticProp' | 'parkedCar' | 'player' | 'npc' | 'debris' | 'water' | 'misc'
   | 'plane' | 'wreck'; // part 2: intact player plane parts (data: { part }), free wreck pieces
 export type SurfaceMaterial =
-  | 'concrete' | 'asphalt' | 'metal' | 'plastic' | 'glass' | 'wood' | 'foliage' | 'flesh' | 'sand' | 'grass' | 'water';
+  | 'concrete' | 'asphalt' | 'metal' | 'plastic' | 'glass' | 'wood' | 'foliage' | 'flesh' | 'sand' | 'grass' | 'water'
+  | 'rock' | 'snow' | 'dirt' | 'gravel'; // part 3 terrain
 
 export interface ColliderTag {
   kind: ColliderKind;

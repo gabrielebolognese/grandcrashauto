@@ -140,6 +140,7 @@ export class Game implements GameActions {
       await new Promise((r) => setTimeout(r, 0)); // let the progress bar paint
       await this.safeInit(sys);
     }
+    await this.warmUp();
     ctx.ui.setLoading(1, 'Ready');
 
     ctx.engine.onFixed = (dt) => this.fixed(dt);
@@ -154,6 +155,78 @@ export class Game implements GameActions {
       this.play();
     }
     window.addEventListener('pagehide', () => ctx.save.flush());
+  }
+
+  /**
+   * Pre-warm everything that would otherwise hitch during the first seconds of play (behind the loading bar):
+   * systems' warmup hooks, a temporary car (its paint/glass programs), parallel shader compilation of EVERY material
+   * in the scene (hidden objects included), then a few hidden frames so geometry/textures get uploaded to the GPU.
+   */
+  private async warmUp(): Promise<void> {
+    const { ctx } = this;
+    const { renderer, scene, camera } = ctx.engine;
+    const t0 = performance.now();
+    ctx.ui.setLoading(0.95, 'Warming up');
+    for (const sys of [ctx.env, ctx.world, ctx.terrain, ctx.highways, ctx.props, ctx.cars, ctx.planeModels, ctx.npcs, ctx.vehicle, ctx.planes, ctx.breakup, ctx.nav, ctx.fx, ctx.audio]) {
+      if (!sys?.warmup) continue;
+      try {
+        await sys.warmup();
+      } catch (err) {
+        reportError(`[${sys.name}] warmup failed`, err);
+      }
+    }
+    // Temporary player car far below the world: compiles the car materials before the first spawn.
+    let tmpCar: ReturnType<typeof ctx.cars.create> | null = null;
+    try {
+      tmpCar = ctx.cars.create(ctx.save.data.garage.current);
+      tmpCar.root.position.set(0, -500, 0);
+      scene.add(tmpCar.root);
+    } catch (err) {
+      reportError('[warmup] temp car failed', err);
+    }
+    // Make hidden meshes visible for the compile pass (never lights: that would change the light count).
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (!o.visible && !(o as THREE.Light).isLight) {
+        hidden.push(o);
+        o.visible = true;
+      }
+    });
+    ctx.ui.setLoading(0.97, 'Compiling shaders');
+    try {
+      const comp = (renderer as unknown as { compileAsync?: (s: THREE.Object3D, c: THREE.Camera) => Promise<unknown> }).compileAsync;
+      if (comp) await Promise.race([comp.call(renderer, scene, camera), new Promise((r) => setTimeout(r, 12000))]);
+      else renderer.compile(scene, camera);
+    } catch (err) {
+      reportError('[warmup] shader compile failed', err);
+    }
+    // A few hidden frames (the boot overlay covers the canvas) upload buffers/textures and build shadow maps.
+    try {
+      const prev = camera.position.clone();
+      const prevQ = camera.quaternion.clone();
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2;
+        camera.position.set(Math.cos(a) * 120, 60, Math.sin(a) * 120);
+        camera.lookAt(0, 0, 0);
+        camera.updateMatrixWorld();
+        ctx.engine.render(0);
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      camera.position.copy(prev);
+      camera.quaternion.copy(prevQ);
+    } catch (err) {
+      reportError('[warmup] warm frames failed', err);
+    }
+    for (const o of hidden) o.visible = false;
+    if (tmpCar) {
+      scene.remove(tmpCar.root);
+      try {
+        tmpCar.dispose();
+      } catch {
+        /* ignore */
+      }
+    }
+    console.info(`[warmup] done in ${Math.round(performance.now() - t0)} ms`);
   }
 
   private async safeInit(sys: GameSystem): Promise<void> {
@@ -209,6 +282,8 @@ export class Game implements GameActions {
     // Floating origin: re-centre the world when the focus wanders > ~2 km from the local origin.
     if (this.state === 'driving' && ctx.origin.maybeShift(this.focus)) this.focus.sub(ctx.origin.delta);
     ctx.world.setFocus(this.focus);
+    ctx.terrain.setFocus?.(this.focus);
+    ctx.highways.setFocus?.(this.focus);
     ctx.env.setShadowFocus(this.focus);
 
     if (this.simulating) {

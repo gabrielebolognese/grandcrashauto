@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "smoke": "node scripts/smoke.mjs",
     "check": "npm run typecheck && npm run build && npm run smoke",
-    "live": "vite --host --port 5999"
+    "live": "node scripts/live.mjs --port 5999"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
