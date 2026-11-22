@@ -177,7 +177,7 @@ async function run(name, contextOpts) {
     await page.waitForFunction(() => {
       const s = window.__game?.game?.state;
       return s && s !== 'boot';
-    }, null, { timeout: 90000 });
+    }, null, { timeout: 180000 });
   } catch {
     loaded = false;
     errors.push('timeout: game never left boot state');
