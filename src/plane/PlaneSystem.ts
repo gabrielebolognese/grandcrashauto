@@ -137,14 +137,18 @@ export class PlaneSystem implements IPlaneSystem {
   private cockpitPiece: WreckPiece | null = null;
   private cockpitEyePart = new THREE.Vector3();
   private cockpitPartName = 'cockpit';
-  private cockpitCutT = -1;
-  private cockpitRideT = 0;
-  private cockpitPrevSpeed = 0;
+  private middleSplitT = -99;
+  private camPiece: WreckPiece | null = null;
+  private preferPiece: WreckPiece | null = null;
+  private camRestT = 0;
   private lastPieces: WreckPiece[] = [];
   private submergedT = 0;
   private stallWarnOn = false;
   private oom = { state: 'ok' as 'ok' | 'warning' | 'failing', countdown: 0, distance: 0, failT: 0, nextT: 0, failed: 0, lastEngineT: -1, aglAtLast: 0, liftScale: 1, checkT: 0 };
   private turbT = 0;
+  private buffet = 0;
+  private buffetT = 0;
+  private shakeT = 0;
   private busy = false;
   private pending: { type: PlaneTypeId; air: boolean } | null = null;
   private instT = 0;
@@ -454,7 +458,10 @@ export class PlaneSystem implements IPlaneSystem {
     this.assistPenalty = 0;
     this.sideDrag = [];
     this.cockpitPiece = null;
-    this.cockpitCutT = -1;
+    this.camPiece = null;
+    this.preferPiece = null;
+    this.camRestT = 0;
+    this.middleSplitT = -99;
     this.lastPieces = [];
     this.submergedT = 0;
     this.crashed = false;
@@ -724,8 +731,8 @@ export class PlaneSystem implements IPlaneSystem {
       const I = this.model.inertia;
       const up = _v.set(0, 1, 0).applyQuaternion(visual.root.quaternion);
       const fwd = _v2.set(0, 0, 1).applyQuaternion(visual.root.quaternion);
-      const ky = I.y * 0.08 * side;
-      const kr = -I.z * 0.03 * side;
+      const ky = I.y * 0.12 * side;
+      const kr = -I.z * 0.04 * side;
       body.applyTorqueImpulse({ x: up.x * ky + fwd.x * kr, y: up.y * ky + fwd.y * kr, z: up.z * ky + fwd.z * kr }, true);
     }
     e.windmill = e.info.propeller ? Math.random() < 0.5 : true;
@@ -784,7 +791,9 @@ export class PlaneSystem implements IPlaneSystem {
     const v = body.linvel();
     const vel = new THREE.Vector3(v.x, v.y, v.z);
     const r = Math.max(2, visual.dims.height * 0.35);
-    this.inCockpitSequence = true;
+    // No cockpit ride (user feedback): the camera stays outside and follows the front section, framing both halves.
+    this.inCockpitSequence = false;
+    this.middleSplitT = this.simTime;
     let pieces: WreckPiece[] = [];
     try {
       pieces = ctx.breakup.breakJoints(this.tracked, ids, { center, energy: this.blastEnergy(0.35), kind: 'middle' });
@@ -798,10 +807,6 @@ export class PlaneSystem implements IPlaneSystem {
       ctx.fx.debrisBurst?.({ position: center, velocity: vel, count: 14, size: r * 0.25, kind: 'panel' });
       ctx.fx.debrisBurst?.({ position: center, velocity: vel, count: 18, size: r * 0.15, kind: 'paper' });
       ctx.events.emit('planeExplosion', { position: center, velocity: vel, radius: r * 2.2, kind: 'middle' });
-    }
-    if (!this.split) {
-      // No split happened (breakup stub): nothing to ride in.
-      this.inCockpitSequence = false;
     }
     ctx.game.slowMo(0.45, 1.2);
   }
@@ -850,11 +855,8 @@ export class PlaneSystem implements IPlaneSystem {
   }
 
   skipSequence(): void {
-    if (!this.inCockpitSequence) return;
+    // The explode-middle cockpit ride was removed (outside camera instead); nothing to skip.
     this.inCockpitSequence = false;
-    this.cockpitCutT = -1;
-    this.markCrashed();
-    this.updateCameraTarget();
   }
 
   // ─────────────────────────────── breakup callbacks ───────────────────────────────
@@ -901,14 +903,12 @@ export class PlaneSystem implements IPlaneSystem {
     this.split = true;
     this.lastPieces = pieces.slice();
     this.cockpitPiece = cockpit;
-    this.cockpitRideT = 0;
-    this.cockpitPrevSpeed = this.state.velocity.length();
-    if (this.inCockpitSequence && cockpit) {
-      // stay in the cockpit (explode middle)
-    } else {
-      this.inCockpitSequence = false;
-      this.markCrashed();
-    }
+    this.inCockpitSequence = false;
+    // camera: the front section first after a middle split, else the breakup's focus (largest burning) piece
+    this.camPiece = null;
+    this.camRestT = 0;
+    this.preferPiece = this.simTime - this.middleSplitT < 1 && cockpit ? cockpit : null;
+    this.markCrashed();
     if (this.stallWarnOn) {
       this.stallWarnOn = false;
       this.ctx.events.emit('stallWarning', { on: false });
@@ -918,45 +918,8 @@ export class PlaneSystem implements IPlaneSystem {
 
   private onCrash(t: TrackedPlane, outcome: CrashOutcome, info: ImpactInfo): void {
     if (t !== this.tracked || outcome === 'landing') return;
-    if (this.inCockpitSequence) {
-      // Only the cockpit section's own impact ends the ride; the rear half landing first doesn't.
-      if (this.cockpitPiece && this.cockpitPiece.parts.includes(info.part)) this.cockpitImpact();
-      return;
-    }
+    void info;
     this.markCrashed();
-  }
-
-  /** Cockpit section hit: violent shake inside, then a cut to the outside shot (SPEC-PART2 §11). */
-  private cockpitImpact(): void {
-    if (this.cockpitCutT >= 0) return;
-    this.cockpitCutT = 1.1;
-    this.ctx.events.emit('vibrate', { pattern: [80, 40, 160] });
-    try {
-      this.ctx.cameraRig.shake(1, 1);
-    } catch {
-      /* camera */
-    }
-  }
-
-  /** Watch the cockpit piece during the explode-middle ride: a sudden velocity loss = it hit something. */
-  private watchCockpit(realDt: number): void {
-    const pc = this.cockpitPiece;
-    if (!pc) return;
-    this.cockpitRideT += realDt;
-    let speed = 0;
-    let alive = false;
-    try {
-      if (this.ctx.physics.world.bodies.contains(pc.body.handle)) {
-        const v = pc.body.linvel();
-        speed = Math.hypot(v.x, v.y, v.z);
-        alive = true;
-      }
-    } catch {
-      alive = false;
-    }
-    const drop = this.cockpitPrevSpeed - speed;
-    this.cockpitPrevSpeed = speed;
-    if (!alive || drop > 10 || (this.cockpitRideT > 3 && speed < 3) || this.cockpitRideT > 75) this.cockpitImpact();
   }
 
   private markCrashed(): void {
@@ -1107,16 +1070,19 @@ export class PlaneSystem implements IPlaneSystem {
       }
     }
 
-    // Gear (G toggles; assisted auto retract/extend).
-    if (cfg.retractable && controllable && assisted && !this.gearCollapsed) {
-      if (!this.onGround && this.gearTarget === 1 && !this.autoGearUpDone && this.agl > A.autoGearUpAgl && vyPre > 0) {
+    // Gear: automatic in both modes (there is no GEAR button; G stays as an override for 8 s).
+    // Up after lift-off (Assisted > autoGearUpAgl, Realistic > autoGearUpAglRealistic, climbing); down on approach
+    // (descending below autoGearDownAgl under autoGearDownSpeed × Vs) or whenever close to the ground and slow.
+    if (cfg.retractable && controllable && !this.gearCollapsed && !this.onGround && this.simTime - this.manualGearT > 8) {
+      const upAgl = assisted ? A.autoGearUpAgl : A.autoGearUpAglRealistic;
+      if (this.gearTarget === 1 && !this.autoGearUpDone && this.agl > upAgl && vyPre > 1) {
         this.gearTarget = 0;
         this.autoGearUpDone = true;
         this.autoGearUpT = this.simTime;
       }
-      if (!this.onGround && this.gearTarget === 0 && this.agl < A.autoGearDownAgl && vyPre < -1.5 && V < A.autoGearDownSpeed * model.vStall && this.simTime - this.manualGearT > 8 && this.simTime - this.autoGearUpT > 12) {
-        this.gearTarget = 1;
-      }
+      const approachDown = this.agl < A.autoGearDownAgl && vyPre < -1 && V < A.autoGearDownSpeed * model.vStall && this.simTime - this.autoGearUpT > 10;
+      const nearGround = this.agl < A.autoGearNearAgl && V < 2 * model.vStall && vyPre < 0.5;
+      if (this.gearTarget === 0 && (approachDown || nearGround)) this.gearTarget = 1;
     }
     if (!cfg.retractable) this.gearTarget = 1;
     if (this.onGround && !this.gearCollapsed) this.gearTarget = 1;
@@ -1131,12 +1097,16 @@ export class PlaneSystem implements IPlaneSystem {
     else if (kmh < cfg.flapsUpKmh - 25 && this.flapsTarget === 0) this.flapsTarget = 0.5;
     this.flaps = approach(this.flaps, this.flapsTarget, 0.22 * dt);
 
-    // Brakes.
-    const brakeIn = controllable && inp.planeBrake ? 1 : 0;
-    if (this.parking && (this.throttle > Math.max(0.12, cfg.idle + 0.05) || !controllable)) this.parking = this.crashed ? this.parking : false;
-    if (this.onGround && gs < 0.3 && this.throttle < 0.03 && controllable) {
+    // Brakes: automatic (no BRAKE button). On the ground with the throttle at/near idle the wheel brakes work
+    // (landing rollout, stopping on the apron) and the parking brake sets once stopped; any throttle releases both.
+    // B / Space stay as a manual override.
+    const idleish = this.throttle <= A.autoBrakeThrottle;
+    const autoBrake = controllable && this.onGround && idleish && this.airborneT === 0;
+    const brakeIn = controllable && (inp.planeBrake || autoBrake) ? 1 : 0;
+    if (this.parking && !this.crashed && controllable && !idleish) this.parking = false;
+    if (this.onGround && gs < 0.5 && idleish && controllable) {
       this.holdStillT += dt;
-      if (this.holdStillT > 2) this.parking = true;
+      if (this.holdStillT > 0.4) this.parking = true;
     } else this.holdStillT = 0;
 
     // Nose-wheel steering: tiller below 60 km/h, pedal steering above; assisted heading hold.
@@ -1189,6 +1159,20 @@ export class PlaneSystem implements IPlaneSystem {
         tb.z += (Math.random() - 0.5) * 3.2 * k;
         tb.y += (Math.random() - 0.5) * 1.0 * k;
         this.inputs.turbVert += (Math.random() - 0.5) * 2 * CONFIG.planes.turbulence.vertical * storm * cfg.turbulence * 2;
+      }
+    }
+
+    // Stall buffet (feel cue — the HUD has no speed tape): shaking grows as the AoA nears the stall.
+    const aWarn = model.alphaStallBody - A.stallMarginDeg * DEG;
+    const depth = this.onGround || this.crashed ? 0 : clamp((model.alpha - aWarn) / ((A.stallMarginDeg + 3) * DEG), 0, 1);
+    this.buffet = depth;
+    if (depth > 0) {
+      this.buffetT -= dt;
+      if (this.buffetT <= 0) {
+        this.buffetT = 0.06 + Math.random() * 0.06;
+        const k = depth * (0.2 + 0.8 * cfg.turbulence);
+        tb.x += (Math.random() - 0.5) * k;
+        tb.z += (Math.random() - 0.5) * k * 1.4;
       }
     }
 
@@ -1461,23 +1445,22 @@ export class PlaneSystem implements IPlaneSystem {
     if (this.active && this.visual) {
       const visual = this.visual;
       if (this.body) this.interp.apply(visual.root, alpha);
+      // buffet felt through the camera too
+      this.shakeT -= realDt;
+      if (this.buffet > 0.05 && this.shakeT <= 0) {
+        this.shakeT = 0.25;
+        try {
+          ctx.cameraRig.shake(0.04 + 0.16 * this.buffet, 0.3);
+        } catch {
+          /* camera */
+        }
+      }
       this.updateVisual(dt, realDt, visual, night);
       this.fillState();
     }
     if (this.active) {
       if (this.crashed) this.crashTime += realDt;
-      if (this.inCockpitSequence && this.cockpitCutT < 0) this.watchCockpit(realDt);
-      if (this.cockpitCutT >= 0) {
-        this.cockpitCutT -= realDt;
-        if (this.cockpitCutT < 0) {
-          this.fadeThen(() => {
-            this.inCockpitSequence = false;
-            this.markCrashed();
-            this.updateCameraTarget();
-          });
-        }
-      }
-      this.updateCameraTarget();
+      this.updateCameraTarget(realDt);
     }
     this.updateBoardCandidate();
   }
@@ -1613,7 +1596,91 @@ export class PlaneSystem implements IPlaneSystem {
     }
   }
 
-  private updateCameraTarget(): void {
+  private pieceAlive(p: WreckPiece, list: readonly WreckPiece[]): boolean {
+    if (!list.includes(p)) return false;
+    try {
+      return this.ctx.physics.world.bodies.contains(p.body.handle);
+    } catch {
+      return false;
+    }
+  }
+
+  private pieceSpeed(p: WreckPiece): number {
+    try {
+      const v = p.body.linvel();
+      return Math.hypot(v.x, v.y, v.z);
+    } catch {
+      return 0;
+    }
+  }
+
+  private pickWreckPiece(realDt: number): WreckPiece | null {
+    let list: readonly WreckPiece[] = [];
+    try {
+      list = this.ctx.breakup.pieces;
+    } catch {
+      list = [];
+    }
+    if (!list.length) list = this.lastPieces;
+    if (!list.length) return null;
+    let cur = this.camPiece && this.pieceAlive(this.camPiece, list) ? this.camPiece : null;
+    if (!cur && this.preferPiece && this.pieceAlive(this.preferPiece, list)) cur = this.preferPiece;
+    if (cur) {
+      if (this.pieceSpeed(cur) < 1.5) this.camRestT += realDt;
+      else this.camRestT = 0;
+      if (this.camRestT < 0.8) return (this.camPiece = cur);
+    }
+    let best: WreckPiece | null = null;
+    let bestM = 0;
+    for (const p of list) {
+      if (!this.pieceAlive(p, list) || this.pieceSpeed(p) < 3) continue;
+      if (p.mass > bestM) {
+        best = p;
+        bestM = p.mass;
+      }
+    }
+    if (!best) {
+      let focus: WreckPiece | null = null;
+      try {
+        focus = this.ctx.breakup.focusPiece;
+      } catch {
+        focus = null;
+      }
+      if (focus && this.pieceAlive(focus, list)) best = focus;
+      else {
+        for (const p of list) {
+          if (!this.pieceAlive(p, list)) continue;
+          const score = p.mass * (p.burning > 0 ? 3 : 1);
+          if (score > bestM) {
+            best = p;
+            bestM = score;
+          }
+        }
+      }
+    }
+    if (best && best !== cur) {
+      this.camRestT = 0;
+      this.preferPiece = null;
+    }
+    this.camPiece = best ?? cur;
+    return this.camPiece;
+  }
+
+  /** Distance from `p` to the farthest other big piece (framing both halves after a middle split). */
+  private spreadAround(p: WreckPiece): number {
+    let list: readonly WreckPiece[] = [];
+    try {
+      list = this.ctx.breakup.pieces;
+    } catch {
+      return 0;
+    }
+    const a = p.object.position;
+    let d = 0;
+    for (const o of list) if (o !== p && o.mass > p.mass * 0.3) d = Math.max(d, a.distanceTo(o.object.position));
+    return d;
+  }
+
+  private updateCameraTarget(realDt = 0): void {
     const visual = this.visual;
     if (!this.active || !visual) {
       this.cameraTarget = null;
@@ -1628,32 +1695,16 @@ export class PlaneSystem implements IPlaneSystem {
       tg.velocity.set(v.x, v.y, v.z);
       tg.cockpitEye = visual.cockpitEye;
       tg.wingCam = visual.wingCam;
-    } else if (this.inCockpitSequence && this.cockpitPiece) {
-      const pc = this.cockpitPiece;
-      tg.object = pc.object;
-      tg.kind = 'cockpitPiece';
-      tg.size = Math.max(4, visual.dims.length * 0.35);
-      this.pieceVelocity(pc, tg.velocity);
-      const part = visual.partByName[this.cockpitPartName];
-      const eye = (tg.cockpitEye && tg.cockpitEye !== visual.cockpitEye ? tg.cockpitEye : new THREE.Vector3());
-      if (part) {
-        pc.object.updateMatrixWorld(true);
-        part.object.localToWorld(eye.copy(this.cockpitEyePart));
-        pc.object.worldToLocal(eye);
-      }
-      tg.cockpitEye = eye;
-      tg.wingCam = undefined;
     } else {
-      let focus: WreckPiece | null = null;
-      try {
-        focus = this.ctx.breakup.focusPiece;
-      } catch {
-        focus = null;
-      }
-      if (!focus && this.lastPieces.length) focus = this.lastPieces.reduce((a, b) => (b.mass > a.mass ? b : a));
+      // Wreck camera — never frozen: follow the largest still-moving piece (switch when it comes to rest while
+      // others still fall); once everything has settled, the biggest burning piece (the rig orbits it).
+      const focus = this.pickWreckPiece(realDt);
       if (focus) {
         tg.object = focus.object;
-        tg.size = Math.max(5, visual.dims.length * Math.cbrt(focus.mass / Math.max(1, visual.mass)));
+        let size = Math.max(5, visual.dims.length * Math.cbrt(focus.mass / Math.max(1, visual.mass)));
+        // right after a middle split, widen to frame both halves
+        if (this.simTime - this.middleSplitT < 8) size = Math.max(size, this.spreadAround(focus) * 1.1, visual.dims.length * 0.8);
+        tg.size = size;
         this.pieceVelocity(focus, tg.velocity);
       } else {
         tg.object = visual.root;

@@ -140,6 +140,8 @@ export class FlightModel {
   readonly controls = { elevator: 0, aileron: 0, rudder: 0 };
   /** Stabilizer trim (rad, added to the tailplane incidence): auto-trim drives the steady elevator to zero. */
   trim = 0;
+  /** Yaw-right moment from asymmetric thrust + side drag this step (N·m), trimmed out by rudder. */
+  asymYaw = 0;
   /** Test hook: disable the assisted stall nudge (stall-speed measurement). */
   noStallNudge = false;
   // assist state
@@ -486,6 +488,7 @@ export class FlightModel {
       _f.copy(vl).multiplyScalar((-q * sd.cdA) / V);
       F.add(_f);
       M.add(_t.crossVectors(sd.point, _f));
+      this.asymYaw -= _t.y;
     }
     // Fuselage: side force, Munk moments (destabilising), camber + flap moment, stall break, extra damping.
     const alpha = Math.atan2(-vl.y, vl.z);
@@ -545,6 +548,7 @@ export class FlightModel {
     if (!this.stall && this.wasStalled) this.stallBias = (Math.random() - 0.5) * 1.6 * DEG;
     this.wasStalled = this.stall;
 
+    this.asymYaw = 0;
     this.aero(_vl, _wl, inp, _F, _M);
 
     // Thrust at each engine, along the body forward axis.
@@ -554,8 +558,10 @@ export class FlightModel {
       _f.set(0, 0, T);
       _F.add(_f);
       _M.add(_t.crossVectors(this.engines[i].point, _f));
+      this.asymYaw -= _t.y;
     }
-    // Everything the assists must fight (aero + thrust line); yaw is deliberately not cancelled (engine-out felt).
+    // Everything the assists must fight (aero + thrust line). Asymmetric yaw (engine out, fire drag) is trimmed out
+    // with rudder: fully in Assisted, partly in Realistic — a twin on one engine flies straight at 50 % power.
     const aeroPitchUp = -_M.x;
     const aeroRoll = _M.z;
 
@@ -598,7 +604,8 @@ export class FlightModel {
           qCmd = sP * pitchMax + ff * 0.5;
           this.gammaHold = this.gamma;
         } else {
-          if (this.stickWasActive) this.gammaHold = this.gamma;
+          // releasing the stick holds the current flight path — but never a steep dive/zoom (stall recovery)
+          if (this.stickWasActive) this.gammaHold = clamp(this.gamma, -15 * DEG, 20 * DEG);
           this.gammaHold = Math.min(this.gammaHold, inp.gammaCap);
           this.gammaHold = clamp(this.gammaHold, -thMax + 5 * DEG, thMax - 5 * DEG);
           qCmd = cfg.gammaK * (this.gammaHold - this.gamma) + ff;
@@ -639,11 +646,15 @@ export class FlightModel {
         coord = (I.y * (-A.yawRateK * this.r)) / ctlY;
       }
       const ground = inp.onGround ? sR : 0;
-      dr = clamp(sY + ground + af * clamp(coord, -A.rudderAssistMax, A.rudderAssistMax), -1, 1);
+      const yawTrim = clamp(-this.asymYaw / ctlY, -1, 1);
+      dr = clamp(sY + ground + af * (clamp(coord, -A.rudderAssistMax, A.rudderAssistMax) + yawTrim), -1, 1);
     } else {
       this.stickWasActive = Math.abs(sP) > 0.06;
       this.gammaHold = this.gamma;
       if (inp.onGround) dr = clamp(sY + sR, -1, 1);
+      // Realistic: a partial rudder trim for asymmetric thrust (the pilot still has to help with the pedals)
+      const ctlY = Math.max(1e-3, this.Ay * I.y * Math.min(qn, this.qnMax[2]));
+      if (V > 2) dr = clamp(dr + 0.4 * clamp(-this.asymYaw / ctlY, -1, 1), -1, 1);
       de = clamp(de, -1, 1);
     }
     // Auto-trim (stabilizer): steady elevator is trimmed out — fast in Assisted, slow in Realistic.

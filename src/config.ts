@@ -1184,6 +1184,7 @@ export const CONFIG = {
     blastFx: true, // breakJoints with a 'middle'/'tail' blast spawns the fireball + emits planeExplosion
     guardGain: 4, // m/s a piece may gain per physics step (solver depenetration guard)
     guardRestitution: 0.12, // max bounce-back speed as a fraction of the recent impact speed
+    focusMinMassFrac: 0.04, // camera focus ignores pieces lighter than this × the biggest piece
     maxAngvel: 30, // rad/s cap for wreck pieces
     damage: {
       vBreak: 14, // m/s of impact severity that breaks a strength-1 joint at the contact
@@ -1205,7 +1206,8 @@ export const CONFIG = {
       maxFrac: 0.25,
       groundMax: 12, // m/s cap when not flying
       tumble: 1.6, // rad/s random tumble (scaled down for heavy pieces)
-      middleSeparation: 7, // m/s total separation speed of the two halves along the fuselage
+      middleSeparation: 12, // m/s total separation speed of the two halves along the fuselage
+      middlePitch: 0.3, // rad/s: the cut levers the halves apart (front nose-down, rear nose-up)
       middleSpin: 0.35,
     },
     air: {
