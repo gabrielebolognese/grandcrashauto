@@ -83,14 +83,14 @@ export function castSolid(ctx: GameContext, origin: THREE.Vector3, dir: THREE.Ve
  * Keep a camera position above the ground / water surface. `refY` is the subject's height: a "ground" more than
  * a few meters above it is an overhead deck (highway overpass), not something to climb on top of.
  */
-export function clampAboveGround(ctx: GameContext, p: THREE.Vector3, refY: number, clearance: number): void {
+export function clampAboveGround(ctx: GameContext, p: THREE.Vector3, refY: number, clearance: number, maxAbove = 3): void {
   let g = -Infinity;
   try {
     g = ctx.world.groundHeightAt(p.x, p.z);
   } catch {
     /* world not ready */
   }
-  if (!Number.isFinite(g) || g > refY + 3) g = -Infinity;
+  if (!Number.isFinite(g) || g > refY + maxAbove) g = -Infinity;
   const water = CONFIG.world.waterLevel;
   const floor = Math.max(g, water) + clearance;
   if (p.y < floor) p.y = floor;

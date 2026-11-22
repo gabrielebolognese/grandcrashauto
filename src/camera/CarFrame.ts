@@ -45,6 +45,18 @@ export class CarFrame {
   boost = 0;
   /** Vertical impact speed (m/s) on the frame the car lands after real airtime, else 0. */
   landing = 0;
+  // Part 3
+  /** 0..1 eased turbo amount (builds in ~0.3 s, fades ~0.8 s). */
+  turbo = 0;
+  turboOn = false;
+  /** Stunt airborne mode (big jump) active. */
+  bigAir = false;
+  /** Barrel roll in progress. */
+  rolling = false;
+  /** 0..1 eased "in a tunnel" amount. */
+  tunnel = 0;
+  private tunnelCheckT = 0;
+  private tunnelRaw = false;
 
   // Local-space measurements (car faces +Z).
   readonly bmin = new THREE.Vector3(-0.9, 0, -2.15);
@@ -131,7 +143,34 @@ export class CarFrame {
     this.tumbling = !!s.upsideDown || this.up.y < 0.35 || Math.abs(this.fwd.y) > 0.8;
     this.reversing = (s.gear === -1 && this.speed < -0.3) || (this.speed < -1.2 && Math.abs(this.slip) > 2.4 && s.throttle < 0.1);
     this.boost = s.boost ?? 0;
+
+    // Part 3: turbo, stunts, tunnels (all optional in the vehicle/highway contracts).
+    this.turboOn = !!s.turboActive && !this.exploded;
+    const tt = this.turboOn ? 1 : 0;
+    this.turbo += (tt - this.turbo) * expK(this.turboOn ? 9 : 3, dt);
+    const a3 = s.airborne3;
+    this.bigAir = !!a3?.active;
+    this.rolling = !!a3?.rolling;
+    this.tunnelCheckT -= dt;
+    if (this.tunnelCheckT <= 0) {
+      this.tunnelCheckT = 0.1;
+      try {
+        this.tunnelRaw = !!ctx.highways?.inTunnel?.(this.pos);
+      } catch {
+        this.tunnelRaw = false;
+      }
+    }
+    this.tunnel += ((this.tunnelRaw ? 1 : 0) - this.tunnel) * expK(this.tunnelRaw ? 6 : 2, dt);
+    if (this.fresh) this.tunnel = this.tunnelRaw ? 1 : 0;
     return true;
+  }
+
+  /** Shift cached world-space state (floating origin). */
+  shift(dx: number, dz: number): void {
+    this.pos.x -= dx;
+    this.pos.z -= dz;
+    this.pivot.x -= dx;
+    this.pivot.z -= dz;
   }
 
   /** Call after consuming `fresh`. */

@@ -39,6 +39,29 @@ export class ChaseCam {
   private readonly desired = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
   private readonly origin = new THREE.Vector3();
+  // Part 3: barrel-roll side swing (0..1) and its hold timer after a 'stunt' event.
+  private rollSwing = 0;
+  private rollHold = 0;
+  private airWide = 0;
+
+  /** Floating origin: the world moved by -(dx, 0, dz). */
+  shift(dx: number, dz: number): void {
+    this.pivot.x -= dx;
+    this.pivot.z -= dz;
+    this.pose.pos.x -= dx;
+    this.pose.pos.z -= dz;
+  }
+
+  /** Vertical camera kick (clean landing "bump"): the camera dips and springs back. */
+  bump(speed: number): void {
+    this.inertiaV.y -= speed;
+  }
+
+  /** Show a barrel roll from the side for a moment (used when the vehicle reports the stunt by event only). */
+  showRoll(seconds: number): void {
+    // Only when the live `airborne3.rolling` flag wasn't seen (the event fires at the END of a roll).
+    if (this.rollSwing < 0.2) this.rollHold = Math.max(this.rollHold, seconds);
+  }
 
   /** Instantly place the camera behind the car for its current speed. */
   snap(f: CarFrame): void {
@@ -57,6 +80,9 @@ export class ChaseCam {
     this.prevVel.copy(f.vel);
     this.lead = 0;
     this.roll = 0;
+    this.rollSwing = 0;
+    this.rollHold = 0;
+    this.airWide = 0;
     this.occ.reset();
   }
 
@@ -81,7 +107,9 @@ export class ChaseCam {
     const c = CONFIG.camera;
     let d = lerp(c.distance, c.distanceMax, f.speedN) * this.sizeK(f);
     if (f.exploded) d *= c.wreckDistance;
-    else if (f.airborne && f.airTime > 0.25) d *= 1 + c.airPullback * smooth01((f.airTime - 0.25) / 0.8);
+    else d *= 1 + c.airPullback * this.airWide;
+    d *= 1 + c.turboPullback * f.turbo;
+    d *= 1 - c.tunnelCloser * f.tunnel;
     return d * this.zoom;
   }
 
@@ -89,12 +117,14 @@ export class ChaseCam {
     const c = CONFIG.camera;
     let h = lerp(c.height, c.heightMax, f.speedN) * clamp(f.height / 1.35, 0.85, 1.5);
     if (f.exploded) h *= c.wreckHeight;
+    h *= 1 - c.turboLower * f.turbo;
+    h *= 1 - c.tunnelLower * f.tunnel;
     return h * lerp(1, this.zoom, 0.7);
   }
 
   private targetFov(f: CarFrame): number {
     const c = CONFIG.camera;
-    return lerp(c.fov, c.fovMax, Math.pow(f.speedN, 1.35)) + f.boost * c.boostFov;
+    return lerp(c.fov, c.fovMax, Math.pow(f.speedN, 1.35)) + f.boost * c.boostFov + c.airFov * this.airWide;
   }
 
   private targetHeading(f: CarFrame): { yaw: number; smooth: number } {
@@ -136,6 +166,13 @@ export class ChaseCam {
     }
     if (Math.abs(this.heading) > 64) this.heading = wrapAngle(this.heading);
 
+    // ── stunts: wider framing in big air, swing to the side to show a barrel roll ──
+    const airT = !f.exploded && (f.bigAir || (f.airborne && f.airTime > 0.25)) ? 1 : 0;
+    this.airWide += (airT - this.airWide) * expK(airT ? 2.5 : 1.5, dt);
+    this.rollHold = Math.max(0, this.rollHold - dt);
+    const swingT = !f.exploded && (f.rolling || this.rollHold > 0) ? 1 : 0;
+    this.rollSwing += (swingT - this.rollSwing) * expK(swingT ? 3.2 : 1.6, dt);
+
     // ── distance / height / fov ──
     this.zoom += (this.zoomTarget - this.zoom) * expK(8, dt);
     this.dist += (this.targetDist(f) - this.dist) * expK(c.distSmooth, dt);
@@ -173,21 +210,25 @@ export class ChaseCam {
     this.roll += (rollT - this.roll) * expK(3.5, dt);
 
     // ── compose ──
-    const yawCam = this.heading + Math.PI * lookBack;
+    const swing = smooth01(this.rollSwing) * (1 - lookBack);
+    const yawCam = this.heading + Math.PI * lookBack + c.rollOrbit * swing;
     const dx = Math.sin(yawCam);
     const dz = Math.cos(yawCam);
+    const ahead = this.ahead * (1 - 0.85 * swing); // side view of a roll: aim at the car, not past it
     this.desired.set(this.pivot.x - dx * this.dist, this.pivot.y + this.height, this.pivot.z - dz * this.dist).add(this.inertiaOut);
-    this.look.set(this.pivot.x + dx * this.ahead, this.pivot.y + c.lookHeight, this.pivot.z + dz * this.ahead);
+    this.look.set(this.pivot.x + dx * ahead, this.pivot.y + c.lookHeight, this.pivot.z + dz * ahead);
 
     // Occlusion from roof height, then lift a little when pulled in so we look over the car.
     this.origin.set(this.pivot.x, this.pivot.y + f.height * 0.4, this.pivot.z);
     const p = this.pose.pos;
     this.occ.apply(ctx, this.origin, this.desired, dt, p);
-    p.y += this.occ.pull * c.occlusionLift;
-    clampAboveGround(ctx, p, f.pivot.y, c.groundClearance);
+    // In a tunnel, don't lift (the ceiling is close); a "ground" far above the car is the mountain over us.
+    p.y += this.occ.pull * c.occlusionLift * (1 - f.tunnel);
+    clampAboveGround(ctx, p, f.pivot.y, c.groundClearance, f.tunnel > 0.5 ? 0.6 : 3);
 
     this.pose.lookAt(this.look, this.roll);
     this.pose.yawBy(this.lead);
-    this.pose.fov = this.fov;
+    // Turbo FOV kick rides on top of the smoothed speed FOV so it hits fast (SPEC-PART3 §7: +12–18°).
+    this.pose.fov = this.fov + c.turboFov * smooth01(f.turbo);
   }
 }

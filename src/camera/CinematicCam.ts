@@ -36,6 +36,13 @@ export class CinematicCam {
     return this.t >= this.duration;
   }
 
+  shift(dx: number, dz: number): void {
+    for (const v of [this.blast, this.focus, this.center, this.pose.pos]) {
+      v.x -= dx;
+      v.z -= dz;
+    }
+  }
+
   start(ctx: GameContext, target: THREE.Vector3, duration: number, fromCam: THREE.Vector3): void {
     const c = CONFIG.camera;
     this.blast.copy(target);

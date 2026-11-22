@@ -56,9 +56,14 @@ export class OrbitCam {
   private moving = false;
 
   update(ctx: GameContext, f: CarFrame, pivot: THREE.Vector3, chaseDist: number, dt: number): void {
+    this.updateAround(ctx, pivot, chaseDist * 1.05, f.hSpeed > 3, f.height * 0.15, f.pivot.y, CONFIG.camera.fov, dt);
+  }
+
+  /** Generic orbit around `pivot` (planes, wrecks). `moving` disables the turntable; refY = subject height. */
+  updateAround(ctx: GameContext, pivot: THREE.Vector3, wantDist: number, moving: boolean, lookUp: number, refY: number, fov: number, dt: number): void {
     const c = CONFIG.camera;
     this.idle += dt;
-    this.moving = f.hSpeed > 3;
+    this.moving = moving;
     // Showroom turntable when parked and left alone.
     const turntable = this.explicit && !this.moving && this.idle > 1.2;
     this.spin += ((turntable ? c.orbitAutoRotate : 0) - this.spin) * expK(1.5, dt);
@@ -66,8 +71,7 @@ export class OrbitCam {
 
     this.yaw += (this.yawT - this.yaw) * expK(10, dt);
     this.pitch += (this.pitchT - this.pitch) * expK(10, dt);
-    const wantDist = Math.max(3, chaseDist * 1.05);
-    this.dist += (wantDist - this.dist) * expK(3, dt);
+    this.dist += (Math.max(3, wantDist) - this.dist) * expK(3, dt);
 
     const cp = Math.cos(this.pitch);
     this.desired.set(
@@ -75,11 +79,16 @@ export class OrbitCam {
       pivot.y + Math.sin(this.pitch) * this.dist,
       pivot.z + Math.cos(this.yaw) * cp * this.dist,
     );
-    this.look.set(pivot.x, pivot.y + f.height * 0.15, pivot.z);
+    this.look.set(pivot.x, pivot.y + lookUp, pivot.z);
     const p = this.pose.pos;
     this.occ.apply(ctx, this.look, this.desired, dt, p);
-    clampAboveGround(ctx, p, f.pivot.y, c.groundClearance);
+    clampAboveGround(ctx, p, refY, c.groundClearance);
     this.pose.lookAt(this.look);
-    this.pose.fov = c.fov;
+    this.pose.fov = fov;
+  }
+
+  shift(dx: number, dz: number): void {
+    this.pose.pos.x -= dx;
+    this.pose.pos.z -= dz;
   }
 }

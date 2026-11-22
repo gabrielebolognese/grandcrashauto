@@ -8,31 +8,42 @@ import { ChaseCam } from './ChaseCam';
 import { CinematicCam } from './CinematicCam';
 import { HoodCam } from './HoodCam';
 import { OrbitCam } from './OrbitCam';
+import { PlaneRig } from './PlaneRig';
+import { ScreenFlash } from './ScreenFlash';
 import { Shake } from './Shake';
 import { Showcase } from './Showcase';
 
 /** Which controller currently produces the pose ('hold' = freeze on the last pose, nothing to follow). */
-type Ctrl = 'chase' | 'hood' | 'orbit' | 'cine' | 'show' | 'hold';
+type Ctrl = 'chase' | 'hood' | 'orbit' | 'cine' | 'show' | 'plane' | 'hold';
 
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
 const _v = new THREE.Vector3();
 
 /**
- * Camera rig (SPEC §10, §11, §13). Owner: camera module.
+ * Camera rig (SPEC §10, §11, §13; PART2 cameras/crash camera; PART3 turbo/stunts/floating origin). Owner: camera.
  *
- * Modes: chase (spring follow), hood (mounted), orbit (drag, auto-returns), cinematic (explosion orbit) and
- * showcase (title/menu city tour). Every controller writes a CamPose; the rig picks the active one, blends
- * between controllers (spherically around the car so transitions swing around it rather than through it),
- * then adds trauma shake + FOV punch and an aspect-aware FOV correction before writing `ctx.engine.camera`.
+ * Car modes: chase (spring follow), hood (mounted), orbit (drag, auto-returns), cinematic (explosion orbit) and
+ * showcase (title/menu city tour). In plane mode a PlaneRig (chase/cockpit/wing/orbit + explosion/crash phases)
+ * takes over. Every controller writes a CamPose; the rig picks the active one, blends between controllers
+ * (spherically around the subject so transitions swing around it rather than through it), then adds trauma
+ * shake + FOV punch, an aspect-aware FOV correction and view-dependent near/far before writing `engine.camera`.
  *
- * All smoothing runs on real time (`engine.realDt`), so the explosion slow-mo plays out while the camera keeps
- * moving at full speed — the classic "bullet time" look. Every tunable lives in CONFIG.camera.
+ * All smoothing runs on real time (`engine.realDt`), so explosion slow-mo plays out while the camera keeps moving
+ * at full speed — the classic "bullet time" look. Every tunable lives in CONFIG.camera.
  */
 export class CameraRig implements ICameraRig {
   readonly name = 'camera';
   private _mode: CameraMode = 'showcase';
+
   get mode(): CameraMode {
+    if (this.planeMode()) return this.plane.modeLabel;
+    return this._mode;
+  }
+
+  /** Concrete view (adds plane 'cockpit' / 'wing'): chase | hood | orbit | cockpit | wing | cinematic | showcase. */
+  get view(): 'chase' | 'hood' | 'orbit' | 'cockpit' | 'wing' | 'cinematic' | 'showcase' {
+    if (this.planeMode()) return this.plane.viewLabel as 'chase';
     return this._mode;
   }
 
@@ -43,6 +54,8 @@ export class CameraRig implements ICameraRig {
   private readonly cine = new CinematicCam();
   private readonly show: Showcase;
   private readonly shakeFx = new Shake();
+  private readonly flash = new ScreenFlash();
+  private readonly plane: PlaneRig;
 
   /** Final pose before shake. */
   private readonly out = new CamPose();
@@ -69,17 +82,32 @@ export class CameraRig implements ICameraRig {
 
   constructor(private readonly ctx: GameContext) {
     this.show = new Showcase(ctx);
+    this.plane = new PlaneRig(ctx, this.shakeFx, this.flash);
   }
 
   init(): void {
     const { events } = this.ctx;
     this.show.init();
+    this.flash.init();
+    this.plane.init();
     this.unsubs.push(
       events.on('explosion', (e) => this.onExplosion(e.position, e.force)),
       events.on('impact', (e) => this.onImpact(e.strength)),
       events.on('stateChanged', ({ to }) => {
         // The showcase overlay must never linger over the garage or the drive.
         if (to !== 'title' && to !== 'menu') this.show.stop();
+        if (to !== 'driving' && to !== 'paused') this.flash.clear();
+      }),
+      events.on('originShift', ({ delta }) => this.onOriginShift(delta.x, delta.z)),
+      events.on('turbo', ({ on }) => {
+        if (!on || this.planeMode() || this._mode === 'showcase') return;
+        const c = CONFIG.camera;
+        this.shakeFx.add(c.turboShake, 0.6);
+        this.shakeFx.kick(c.turboPunch);
+      }),
+      events.on('stunt', (e) => this.onStunt(e.kind)),
+      events.on('modeChanged', ({ mode }) => {
+        if (mode === 'plane') this.plane.snap();
       }),
     );
     this.bindPointer();
@@ -89,9 +117,18 @@ export class CameraRig implements ICameraRig {
     this.holdPose.copy(this.out);
   }
 
+  private planeMode(): boolean {
+    return this.ctx.game?.mode === 'plane' && this._mode !== 'showcase';
+  }
+
   // ───────────────────────────── ICameraRig ─────────────────────────────
   cycleMode(): void {
     if (this._mode === 'showcase') return;
+    if (this.planeMode()) {
+      const label = this.plane.cycle();
+      if (label) this.ctx.events.emit('toast', { text: label, ms: 1100 });
+      return;
+    }
     if (this._mode === 'cinematic') {
       this.endCinematic(false);
       return;
@@ -128,6 +165,7 @@ export class CameraRig implements ICameraRig {
   }
 
   skipCinematic(): void {
+    if (this.planeMode()) this.plane.endPhase();
     if (this._mode !== 'cinematic') return;
     this.endCinematic(true);
   }
@@ -137,6 +175,10 @@ export class CameraRig implements ICameraRig {
     this.snapPending = true;
     this.cutNext = true;
     this.blendFrom = null;
+    if (this.planeMode()) {
+      this.plane.snap();
+      return;
+    }
     // Best effort right now; repeated on the next update with fresh vehicle state (spawn/reset happen
     // before the vehicle has re-published its interpolated transform).
     if (this.frame.update(this.ctx, 0)) {
@@ -170,6 +212,7 @@ export class CameraRig implements ICameraRig {
     this.blendFrom = null;
     this.lookBack = 0;
     this.shakeFx.reset();
+    this.flash.clear();
     this.show.start();
   }
 
@@ -200,6 +243,8 @@ export class CameraRig implements ICameraRig {
   private blendDuration(from: Ctrl, to: Ctrl): number {
     const c = CONFIG.camera;
     if (from === 'show' || to === 'show' || from === 'hold' || to === 'hold') return 0;
+    if (to === 'plane') return c.planeBoardBlend; // camera move from the car to the plane
+    if (from === 'plane') return c.planeExitBlend;
     if (to === 'cine') return c.cineBlendIn + this.cine.extraBlend;
     if (from === 'cine') return c.cineBlendOut;
     if (from === 'orbit' && to === 'chase') return this.lookBack > 0 ? Math.max(0.05, c.lookBackBlend) : c.orbitBlend;
@@ -207,16 +252,26 @@ export class CameraRig implements ICameraRig {
     return 0; // chase ⇄ hood: a clean cut (a blend would fly through the car body)
   }
 
+  /** Pivot for spherical blending: the subject we are blending TO. */
+  private pivotFor(_a: Ctrl | 'frozen' | null, b: Ctrl): THREE.Vector3 | null {
+    if (b === 'plane') return this.plane.active ? this.plane.pivot : null;
+    return this.frame.active ? this.chase.pivot : null;
+  }
+
+  private frozenOnCar = false;
+
   private transition(to: Ctrl): void {
     const from = this.active;
     const dur = this.cutNext ? 0 : this.blendDuration(from, to);
     this.cutNext = false;
     if (dur <= 0) {
       this.blendFrom = null;
-    } else if (this.blendFrom !== null) {
-      // Interrupted mid-blend: freeze what's on screen (relative to the car) and blend from that.
+    } else if (this.blendFrom !== null || from === 'plane' || to === 'plane') {
+      // Interrupted mid-blend: freeze what's on screen, riding along with the car. Crossing car ⇄ plane: the
+      // subject we leave is parked, so the frozen shot simply stays put in the world.
       this.frozen.copy(this.out);
-      this.frozenRel.subVectors(this.out.pos, this.chase.pivot);
+      this.frozenOnCar = from !== 'plane' && to !== 'plane' && this.frame.active;
+      if (this.frozenOnCar) this.frozenRel.subVectors(this.out.pos, this.chase.pivot);
       this.blendFrom = 'frozen';
     } else {
       this.blendFrom = from;
@@ -233,8 +288,9 @@ export class CameraRig implements ICameraRig {
       case 'orbit': return this.orbit.pose;
       case 'cine': return this.cine.pose;
       case 'show': return this.show.pose;
+      case 'plane': return this.plane.pose;
       case 'frozen':
-        if (this.frame.active) this.frozen.pos.addVectors(this.chase.pivot, this.frozenRel);
+        if (this.frozenOnCar && this.frame.active) this.frozen.pos.addVectors(this.chase.pivot, this.frozenRel);
         return this.frozen;
       default: return this.holdPose;
     }
@@ -247,18 +303,24 @@ export class CameraRig implements ICameraRig {
     const dt = Math.min(0.1, Math.max(0, ctx.engine.realDt));
     const f = this.frame;
     const hasCar = f.update(ctx, dt);
+    const planeMode = this.planeMode();
 
     if (this._mode === 'showcase' && !this.show.active) this.show.start();
-    if (hasCar && this._mode !== 'showcase' && (this.snapPending || f.fresh)) this.doSnap(true);
+    if (!planeMode && hasCar && this._mode !== 'showcase' && (this.snapPending || f.fresh)) this.doSnap(true);
+    if (planeMode) this.snapPending = false;
 
     // Look-back (held): chase arcs around quickly, hood cuts to the tail camera.
-    const lbHeld = hasCar && !f.exploded && this._mode !== 'showcase' && this._mode !== 'cinematic' && !!ctx.input?.state?.lookBack;
+    const lbHeld = !planeMode && hasCar && !f.exploded && this._mode !== 'showcase' && this._mode !== 'cinematic' && !!ctx.input?.state?.lookBack;
     const lbDur = c.lookBackBlend;
     this.lookBack = lbDur > 0 ? clamp(this.lookBack + (lbHeld ? dt : -dt) / lbDur, 0, 1) : lbHeld ? 1 : 0;
     const lbW = smoother01(this.lookBack);
 
+    if (planeMode) this.plane.update(dt);
+    else this.flash.update(dt);
+
     let want: Ctrl;
     if (this._mode === 'showcase') want = 'show';
+    else if (planeMode) want = this.plane.active ? 'plane' : 'hold';
     else if (this._mode === 'cinematic') want = 'cine';
     else if (!hasCar) want = 'hold';
     else if (this._mode === 'hood' && !f.exploded) want = 'hood';
@@ -279,7 +341,7 @@ export class CameraRig implements ICameraRig {
     if (this.blendFrom && this.blendDur > 0) {
       this.blendT += dt;
       const w = smoother01(this.blendT / this.blendDur);
-      blendPoses(this.poseOf(this.blendFrom), pose, w, hasCar ? this.chase.pivot : null, this.out);
+      blendPoses(this.poseOf(this.blendFrom), pose, w, this.pivotFor(this.blendFrom, this.active), this.out);
       if (this.blendT >= this.blendDur) this.blendFrom = null;
     } else {
       this.out.copy(pose);
@@ -287,19 +349,23 @@ export class CameraRig implements ICameraRig {
     this.holdPose.copy(this.out);
 
     // Mode bookkeeping for next frame.
-    if (this._mode === 'cinematic' && this.cine.done) this.endCinematic(false);
-    if (this._mode === 'orbit' && this.active === 'orbit' && this.orbit.wantsReturn) this._mode = 'chase';
+    if (!planeMode && this._mode === 'cinematic' && this.cine.done) this.endCinematic(false);
+    if (!planeMode && this._mode === 'orbit' && this.active === 'orbit' && this.orbit.wantsReturn) this._mode = 'chase';
 
-    // Shake sources that come from the car itself: landings, top-speed vibration, off-road rumble.
+    // Shake sources from the car itself: landings, top-speed vibration, off-road rumble, turbo body shake.
     let vib = 0;
-    if (hasCar && !f.exploded && (this.active === 'chase' || this.active === 'hood')) {
+    if (!planeMode && hasCar && !f.exploded && (this.active === 'chase' || this.active === 'hood')) {
       if (f.landing > 5) this.shakeFx.add(clamp((f.landing - 5) / 14, 0, 1) * c.landingShake);
       if (!f.airborne) {
         vib = smooth01((f.speedN - c.speedShakeStart) / Math.max(0.05, 1 - c.speedShakeStart)) * c.speedShake;
         if (f.offroad) vib += c.offroadShake * smooth01(f.hSpeed / 15);
       }
+      vib += c.turboVibration * f.turbo;
     }
-    const scale = this.active === 'show' ? 0 : this.active === 'hood' ? c.hoodShake : 1;
+    let scale = 1;
+    if (this.active === 'show') scale = 0;
+    else if (this.active === 'hood') scale = c.hoodShake;
+    else if (this.active === 'plane' && this.plane.isMounted && !ctx.planes?.inCockpitSequence) scale = c.planeCockpitShake;
     this.shakeFx.sample(dt, vib, scale);
     this.writeCamera(scale);
     f.settle();
@@ -318,11 +384,37 @@ export class CameraRig implements ICameraRig {
       cam.position.add(_v);
       kick = s.fovKick;
     }
+    let dirty = false;
     const fov = this.aspectFov(this.out.fov + kick, cam.aspect);
     if (Math.abs(fov - cam.fov) > 1e-3) {
       cam.fov = fov;
-      cam.updateProjectionMatrix();
+      dirty = true;
     }
+    const { near, far } = this.clipPlanes();
+    if (Math.abs(near - cam.near) > near * 0.02 || Math.abs(far - cam.far) > far * 0.02) {
+      cam.near = near;
+      cam.far = far;
+      dirty = true;
+    }
+    if (dirty) cam.updateProjectionMatrix();
+  }
+
+  /**
+   * Near/far by view: hood/cockpit need a close near plane; the far plane covers the terrain view distance
+   * (Part 3) and grows with altitude in a plane (haze to ~10 km) — env's fog and ocean radius follow it.
+   */
+  private clipPlanes(): { near: number; far: number } {
+    const c = CONFIG.camera;
+    const q = (this.ctx.quality?.current ?? {}) as { terrainViewDistance?: number; viewDistance?: number };
+    const view = Math.max(q.terrainViewDistance ?? 0, q.viewDistance ?? 0);
+    let far = Math.max(c.far, view * 1.15 + 150);
+    let near = this.active === 'hood' ? c.nearHood : c.near;
+    if (this.active === 'plane') {
+      near = this.plane.near;
+      const agl = Math.max(0, this.ctx.planes?.state?.altitudeAgl ?? 0, this.out.pos.y - CONFIG.world.waterLevel);
+      far = clamp(Math.max(far, view * 1.2 + agl * 3.5), c.far, c.planeFar);
+    }
+    return { near, far };
   }
 
   /**
@@ -340,8 +432,34 @@ export class CameraRig implements ICameraRig {
   }
 
   // ───────────────────────────── events ─────────────────────────────
+  private onOriginShift(dx: number, dz: number): void {
+    // Core already moved every scene child (incl. engine.camera); shift every cached world-space position too,
+    // or springs/blends would swoop across kilometres.
+    for (const p of [this.out, this.holdPose, this.frozen]) {
+      p.pos.x -= dx;
+      p.pos.z -= dz;
+    }
+    this.frame.shift(dx, dz);
+    this.chase.shift(dx, dz);
+    this.hood.shift(dx, dz);
+    this.orbit.shift(dx, dz);
+    this.cine.shift(dx, dz);
+    this.show.shift(dx, dz);
+    this.plane.shift(dx, dz);
+  }
+
+  private onStunt(kind: string): void {
+    if (this.planeMode() || this._mode === 'showcase') return;
+    const c = CONFIG.camera;
+    if (kind === 'barrelRoll') this.chase.showRoll(c.rollShowTime);
+    else if (kind === 'cleanLanding') {
+      this.chase.bump(c.landingBump);
+      this.shakeFx.add(0.12);
+    } else if (kind === 'crashLanding') this.shakeFx.add(0.5, 0.8);
+  }
+
   private onExplosion(pos: THREE.Vector3, force: number): void {
-    if (this._mode === 'showcase' || this.ctx.game?.state !== 'driving') return;
+    if (this._mode === 'showcase' || this.ctx.game?.state !== 'driving' || this.planeMode()) return;
     const c = CONFIG.camera;
     const d = this.ctx.engine.camera.position.distanceTo(pos);
     const k = clamp(1 - d / Math.max(1, c.explosionShakeRange), 0.15, 1) * clamp(Number.isFinite(force) && force > 0 ? force : 1, 0.4, 1.5);
@@ -353,7 +471,7 @@ export class CameraRig implements ICameraRig {
   }
 
   private onImpact(strength: number): void {
-    if (this._mode === 'showcase') return;
+    if (this._mode === 'showcase' || this.planeMode()) return;
     const c = CONFIG.camera;
     if (!(strength > c.impactMin)) return;
     this.shakeFx.add(Math.min(1, strength) * c.impactShake);
@@ -361,11 +479,17 @@ export class CameraRig implements ICameraRig {
 
   // ───────────────────────────── pointer input ─────────────────────────────
   private canDrag(): boolean {
-    return this.ctx.game?.state === 'driving' && this.frame.active && (this._mode === 'chase' || this._mode === 'orbit' || this._mode === 'hood');
+    if (this.ctx.game?.state !== 'driving') return false;
+    if (this.planeMode()) return this.plane.active;
+    return this.frame.active && (this._mode === 'chase' || this._mode === 'orbit' || this._mode === 'hood');
   }
 
   private drag(dx: number, dy: number): void {
     if (!this.canDrag() || !(Number.isFinite(dx) && Number.isFinite(dy))) return;
+    if (this.planeMode()) {
+      this.plane.drag(dx, dy);
+      return;
+    }
     if (this._mode === 'hood' && !this.frame.exploded) {
       this.hood.drag(dx, dy);
       return;
@@ -374,7 +498,7 @@ export class CameraRig implements ICameraRig {
     this.orbit.drag(dx, dy);
   }
 
-  /** Desktop: drag on the canvas (left or right button) to orbit, wheel to zoom. Touch is forwarded by the UI. */
+  /** Desktop: drag on the canvas (left or right button) to orbit / look, wheel to zoom. Touch is forwarded by the UI. */
   private bindPointer(): void {
     const el = this.ctx.engine?.canvas;
     if (!el) return;
@@ -418,8 +542,10 @@ export class CameraRig implements ICameraRig {
       }
     };
     const wheel = (e: WheelEvent) => {
-      if (!this.canDrag() || this._mode === 'hood' || e.ctrlKey) return;
-      this.chase.zoomBy(e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1));
+      if (!this.canDrag() || e.ctrlKey) return;
+      const d = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1);
+      if (this.planeMode()) this.plane.zoomBy(d);
+      else if (this._mode !== 'hood') this.chase.zoomBy(d);
     };
     const ctxMenu = (e: Event) => {
       if (this.ctx.game?.state === 'driving') e.preventDefault();
@@ -448,5 +574,6 @@ export class CameraRig implements ICameraRig {
     this.unsubs = [];
     this.domCleanup = [];
     this.show.stop();
+    this.flash.dispose();
   }
 }

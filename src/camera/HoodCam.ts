@@ -25,6 +25,11 @@ export class HoodCam {
   private idle = 99;
   private readonly eye = new THREE.Vector3();
 
+  shift(dx: number, dz: number): void {
+    this.pose.pos.x -= dx;
+    this.pose.pos.z -= dz;
+  }
+
   snap(): void {
     this.init = false;
     this.lookYaw = this.lookPitch = this.lookYawT = this.lookPitchT = 0;

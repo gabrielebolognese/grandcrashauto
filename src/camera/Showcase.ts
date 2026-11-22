@@ -162,6 +162,17 @@ export class Showcase {
     this.setOpacity(0);
   }
 
+  private waitReady = 0;
+
+  private streamReady(): boolean {
+    const p = this.pose.pos;
+    try {
+      return this.ctx.terrain?.isReady?.(p.x, p.z, 120) ?? true;
+    } catch {
+      return true;
+    }
+  }
+
   update(dt: number): void {
     const c = CONFIG.camera;
     if (!this.shots.length) {
@@ -172,9 +183,12 @@ export class Showcase {
     }
     let shot = this.shots[this.idx];
     if (this.hold > 0) {
+      // Held dark at a cut; far-away shots (airport…) also wait for streaming around the new spot (max ~2.5 s).
       this.hold -= dt;
+      this.waitReady -= dt;
       this.setOpacity(1);
       this.evalShot(shot, 0);
+      if (this.hold <= 0 && this.waitReady > 0 && !this.streamReady()) this.hold = 0.05;
       return;
     }
     this.t += dt;
@@ -189,6 +203,7 @@ export class Showcase {
       shot = this.shots[this.idx];
       this.t = 0;
       this.hold = c.showcaseHold;
+      this.waitReady = 2.5;
       this.fadeIn = c.showcaseFadeIn;
       this.setOpacity(1);
       this.evalShot(shot, 0);
@@ -198,6 +213,26 @@ export class Showcase {
     const fout = smooth01((shot.dur - this.t) / Math.max(0.05, c.showcaseFadeOut));
     this.setOpacity(1 - Math.min(fin, fout));
     this.evalShot(shot, this.t / shot.dur);
+  }
+
+  /** Floating origin: the world (and CityData, in place) moved by -(dx, 0, dz). */
+  shift(dx: number, dz: number): void {
+    const sh = (v: V) => {
+      v.x -= dx;
+      v.z -= dz;
+    };
+    for (const s of this.shots) {
+      sh(s.t0);
+      sh(s.t1);
+      if (s.kind === 'dolly') {
+        sh(s.p0);
+        sh(s.p1);
+      } else if (s.kind === 'orbit') sh(s.c);
+      else s.pts.forEach(sh);
+    }
+    sh(this.pose.pos);
+    sh(this.target);
+    this.index = null; // building positions changed in place → re-bucket on next build
   }
 
   /** Names of the current shot list (debug / smoke tests). */
@@ -323,6 +358,7 @@ export class Showcase {
     if (cyc % 2 === 0) tryAdd(() => this.shotRamp(data, cyc) ?? this.shotHighway(data, cyc));
     else tryAdd(() => this.shotHighway(data, cyc) ?? this.shotRamp(data, cyc));
     tryAdd(() => this.shotStreet(data, cyc));
+    tryAdd(() => this.shotAirport(data, cyc));
     tryAdd(() => this.shotSkyline(data, cyc));
     tryAdd(() => this.shotHub(data, cyc));
     let k = 0;
@@ -375,7 +411,7 @@ export class Showcase {
     if (!coast || !(coast.shoreZ > coast.seaWallZ)) return null;
     const size = d.size || 800;
     const dirX = this.sunSide(cyc);
-    const zc = lerp(coast.seaWallZ, coast.shoreZ, 0.8);
+    const zc = lerp(coast.seaWallZ, coast.shoreZ, 0.97);
     for (let k = 0; k < 4; k++) {
       const x0 = [-0.3, 0.12, -0.05, 0.33][(cyc + k) % 4] * size;
       const p0 = v3(x0, 0, zc);
@@ -384,7 +420,7 @@ export class Showcase {
       p1.y = this.ground(p1.x, p1.z) + 2.8;
       if (!this.free(p0) || !this.free(p1)) continue;
       // Look along the shoreline, slightly out to sea and toward the sun's side: glitter on the water.
-      const look = v3(dirX, 0, 0.55).normalize().multiplyScalar(45);
+      const look = v3(dirX, 0, 0.75).normalize().multiplyScalar(45);
       const wl = CONFIG.world.waterLevel;
       return {
         kind: 'dolly', name: 'beach', dur: this.dur(), fov0: 54, fov1: 50, roll: 0,
@@ -507,19 +543,32 @@ export class Showcase {
   private shotRamp(d: CityData, cyc: number): Shot | null {
     const rp = d.jumpRamp;
     if (!rp) return null;
-    const P = v3(rp.position.x, rp.position.y, rp.position.z);
+    const P0 = v3(rp.position.x, rp.position.y, rp.position.z);
     const f = v3(Math.sin(rp.yaw), 0, Math.cos(rp.yaw));
     const r = v3(-Math.cos(rp.yaw), 0, Math.sin(rp.yaw));
+    // The pose is the run-up start; find the lip (highest ground ahead along the ramp direction).
+    let lipD = 0;
+    let lipH = 0;
+    for (let dd = 0; dd <= 180; dd += 2) {
+      const h = this.ground(P0.x + f.x * dd, P0.z + f.z * dd) - P0.y;
+      if (h > lipH) {
+        lipH = h;
+        lipD = dd;
+      }
+    }
+    if (lipH < 1.5) lipD = 0;
+    const P = P0.clone().addScaledVector(f, lipD);
+    const base = P0.y;
     const s0 = cyc % 2 ? 1 : -1;
     for (const side of [s0, -s0]) {
-      const p0 = P.clone().addScaledVector(r, 16 * side).addScaledVector(f, -12);
-      p0.y = Math.max(this.ground(p0.x, p0.z), P.y) + 1.0;
-      const p1 = P.clone().addScaledVector(r, 10 * side).addScaledVector(f, 1);
-      p1.y = Math.max(this.ground(p1.x, p1.z), P.y) + 1.8;
-      const t0 = P.clone().addScaledVector(f, 2);
-      t0.y = P.y + 2.5;
-      const t1 = P.clone().addScaledVector(f, 8);
-      t1.y = P.y + 5;
+      const p0 = P.clone().addScaledVector(r, 22 * side).addScaledVector(f, -20);
+      p0.y = Math.max(this.ground(p0.x, p0.z), base) + 1.2;
+      const p1 = P.clone().addScaledVector(r, 15 * side).addScaledVector(f, -6);
+      p1.y = Math.max(this.ground(p1.x, p1.z), base) + 2.0;
+      const t0 = P.clone().addScaledVector(f, -2);
+      t0.y = base + Math.max(2.5, lipH * 0.7);
+      const t1 = P.clone().addScaledVector(f, 12);
+      t1.y = base + Math.max(5, lipH * 1.1);
       if (!this.free(p0) || !this.free(p1) || !this.los(p0, t0)) continue;
       return { kind: 'dolly', name: 'ramp', dur: this.dur(), fov0: 60, fov1: 50, roll: -0.03 * side, p0, p1, t0, t1 };
     }
@@ -636,18 +685,73 @@ export class Showcase {
     const r = v3(-Math.cos(yaw), 0, Math.sin(yaw));
     const s0 = cyc % 2 ? 1 : -1;
     for (const side of [s0, -s0]) {
-      const p0 = g.clone().addScaledVector(f, 20).addScaledVector(r, 13 * side);
-      p0.y = this.ground(p0.x, p0.z) + 2.0;
-      const p1 = g.clone().addScaledVector(f, 16).addScaledVector(r, -7 * side);
-      p1.y = this.ground(p1.x, p1.z) + 4.2;
+      // Wide establishing crane over the lot: the garage and the parking hub both in frame.
+      const p0 = g.clone().addScaledVector(f, 40).addScaledVector(r, 24 * side);
+      p0.y = this.ground(p0.x, p0.z) + 5;
+      const p1 = g.clone().addScaledVector(f, 34).addScaledVector(r, 6 * side);
+      p1.y = this.ground(p1.x, p1.z) + 11;
       if (!this.free(p0, 1.5) || !this.free(p1, 1.5)) continue;
-      const t0 = g.clone().addScaledVector(f, 2);
-      t0.y = g.y + 2.5;
-      const t1 = g.clone().lerp(sp, 0.5);
-      t1.y = Math.max(g.y, sp.y) + 1.8;
-      return { kind: 'dolly', name: 'hub', dur: this.dur(), fov0: 56, fov1: 52, roll: 0, p0, p1, t0, t1 };
+      const t0 = g.clone().addScaledVector(f, 4);
+      t0.y = g.y + 4;
+      const t1 = g.clone().lerp(sp, 0.4);
+      t1.y = Math.max(g.y, sp.y) + 3;
+      return { kind: 'dolly', name: 'hub', dur: this.dur(), fov0: 52, fov1: 48, roll: 0, p0, p1, t0, t1 };
     }
     return null;
+  }
+
+  /**
+   * Part 2 airport: alternate between a low glide along the main runway (planes on the apron in the background)
+   * and a slow crane over the stands looking at the parked planes.
+   */
+  private shotAirport(d: CityData, cyc: number): Shot | null {
+    const ap = d.airport;
+    if (!ap) return null;
+    const elev = Number.isFinite(ap.elevation) ? ap.elevation : 0;
+    const rw = ap.runways?.[0];
+    if (rw && cyc % 2 === 0) {
+      const a = v3(rw.a.x, rw.a.y, rw.a.z);
+      const b = v3(rw.b.x, rw.b.y, rw.b.z);
+      const len = a.distanceTo(b);
+      if (len > 200) {
+        const dir = b.clone().sub(a).setY(0).normalize();
+        const side = v3(dir.z, 0, -dir.x);
+        // Edge of the runway on the apron side (side closest to the stands).
+        const st = ap.stands?.[0]?.p;
+        const s = st && side.dot(v3(st.x - a.x, 0, st.z - a.z)) < 0 ? -1 : 1;
+        const off = (rw.width || 45) * 0.5 + 6;
+        const p0 = a.clone().addScaledVector(dir, len * 0.3).addScaledVector(side, off * s);
+        p0.y = elev + 2.2;
+        const p1 = p0.clone().addScaledVector(dir, 120);
+        p1.y = elev + 4.5;
+        const t0 = p0.clone().addScaledVector(dir, 160).addScaledVector(side, off * s * 2.5);
+        t0.y = elev + 4;
+        const t1 = p1.clone().addScaledVector(dir, 160).addScaledVector(side, off * s * 2.5);
+        t1.y = elev + 5;
+        return { kind: 'dolly', name: 'airport-runway', dur: this.dur(), fov0: 52, fov1: 48, roll: 0, p0, p1, t0, t1 };
+      }
+    }
+    const stands = ap.stands ?? [];
+    if (!stands.length) return null;
+    let cx = 0;
+    let cz = 0;
+    for (const s of stands) {
+      cx += s.p.x;
+      cz += s.p.z;
+    }
+    cx /= stands.length;
+    cz /= stands.length;
+    let r = 40;
+    for (const s of stands) r = Math.max(r, Math.hypot(s.p.x - cx, s.p.z - cz) + 45);
+    // Swing in from the airside (away from the terminal) so the planes face the lens.
+    const t = ap.terminal;
+    const away = t ? Math.atan2(cx - t.x, cz - t.z) : cyc * 1.3;
+    const a0 = away - 0.35;
+    return {
+      kind: 'orbit', name: 'airport-apron', dur: this.dur(1), fov0: 54, fov1: 50, roll: 0,
+      c: v3(cx, elev, cz), r0: r, r1: r * 0.85, a0, a1: a0 + 0.7, h0: 9, h1: 26,
+      t0: v3(cx, elev + 6, cz), t1: v3(cx, elev + 3, cz),
+    };
   }
 
   private genericOrbit(d: CityData | null, cyc: number): Shot {
