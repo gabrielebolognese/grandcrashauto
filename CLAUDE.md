@@ -1,6 +1,7 @@
 # Coastline — browser 3D city driving sandbox
 
-Read `docs/SPEC.md` (the user's full brief — source of truth for features) before working. This file covers architecture,
+Read `docs/SPEC.md` (part 1 brief: city driving sandbox) and `docs/SPEC-PART2.md` (part 2 brief: island, airport,
+flyable planes, engine explosions, breakups, crashes, GPS map) — the sources of truth for features — before working. This file covers architecture,
 conventions, ownership and how to verify your work.
 
 ## Commands
@@ -41,6 +42,30 @@ conventions, ownership and how to verify your work.
   `cameraRig.snap()` → Game emits `carReset`. Out-of-world / deep water → vehicle calls `ctx.game.requestReset()`.
 - Robustness: Game wraps each system's init/update in try/catch and reports to the debug overlay, so one broken module
   doesn't kill the game. Don't rely on that — fix your errors.
+
+## Part 2 architecture (planes) — see `src/plane/types.ts` and the PART 2 section of `src/game/contracts.ts`
+- `ctx.game.mode` is `'car' | 'plane'` inside the `driving` state (`setMode()` emits `modeChanged`). `ctx.input.mode`
+  follows it: in plane mode the car fields of `input.state` read zero (+ handbrake on) and the flight fields
+  (`pitch` +1 = pull/nose up, `roll` +1 = bank right, `yaw`, `throttleAxis`, `throttleSet` (touch slider, -1 = unset),
+  `planeBrake`) are filled. New triggers: `interact` (F: board/exit), `map` (N), `gear` (G, consumed by the plane
+  system), `engine1..4` (1–4), `explodeMiddle` (M), `explodeTail` (T), `skip` (Enter). Game.ts routes them.
+- `ctx.planeModels: IPlaneFactory` (src/plane/models) builds `PlaneVisual`s: named parts (`PlanePartInfo`: mass, com,
+  box, fuel, cdA, cpOffset), break joints with hidden torn caps, break modes, engines (button order 1..n, left→right
+  from the cockpit — left = +X), gear, cockpit eye, wing cam. Root origin = centre of mass; nose +Z.
+- `ctx.planes: IPlaneSystem` (src/plane) owns the parked planes on the airport stands, boarding/exit, the flight
+  model (one Rapier body + raycast gear), engines, assists, out-of-map sequence, crash flow (respawn / retry / back
+  to car) and `PlaneState` (HUD/audio/camera read it). It registers the player plane with the breakup system as a
+  `TrackedPlane`.
+- `ctx.breakup: IBreakup` (src/plane/breakup) owns crash detection & outcomes (landing / hard / ground / water /
+  building), water forces, momentum-conserving splits into `WreckPiece`s, piece aerodynamics, wreck fires/slicks,
+  sinking, budgets and cleanup.
+- `ctx.nav: INav` (src/nav + src/ui/map) owns POIs, A* routes, the road ribbon, turn card, the Map screen and teleport.
+- Part-2 FX/audio hooks: optional `IFx` members (`explosionEx`, `attachTrail`, `splash`, `fuelFire`, …) — call with
+  `?.`; part-2 events (`engineExplode`, `planeExplosion`, `planeBreak`, `planeImpact`, `touchdown`, `stallWarning`,
+  `masterCaution`, `outOfMap`, `modeChanged`, `planeSpawned`).
+- Island: `CONFIG.world.island` (land ~x∈[-2000,2000], z∈[-2600,400], centre (0,-1100), warn 5.5 km, fail 6.5 km,
+  ceiling 3 km). Airport data: optional `CityData.airport` (runways, 4 stands, car park pose). Heading 0 = north (-Z).
+- Plane spec numbers (mass, rotation/stall/top speed, fuel, explosion radius) are in `CONFIG.planes` (flight owns it).
 
 ## Conventions
 - Units: meters, seconds, kilograms, newtons, radians. Y is up. City spans [-400, 400] on X and Z; the ocean is at +Z (south).
@@ -89,10 +114,14 @@ conventions, ownership and how to verify your work.
 | npc | `src/npc/**` |
 | fx | `src/fx/**` |
 | audio | `src/audio/**` |
-| ui | `src/ui/**` except `src/ui/garage/` |
+| ui | `src/ui/**` except `src/ui/garage/` and `src/ui/map/` |
+| planemodels (part 2) | `src/plane/models/**` |
+| flight (part 2) | `src/plane/**` except `models/`, `breakup/` and `types.ts` |
+| breakup (part 2) | `src/plane/breakup/**` |
+| nav (part 2) | `src/nav/**`, `src/ui/map/**` |
 
 Shared files: `src/config.ts` (edit only your section; re-read right before editing — others edit it concurrently),
-`src/game/contracts.ts`, `src/core/events.ts`, `src/world/types.ts` (only ADD optional members/events if you truly need them,
+`src/game/contracts.ts`, `src/core/events.ts`, `src/world/types.ts`, `src/plane/types.ts` (only ADD optional members/events if you truly need them,
 never change or remove existing ones; mention every such change in your final report).
 Do not run git commands (the lead commits). Do not edit `Game.ts`; if you need a hook there, say so in your report.
 When `npm run typecheck` shows errors in files you don't own, ignore them (another agent is mid-edit).

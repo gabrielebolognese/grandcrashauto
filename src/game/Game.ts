@@ -10,7 +10,8 @@ import { SaveStore } from '../core/Save';
 import { SettingsStore } from '../core/Settings';
 import { installDebugOverlay, reportError } from '../core/debugOverlay';
 import type { CarBuild } from '../vehicle/CarBuild';
-import type { GameActions, GameContext, GameSystem } from './contracts';
+import type { Pose } from '../world/types';
+import type { GameActions, GameContext, GameSystem, PlayerMode } from './contracts';
 
 import { World } from '../world/World';
 import { Environment } from '../world/env/Environment';
@@ -23,19 +24,26 @@ import { Fx } from '../fx/Fx';
 import { Audio } from '../audio/Audio';
 import { Garage } from '../ui/garage/Garage';
 import { UI } from '../ui/UI';
+import { PlaneFactory } from '../plane/models/PlaneFactory';
+import { PlaneSystem } from '../plane/PlaneSystem';
+import { Breakup } from '../plane/breakup/Breakup';
+import { Nav } from '../nav/Nav';
 
 /**
  * Orchestrator: owns the context, the state machine and the system update order. Owner: core.
  * State flow: boot → title ("tap to start") → menu ⇄ garage, menu → driving ⇄ paused.
+ * In 'driving' the player controls either the car or a plane (`mode`, part 2).
  */
 export class Game implements GameActions {
   state: GameState = 'boot';
+  mode: PlayerMode = 'car';
   readonly ctx: GameContext;
   private simSystems: GameSystem[] = [];
-  private allSystems: GameSystem[] = [];
   private errorCounts = new Map<string, number>();
   private autoResetT = -1;
   private slowMoT = -1;
+  private slowMoScale = CONFIG.game.slowMoScale;
+  private slowMoDuration = CONFIG.game.slowMoDuration;
   private resetting = false;
   private focus = new THREE.Vector3();
   private hornWasOn = false;
@@ -66,14 +74,20 @@ export class Game implements GameActions {
     ctx.npcs = new NpcSystem(ctx);
     ctx.cars = new CarFactory(ctx);
     ctx.vehicle = new PlayerVehicle(ctx);
+    ctx.planeModels = new PlaneFactory(ctx);
+    ctx.planes = new PlaneSystem(ctx);
+    ctx.breakup = new Breakup(ctx);
+    ctx.nav = new Nav(ctx);
     ctx.cameraRig = new CameraRig(ctx);
     ctx.fx = new Fx(ctx);
     ctx.audio = new Audio(ctx);
     ctx.garage = new Garage(ctx);
 
-    // Simulation order matters: world/props/npcs, then the car, then the camera that follows it, then fx/audio.
-    this.simSystems = [ctx.env, ctx.world, ctx.props, ctx.npcs, ctx.vehicle, ctx.cameraRig, ctx.fx, ctx.audio];
-    this.allSystems = [ctx.ui, ctx.env, ctx.world, ctx.props, ctx.npcs, ctx.cars, ctx.vehicle, ctx.cameraRig, ctx.fx, ctx.audio, ctx.garage];
+    // Simulation order matters: world/props/npcs, then the car and planes (forces), breakup (water/piece aero),
+    // navigation, then the camera that follows them, then fx/audio.
+    this.simSystems = [
+      ctx.env, ctx.world, ctx.props, ctx.npcs, ctx.vehicle, ctx.planes, ctx.breakup, ctx.nav, ctx.cameraRig, ctx.fx, ctx.audio,
+    ];
 
     if (debug) (window as any).__game = { game: this, ctx, CONFIG };
   }
@@ -92,11 +106,15 @@ export class Game implements GameActions {
     ctx.quality.init();
     const order: [GameSystem, string][] = [
       [ctx.env, 'Painting the sky'],
-      [ctx.world, 'Building the city'],
+      [ctx.world, 'Building the island'],
       [ctx.props, 'Placing street furniture'],
       [ctx.cars, 'Assembling cars'],
+      [ctx.planeModels, 'Rolling out the planes'],
       [ctx.npcs, 'Waking up the locals'],
       [ctx.vehicle, 'Fuelling up'],
+      [ctx.planes, 'Pre-flight checks'],
+      [ctx.breakup, 'Briefing the crash team'],
+      [ctx.nav, 'Calibrating GPS'],
       [ctx.cameraRig, 'Framing the shot'],
       [ctx.fx, 'Loading effects'],
       [ctx.audio, 'Tuning the engine'],
@@ -162,13 +180,17 @@ export class Game implements GameActions {
   private update(dt: number, alpha: number, realDt: number): void {
     const { ctx } = this;
     ctx.input.enabled = this.state === 'driving';
+    ctx.input.mode = this.mode;
     ctx.input.sensitivity = ctx.settings.values.steerSensitivity;
+    ctx.input.invertPitch = ctx.settings.values.invertPitch;
     ctx.input.update(realDt);
     this.handleTriggers();
     this.updateTimers(realDt);
 
-    // Streaming / shadow focus follows the car, or the camera when there is no car.
-    if (ctx.vehicle.active && ctx.vehicle.object) this.focus.copy(ctx.vehicle.state.position);
+    // Streaming / shadow focus follows what the player controls (car or plane/wreck), else the camera.
+    const target = this.mode === 'plane' ? ctx.planes.cameraTarget?.object : null;
+    if (target) target.getWorldPosition(this.focus);
+    else if (ctx.vehicle.active && ctx.vehicle.object) this.focus.copy(ctx.vehicle.state.position);
     else this.focus.copy(ctx.engine.camera.position);
     ctx.world.setFocus(this.focus);
     ctx.env.setShadowFocus(this.focus);
@@ -185,17 +207,35 @@ export class Game implements GameActions {
   }
 
   private handleTriggers(): void {
-    const { input, vehicle, cameraRig, events } = this.ctx;
+    const { input, vehicle, planes, cameraRig, events, nav } = this.ctx;
     if (this.state === 'driving') {
-      if (input.consume('explode')) this.explodeOrReset();
-      if (input.consume('reset')) this.requestReset();
-      if (input.consume('camera')) cameraRig.cycleMode();
-      if (input.consume('flip')) vehicle.flip();
       if (input.consume('pause')) this.pause();
-      const horn = input.state.horn && vehicle.active;
-      if (horn !== this.hornWasOn) {
-        this.hornWasOn = horn;
-        events.emit('horn', { position: vehicle.state.position, on: horn });
+      if (input.consume('map')) nav.openMap();
+      if (input.consume('camera')) cameraRig.cycleMode();
+      if (this.mode === 'plane') {
+        if (input.consume('explode')) this.explodeOrReset();
+        if (input.consume('reset')) this.requestReset();
+        if (input.consume('interact')) planes.exit();
+        if (input.consume('explodeMiddle')) planes.explodeMiddle();
+        if (input.consume('explodeTail')) planes.explodeTail();
+        for (let i = 1; i <= 4; i++) if (input.consume(`engine${i}` as 'engine1')) planes.explodeEngine(i);
+        if (input.consume('skip')) planes.skipSequence();
+        // 'gear' is consumed by the plane system itself.
+        input.consume('flip');
+      } else {
+        if (input.consume('explode')) this.explodeOrReset();
+        if (input.consume('reset')) this.requestReset();
+        if (input.consume('flip')) vehicle.flip();
+        if (input.consume('interact')) {
+          if (planes.boardCandidate) planes.board();
+          else if (vehicle.state.upsideDown) vehicle.flip();
+        }
+        for (const a of ['gear', 'engine1', 'engine2', 'engine3', 'engine4', 'explodeMiddle', 'explodeTail', 'skip'] as const) input.consume(a);
+        const horn = input.state.horn && vehicle.active;
+        if (horn !== this.hornWasOn) {
+          this.hornWasOn = horn;
+          events.emit('horn', { position: vehicle.state.position, on: horn });
+        }
       }
     } else if (this.state === 'paused') {
       if (input.consume('pause')) this.resume();
@@ -210,14 +250,14 @@ export class Game implements GameActions {
     const { engine } = this.ctx;
     if (this.slowMoT >= 0) {
       this.slowMoT += realDt;
-      const t = Math.min(1, this.slowMoT / CONFIG.game.slowMoDuration);
-      engine.timeScale = CONFIG.game.slowMoScale + (1 - CONFIG.game.slowMoScale) * t * t;
+      const t = Math.min(1, this.slowMoT / this.slowMoDuration);
+      engine.timeScale = this.slowMoScale + (1 - this.slowMoScale) * t * t;
       if (t >= 1) {
         engine.timeScale = 1;
         this.slowMoT = -1;
       }
     }
-    if (this.autoResetT >= 0 && this.state === 'driving') {
+    if (this.autoResetT >= 0 && this.state === 'driving' && this.mode === 'car') {
       this.autoResetT -= realDt;
       if (this.autoResetT < 0) this.requestReset();
     }
@@ -232,6 +272,49 @@ export class Game implements GameActions {
   }
 
   // ─────────────────────────────── actions ───────────────────────────────
+  setMode(mode: PlayerMode): void {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    this.ctx.input.mode = mode;
+    this.ctx.input.clearTriggers();
+    this.hornWasOn = false;
+    this.autoResetT = -1;
+    this.ctx.events.emit('modeChanged', { mode });
+  }
+
+  slowMo(scale: number, duration: number): void {
+    this.slowMoScale = scale;
+    this.slowMoDuration = Math.max(0.05, duration);
+    this.slowMoT = 0;
+    this.ctx.engine.timeScale = scale;
+  }
+
+  teleportCar(pose: Pose): void {
+    const { ctx } = this;
+    if (this.state !== 'driving' && this.state !== 'paused') return;
+    if (!ctx.vehicle.active || ctx.vehicle.state.exploded || this.resetting) return;
+    if (this.mode === 'plane') ctx.planes.backToCar();
+    this.resetting = true;
+    let done = false;
+    const doIt = () => {
+      if (done) return;
+      done = true;
+      try {
+        ctx.engine.timeScale = 1;
+        this.slowMoT = -1;
+        ctx.vehicle.reset(pose);
+        ctx.fx.clearAll();
+        ctx.cameraRig.setMode('chase');
+        ctx.cameraRig.snap();
+        ctx.events.emit('carReset', { position: ctx.vehicle.state.position, yaw: pose.yaw });
+      } finally {
+        this.resetting = false;
+      }
+    };
+    ctx.ui.fade(doIt);
+    window.setTimeout(doIt, 1500);
+  }
+
   titleDone(): void {
     if (this.state !== 'title') return;
     this.ctx.events.emit('userGesture', {});
@@ -245,17 +328,27 @@ export class Game implements GameActions {
     if (this.state === 'garage') ctx.garage.close();
     if (!ctx.vehicle.active) ctx.vehicle.spawn(ctx.save.data.garage.current, ctx.world.data.spawn);
     ctx.engine.timeScale = 1;
-    ctx.cameraRig.setMode('chase');
-    ctx.cameraRig.snap();
+    if (this.mode === 'car') {
+      ctx.cameraRig.setMode('chase');
+      ctx.cameraRig.snap();
+    }
     this.setState('driving');
+  }
+
+  /** Leave plane control cleanly (menus / garage). */
+  private leavePlane(): void {
+    if (this.mode === 'plane') this.ctx.planes.backToCar();
+    if (this.mode === 'plane') this.setMode('car');
   }
 
   openGarage(): void {
     const { ctx } = this;
     if (this.state === 'garage') return;
+    this.leavePlane();
     ctx.engine.timeScale = 1;
     this.slowMoT = -1;
     this.autoResetT = -1;
+    ctx.nav.closeMap();
     ctx.vehicle.despawn();
     ctx.fx.clearAll();
     this.setState('garage');
@@ -280,12 +373,16 @@ export class Game implements GameActions {
 
   resume(): void {
     if (this.state !== 'paused') return;
+    this.ctx.nav.closeMap();
     this.setState('driving');
   }
 
   toMainMenu(): void {
     const { ctx } = this;
     if (this.state === 'garage') ctx.garage.close();
+    this.leavePlane();
+    ctx.nav.closeMap();
+    ctx.nav.setDestination(null);
     ctx.vehicle.despawn();
     ctx.fx.clearAll();
     ctx.engine.timeScale = 1;
@@ -297,21 +394,31 @@ export class Game implements GameActions {
 
   explodeOrReset(): void {
     const { ctx } = this;
-    if (this.state !== 'driving' || !ctx.vehicle.active) return;
+    if (this.state !== 'driving') return;
+    if (this.mode === 'plane') {
+      if (ctx.planes.crashed) ctx.planes.respawnPlane();
+      else ctx.planes.explode();
+      return;
+    }
+    if (!ctx.vehicle.active) return;
     if (ctx.vehicle.state.exploded) {
       this.requestReset();
       return;
     }
     ctx.vehicle.explode(); // vehicle emits 'explosion'
-    this.slowMoT = 0;
-    ctx.engine.timeScale = CONFIG.game.slowMoScale;
+    this.slowMo(CONFIG.game.slowMoScale, CONFIG.game.slowMoDuration);
     ctx.save.update((d) => d.stats.explosions++);
     this.autoResetT = ctx.settings.values.autoReset ? CONFIG.game.autoResetDelay : -1;
   }
 
   requestReset(): void {
     const { ctx } = this;
-    if (this.state !== 'driving' || !ctx.vehicle.active || this.resetting) return;
+    if (this.state !== 'driving') return;
+    if (this.mode === 'plane') {
+      ctx.planes.respawnPlane();
+      return;
+    }
+    if (!ctx.vehicle.active || this.resetting) return;
     this.resetting = true;
     this.autoResetT = -1;
     ctx.cameraRig.skipCinematic();

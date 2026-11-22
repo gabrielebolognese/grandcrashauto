@@ -143,6 +143,33 @@ export interface BuildingLot {
   chunk: number;
 }
 
+export interface RunwayData {
+  id: string;
+  a: Vec3; // threshold A centre (y = surface)
+  b: Vec3; // threshold B centre
+  width: number;
+  designatorA: string; // e.g. '27' painted at end A
+  designatorB: string;
+}
+
+export interface StandData {
+  id: number;
+  type: 'prop' | 'bizjet' | 'airliner' | 'jumbo'; // which plane parks here
+  p: Vec3; // stand centre on the ground (plane centre-of-mass ground projection goes here)
+  yaw: number; // plane nose direction
+}
+
+export interface AirportData {
+  runways: RunwayData[]; // [0] = main 2200 × 45 m, [1] = crosswind 1200 m
+  stands: StandData[]; // one per plane type
+  /** Car park next to the apron (~40 m from it), facing the planes: directions/teleport destination. */
+  carPark: Pose;
+  terminal: Vec3;
+  tower: Vec3;
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  elevation: number; // airport ground height (m)
+}
+
 export interface CityData {
   seed: number;
   size: number;
@@ -164,6 +191,12 @@ export interface CityData {
   garage: Pose;
   /** The big jump ramp (for minimap marker / debug teleport). */
   jumpRamp: Pose | null;
+  /** Part 2: the airport (optional until the world module builds it). */
+  airport?: AirportData;
+  /** Part 2: points of interest for the map / directions (on-road poses). */
+  pois?: { id: string; name: string; pose: Pose }[];
+  /** Part 2: island land bounds (the ocean surrounds it). */
+  island?: { minX: number; maxX: number; minZ: number; maxZ: number };
   /** Coastline: the beach/ocean is on the +Z side. Sand starts at seaWallZ, water line (y = waterLevel) at shoreZ. */
   coast: { seaWallZ: number; shoreZ: number };
   /** Coarse district map: districtGrid[iz * districtGridSize + ix], cell = size / districtGridSize meters. */

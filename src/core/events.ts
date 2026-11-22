@@ -3,6 +3,8 @@ import type { ColliderTag, SurfaceMaterial } from './Physics';
 import type { Settings } from './Settings';
 import type { QualityLevel } from '../config';
 import type { CarBuild } from '../vehicle/CarBuild';
+import type { PlayerMode } from '../game/contracts';
+import type { CrashOutcome, ImpactSurface, PlaneTypeId } from '../plane/types';
 
 export type GameState = 'boot' | 'title' | 'menu' | 'garage' | 'driving' | 'paused';
 
@@ -58,4 +60,29 @@ export interface GameEvents extends Record<string, unknown> {
   vibrate: { pattern: number | number[] };
   /** First user gesture happened (ui) — audio unlocks on this. */
   userGesture: Record<string, never>;
+
+  // ── Part 2: planes ──
+  /** Player switched between car and plane (game). */
+  modeChanged: { mode: PlayerMode };
+  /** A plane was spawned / respawned for the player (planes). */
+  planeSpawned: { type: PlaneTypeId; inAir: boolean };
+  /** An engine exploded (planes). velocity = plane velocity at the nacelle. radius = fireball radius. */
+  engineExplode: { type: PlaneTypeId; engine: number; position: THREE.Vector3; velocity: THREE.Vector3; radius: number };
+  /** Engine fire spread along the wing (planes). */
+  engineFireSpread: { engine: number; position: THREE.Vector3 };
+  /** Whole-plane / middle / tail explosion (planes or breakup). */
+  planeExplosion: { position: THREE.Vector3; velocity: THREE.Vector3; radius: number; kind: 'total' | 'middle' | 'tail' | 'secondary' };
+  /** Airframe tore apart (breakup) — metal tearing sound, camera shake. intensity 0..1 */
+  planeBreak: { position: THREE.Vector3; velocity: THREE.Vector3; pieces: number; intensity: number };
+  /** Classified impact of the plane or a big piece (breakup). */
+  planeImpact: { position: THREE.Vector3; velocity: THREE.Vector3; outcome: CrashOutcome; surface: ImpactSurface; energy: number; normalSpeed: number };
+  /** Wheels touched the ground (planes). */
+  touchdown: { position: THREE.Vector3; verticalSpeed: number; hard: boolean };
+  gearCollapse: { position: THREE.Vector3 };
+  /** Stall warning horn on/off (planes). */
+  stallWarning: { on: boolean };
+  /** Master caution banner + tone, e.g. 'ENGINE 2 FIRE', 'ENGINE FAILURE — 2/4' (planes → ui/audio). */
+  masterCaution: { text: string; level: 'caution' | 'warning' };
+  /** Out-of-map sequence state changes (planes → ui/audio). */
+  outOfMap: { state: 'ok' | 'warning' | 'failing'; countdown: number };
 }

@@ -10,6 +10,9 @@ import type { SaveStore } from '../core/Save';
 import type { SettingsStore } from '../core/Settings';
 import type { CarBuild, CarModelId } from '../vehicle/CarBuild';
 import type { CityData, Pose, DistrictId } from '../world/types';
+import type {
+  BlastInfo, CrashOutcome, ImpactInfo, PlaneState, PlaneTypeId, PlaneVisual, TrackedPlane, WreckPiece,
+} from '../plane/types';
 
 /**
  * MODULE CONTRACTS. Owner: core. Every module implements one interface below in its own directory and is wired in
@@ -50,6 +53,11 @@ export interface GameContext {
   audio: IAudio;
   garage: IGarage;
   ui: IUI;
+  /** Part 2: plane meshes, flyable planes, breakup/crash physics, GPS navigation + map screen. */
+  planeModels: IPlaneFactory;
+  planes: IPlaneSystem;
+  breakup: IBreakup;
+  nav: INav;
   /** True when ?debug is in the URL. */
   debug: boolean;
 }
@@ -70,7 +78,17 @@ export interface GameActions {
   requestReset(): void;
   /** Called by the title screen after the first user gesture. */
   titleDone(): void;
+  /** Part 2: who the player controls while in the 'driving' state. */
+  readonly mode: PlayerMode;
+  /** Switch control between the car and a plane (called by the plane system on board/exit). Emits 'modeChanged'. */
+  setMode(mode: PlayerMode): void;
+  /** Slow-motion dip: timeScale drops to `scale` and eases back to 1 over `duration` real seconds. */
+  slowMo(scale: number, duration: number): void;
+  /** Teleport the CAR to a pose with a fade (map teleport). Ignored while the car is exploded. */
+  teleportCar(pose: Pose): void;
 }
+
+export type PlayerMode = 'car' | 'plane';
 
 // ─────────────────────────────── world (src/world) ───────────────────────────────
 export interface IWorld extends GameSystem {
@@ -254,6 +272,36 @@ export interface IFx extends GameSystem {
   attachFire(target: THREE.Object3D, localOffset?: THREE.Vector3, scale?: number): FireHandle;
   /** Remove all transient effects, fires and skid marks (on reset). */
   clearAll(): void;
+
+  // -- Part 2 (planes). All optional until the fx module implements them; callers use optional chaining. --
+  /**
+   * Momentum-correct explosion (SPEC-PART2 section 12): particles inherit `velocity` (fireball ~90%, smoke ~60%,
+   * sparks 100%) then drag toward the wind. `radius` = fireball radius (car ~6, prop ~10, bizjet ~25, airliner ~45,
+   * jumbo ~70). nearSurface adds a dust ring ('ground') or spray ring ('water') when within ~100 m of it.
+   */
+  explosionEx?(o: { position: THREE.Vector3; velocity?: THREE.Vector3; radius: number; kind?: 'car' | 'engine' | 'plane' | 'secondary' | 'impact'; nearSurface?: 'ground' | 'water' | null; light?: boolean }): void;
+  /** World-space fire+smoke trail on a moving object (burning engine/tail/wreck): flames stretched by airflow, smoke ribbon left in the sky. */
+  attachTrail?(target: THREE.Object3D, localOffset: THREE.Vector3, o: { fire: number; smoke: number; size: number }): TrailHandle;
+  /** Water impact: spray plume (height ~ speed squared), splash ring, foam. */
+  splash?(o: { position: THREE.Vector3; velocity: THREE.Vector3; size: number }): void;
+  /** Continuous spray sheet behind a skimming object (call every frame while skimming). */
+  spraySheet?(position: THREE.Vector3, velocity: THREE.Vector3, intensity: number): void;
+  steam?(position: THREE.Vector3, size: number): void;
+  bubbles?(position: THREE.Vector3, size: number): void;
+  /** Burning fuel patch on the ground or floating on water (slick); burns `duration` s. */
+  fuelFire?(o: { position: THREE.Vector3; velocity?: THREE.Vector3; size: number; duration: number; onWater: boolean }): void;
+  /** Ground scrape / plough gouge decal segment from a to b (call repeatedly while sliding). */
+  gouge?(a: THREE.Vector3, b: THREE.Vector3, width: number): void;
+  /** Small non-colliding debris fragments (fan blades, cowling, panels, paper-like insulation) inheriting velocity. */
+  debrisBurst?(o: { position: THREE.Vector3; velocity: THREE.Vector3; count: number; size: number; kind?: 'metal' | 'panel' | 'paper' | 'cushion' }): void;
+  /** White mist puff (cabin depressurization). */
+  mist?(position: THREE.Vector3, velocity: THREE.Vector3, size: number): void;
+  /** Scorch decal on a building facade (vertical surface). */
+  scorch?(position: THREE.Vector3, normal: THREE.Vector3, size: number): void;
+}
+
+export interface TrailHandle extends FireHandle {
+  setIntensity(fire: number, smoke: number, size?: number): void;
 }
 
 // ─────────────────────────────── audio (src/audio) ───────────────────────────────
@@ -279,4 +327,103 @@ export interface IUI extends GameSystem {
   /** Fade to black, run cb at full black, fade back (reset swap). */
   fade(cb: () => void): void;
   showFatal(message: string): void;
+}
+
+// =============================== PART 2: planes, breakup, navigation ===============================
+
+// --------------------------- plane meshes (src/plane/models) ---------------------------
+export interface PlaneModelInfo {
+  type: PlaneTypeId;
+  name: string; // fictional model name
+  livery: string; // fictional operator
+  description: string;
+}
+
+export interface IPlaneFactory extends GameSystem {
+  readonly models: PlaneModelInfo[];
+  /** Build a complete plane (named parts, joints, caps, cockpit interior, 3 LODs). */
+  create(type: PlaneTypeId): PlaneVisual;
+}
+
+// --------------------------- flyable planes (src/plane) ---------------------------
+export interface PlaneCameraTarget {
+  object: THREE.Object3D; // follow this (already interpolated)
+  kind: 'plane' | 'cockpitPiece' | 'wreck';
+  size: number; // characteristic length (m) for camera distance
+  velocity: THREE.Vector3;
+  /** Local-space cockpit eye of `object` (for the cockpit camera), if any. */
+  cockpitEye?: THREE.Vector3;
+  /** Local-space wing camera of `object`, if any. */
+  wingCam?: { position: THREE.Vector3; target: THREE.Vector3 };
+}
+
+export interface IPlaneSystem extends GameSystem {
+  /** The player is controlling (or riding in the wreck of) a plane. */
+  readonly active: boolean;
+  readonly state: PlaneState;
+  readonly visual: PlaneVisual | null;
+  readonly cameraTarget: PlaneCameraTarget | null;
+  /** Non-null when the car is close/slow enough to board (UI shows BOARD). */
+  readonly boardCandidate: { type: PlaneTypeId; name: string } | null;
+  /** True after a crash/destruction; UI shows Back to car / Respawn plane / Retry in air when crashTime > 3 s. */
+  readonly crashed: boolean;
+  readonly crashTime: number;
+  /** In the explode-middle cockpit sequence (camera free-look, Skip button). */
+  readonly inCockpitSequence: boolean;
+  board(): boolean;
+  exit(): boolean;
+  explodeEngine(index: number): void;
+  explode(): void;
+  explodeMiddle(): void;
+  explodeTail(): void;
+  respawnPlane(): void;
+  retryInAir(): void;
+  backToCar(): void;
+  skipSequence(): void;
+}
+
+// --------------------------- breakup & crash physics (src/plane/breakup) ---------------------------
+export interface IBreakup extends GameSystem {
+  /** Register the intact player plane: crash detection, water forces and breakup apply to it from now on. */
+  track(plane: TrackedPlane): void;
+  untrack(plane: TrackedPlane): void;
+  /**
+   * Break joints of a tracked plane (momentum-conserving split + clamped blast kick). Returns the newly created
+   * free pieces. If the main body is replaced, plane.onSplit() is called; if only parts fell off, plane.onPartsLost().
+   */
+  breakJoints(plane: TrackedPlane, jointIds: string[], blast?: BlastInfo): WreckPiece[];
+  /** Total fuel explosion: break every joint, fireball, burning pieces (8a). */
+  explodeTotal(plane: TrackedPlane): void;
+  /** Gear collapse + belly slide (hard landing) - the plane system calls it on a 3-6 m/s touchdown. */
+  hardLanding(plane: TrackedPlane, info: ImpactInfo): void;
+  /** Ground/water/building crash at an impact (e.g. > 6 m/s touchdown); fuselage/water contacts are detected internally. */
+  crash(plane: TrackedPlane, outcome: CrashOutcome, info: ImpactInfo): void;
+  readonly pieces: readonly WreckPiece[];
+  /** Largest burning piece (camera follow after a total explosion). */
+  readonly focusPiece: WreckPiece | null;
+  /** Remove every piece, fire and slick (respawn). */
+  clear(): void;
+}
+
+// --------------------------- navigation + map screen (src/nav, src/ui/map) ---------------------------
+export interface PointOfInterest {
+  id: string; // 'airport' | 'garage' | 'beach' | 'downtown' | 'park' | 'highway' | ...
+  name: string;
+  icon: string; // emoji or short glyph
+  /** On-road destination pose (airport: the car park facing the planes). */
+  pose: Pose;
+}
+
+export interface INav extends GameSystem {
+  readonly pois: PointOfInterest[];
+  /** Active route polyline (world points, y = road height), or null. */
+  readonly route: THREE.Vector3[] | null;
+  readonly destination: PointOfInterest | null;
+  /** Next manoeuvre for the turn card. */
+  readonly nextTurn: { direction: 'left' | 'right' | 'straight' | 'uturn' | 'arrive'; distance: number } | null;
+  setDestination(poiId: string | null): void;
+  teleport(poiId: string): void;
+  openMap(): void;
+  closeMap(): void;
+  readonly mapOpen: boolean;
 }

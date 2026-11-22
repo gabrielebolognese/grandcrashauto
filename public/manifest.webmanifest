@@ -1,0 +1,12 @@
+{
+  "name": "Coastline",
+  "short_name": "Coastline",
+  "description": "A sunny low-poly city driving sandbox. Drive, customize, crash.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#8fd0ec",
+  "theme_color": "#7fc8e8",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

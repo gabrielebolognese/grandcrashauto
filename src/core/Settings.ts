@@ -22,6 +22,10 @@ export interface Settings {
   controlsOpacity: number; // 0.2..1
   steerSensitivity: number; // 0.5..1.5
   vibration: boolean;
+  // flight (part 2)
+  flightAssisted: boolean; // Assisted (default) / Realistic
+  flightTilt: boolean; // tilt the phone to steer the plane
+  invertPitch: boolean; // stick up = nose up when true
   // gameplay
   units: 'kmh' | 'mph';
   autoReset: boolean; // auto reset 6 s after explosion
@@ -49,6 +53,9 @@ export const DEFAULT_SETTINGS: Settings = {
   controlsOpacity: 0.55,
   steerSensitivity: 1,
   vibration: true,
+  flightAssisted: true,
+  flightTilt: false,
+  invertPitch: false,
   units: 'kmh',
   autoReset: false,
   muted: false,
