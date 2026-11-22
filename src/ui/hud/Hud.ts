@@ -127,10 +127,11 @@ export class Hud {
       };
       if (id === 'flip') el = action('flip', text ?? 'Flip car', 'F', '', () => ctx.input.press('flip'));
       else if (id === 'board') el = action('plane', text ?? 'Board', 'F', 'blue', () => ctx.input.press('interact'));
-      else if (id === 'exit') el = action('car', text ?? 'Exit plane', 'F', 'mint', () => ctx.input.press('interact'));
+      else if (id === 'exit') el = action('car', text ?? 'Exit', 'F', 'mint exit-mini', () => ctx.input.press('interact'));
       else el = h('div', { class: 'prompt-pill' }, h('span', { text: text ?? id }));
       this.promptEls.set(id, el);
-      this.prompts.append(el);
+      // Exit plane sits small under the clock (top-left) so it never covers the plane.
+      ((id === 'exit' ? this.el.querySelector('.hud-tl') : null) ?? this.prompts).append(el);
       void el.offsetWidth;
     } else if (text) {
       const lbl = el.querySelector('.pb-label') ?? el.querySelector('span');
@@ -196,7 +197,7 @@ export class Hud {
     const canExit = plane && !!ctx.planes?.state?.canExit && !ctx.planes.crashed;
     if (canExit !== this.exitShown) {
       this.exitShown = canExit;
-      this.setPrompt('exit', canExit, 'Exit plane');
+      this.setPrompt('exit', canExit, 'Exit');
     }
     // Clock + weather chip (part 3 env; hidden until the env provides a clock).
     const hours = ctx.env?.clockHours;

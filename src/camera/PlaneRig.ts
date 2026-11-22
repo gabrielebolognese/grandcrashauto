@@ -351,6 +351,13 @@ export class PlaneRig {
       kind = 'wreck';
       size = this.measurePiece(fp);
     }
+    // Never freeze (user request): if the target vanishes for a moment, keep following the last subject while it is
+    // still in the scene (falling wreckage, burning piece) instead of dropping to the 'hold' pose.
+    if (!obj && this.obj && this.obj.parent && this.ctx.game.mode === 'plane') {
+      obj = this.obj;
+      kind = 'wreck';
+      size = this.size;
+    }
     if (!obj) return false;
     if (obj !== this.obj) {
       if (!this.obj) this.fresh = true;

@@ -1287,3 +1287,5 @@ html body #fatal.fatal-styled {
 .boom-wrap .more-btn span { font-size: 20px; line-height: 1; font-weight: 900; }
 .boom-wrap.extra-open .more-btn { background: var(--c-coral, #ff7a6b); color: #fff; }
 .hud .minimap, .hud-tl .minimap { display: none !important; }
+/* Exit plane: small corner button instead of a big centred pill covering the plane */
+.hud-tl .prompt-btn.exit-mini { position: static; transform: scale(0.72); transform-origin: top left; margin: 6px 0 0; pointer-events: auto; }
