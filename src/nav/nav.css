@@ -1,0 +1,143 @@
+/* Nav module: GPS turn card (owner: nav). Uses the UI theme variables from src/ui/theme.css. */
+
+.nav-turn {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: calc(var(--gt) + 62px * var(--tbs, 1) + 6px);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  max-width: min(78vw, 420px);
+  padding: 6px 18px 6px 6px;
+  border-radius: 999px;
+  background: var(--glass-strong, rgba(255, 248, 238, 0.96));
+  box-shadow: 0 8px 22px rgba(34, 48, 77, 0.22), inset 0 0 0 1.5px rgba(92, 200, 214, 0.6);
+  color: var(--c-ink, #22304d);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -10px) scale(0.94);
+  transition: opacity 0.25s ease, transform 0.35s var(--ease-back, ease), visibility 0s linear 0.25s;
+}
+.nav-turn::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+.nav-turn.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0) scale(1);
+  transition: opacity 0.25s ease, transform 0.35s var(--ease-back, ease);
+}
+#ui-root:not([data-state='driving']) .nav-turn {
+  opacity: 0;
+  visibility: hidden;
+}
+.nt-arrow {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(180deg, #74dbe7 0%, var(--c-sea, #2aa3c4) 100%);
+  box-shadow: 0 3px 0 var(--c-deep, #146c94), 0 6px 14px rgba(20, 108, 148, 0.35);
+}
+.nt-arrow svg {
+  width: 28px;
+  height: 28px;
+  filter: drop-shadow(0 1px 0 rgba(10, 60, 90, 0.35));
+}
+.nav-turn.pop .nt-arrow {
+  animation: nt-pop 0.5s var(--ease-back, ease) both;
+}
+.nav-turn.soon .nt-arrow {
+  background: linear-gradient(180deg, #ff9d82 0%, var(--c-coral, #ff7a6b) 100%);
+  box-shadow: 0 3px 0 var(--c-coral-d, #e2584c), 0 6px 16px rgba(226, 88, 76, 0.4);
+  animation: nt-pulse 0.9s ease-in-out infinite;
+}
+.nav-turn[data-dir='arrive'] .nt-arrow {
+  background: linear-gradient(180deg, #c3f1df 0%, var(--c-mint-d, #4fb894) 100%);
+  box-shadow: 0 3px 0 #2f8a6c, 0 6px 14px rgba(79, 184, 148, 0.35);
+}
+.nav-turn.partial .nt-arrow {
+  background: linear-gradient(180deg, #d5c9f5 0%, var(--c-lilac, #b8a6e8) 100%);
+  box-shadow: 0 3px 0 #8a77c4, 0 6px 14px rgba(138, 119, 196, 0.35);
+}
+.nt-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.nt-dist {
+  font: 900 23px/1 var(--font-display, sans-serif);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.nt-sub {
+  font: 700 11.5px/1.15 var(--font, sans-serif);
+  letter-spacing: 0.03em;
+  color: var(--c-ink-soft, #56607c);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* keep toasts clear of the card while a route is active */
+#ui-root.nav-routing[data-state='driving'] .toasts {
+  top: calc(var(--gt) + 62px * var(--tbs, 1) + 70px);
+}
+@media (max-height: 460px) {
+  .nav-turn {
+    top: calc(var(--gt) + 56px * var(--tbs, 1) + 4px);
+    gap: 9px;
+    padding: 4px 14px 4px 4px;
+  }
+  .nt-arrow {
+    width: 38px;
+    height: 38px;
+  }
+  .nt-arrow svg {
+    width: 23px;
+    height: 23px;
+  }
+  .nt-dist {
+    font-size: 19px;
+  }
+  .nt-sub {
+    font-size: 10.5px;
+  }
+  #ui-root.nav-routing[data-state='driving'] .toasts {
+    top: calc(var(--gt) + 56px * var(--tbs, 1) + 56px);
+  }
+}
+@keyframes nt-pop {
+  0% {
+    transform: scale(0.6) rotate(-12deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes nt-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-turn,
+  .nav-turn .nt-arrow {
+    animation: none !important;
+    transition: opacity 0.2s !important;
+  }
+}

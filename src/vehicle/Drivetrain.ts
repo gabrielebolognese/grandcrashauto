@@ -87,9 +87,9 @@ export class Drivetrain {
     }
     this.rpm = damp(this.rpm, Math.min(target, redline * 1.03), response, dt);
 
-    // Rev limiter: fuel cut + rpm dip (audible bounce)
+    // Rev limiter: fuel cut + rpm dip (audible bounce) — not in top gear on the ground (soft governor there)
     if (this.limiterTimer > 0) this.limiterTimer -= dt;
-    else if (this.rpm >= redline * 0.995 && throttle > 0.1) {
+    else if (this.rpm >= redline * 0.995 && throttle > 0.1 && !(this.gear === 5 && grounded && !clutchIn)) {
       this.limiterTimer = E.limiterCut;
       this.rpm -= redline * 0.04;
     }
@@ -102,7 +102,9 @@ export class Drivetrain {
 
     if (clutchIn || this.shiftTimer > 0 || this.limiterTimer > 0 || throttle <= 0) return 0;
     if (grounded && wheelRpm > redline * 1.01) return 0; // past the gear's limit
-    const torque = p.peakTorque * torqueFactor(this.rpm / redline) * throttle * (1 + this.boost * p.turbo);
+    let torque = p.peakTorque * torqueFactor(this.rpm / redline) * throttle * (1 + this.boost * p.turbo);
+    // Top gear: fade torque out just below redline → a smooth, governed top speed instead of limiter bounce.
+    if (this.gear === 5 && grounded) torque *= Math.min(1, Math.max(0, (1 - wheelRpm / redline) / Math.max(0.005, E.topGearSoftLimit)));
     let force = (torque * ratio * p.finalDrive * p.efficiency) / p.wheelRadius;
     if (this.gear < 0) {
       const over = Math.abs(speed) - p.maxReverseSpeed;

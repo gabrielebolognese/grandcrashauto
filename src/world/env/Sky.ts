@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { GLSL_ENV_PARS, GLSL_OUTPUT, envUniforms } from './shaders';
 
 /**
- * Sky dome: horizon haze → zenith gradient, warm sun disk + glow, moon and twinkling stars at night.
+ * Sky dome: horizon haze → zenith gradient, warm sun disk + glow, moon with phases, twinkling stars, Milky Way,
+ * and the weather cloud deck (cover from scattered wisps to a full overcast dome).
  * One mesh centred on the camera every frame, pinned to the far plane and drawn LAST among opaques (early-z).
  * A second material ("env pass") renders the same sky with a darker ground hemisphere into the PMREM env map.
  */
@@ -22,53 +23,83 @@ ${GLSL_ENV_PARS}
 uniform float uEnvPass;
 varying vec3 vDir;
 
+const vec3 MW_N = vec3(0.42, 0.55, -0.72); // Milky Way great-circle normal
+
 void main() {
   vec3 dir = normalize(vDir);
   vec3 sp = dir * 190.0;
   float spx = length(fwidth(sp)); // derivatives in uniform control flow only
   vec3 col = skyColor(dir);
   float h = dir.y;
-
-  if (uEnvPass > 0.5) {
-    // Environment capture: below the horizon a soft "ground" (sand / sea / asphalt mix) so cars reflect a ground.
-    col = mix(col, uSkyGround, smoothstep(0.0, -0.18, h));
-  }
-
-  float cosA = dot(dir, uSunDir);
-  // Sun disk (HDR, blooms on High) with soft limb.
-  float sunR = 0.0095 * uSunSize;
-  float a = sqrt(max(0.0, 2.0 * (1.0 - cosA))); // ≈ angle for small angles
-  float disk = 1.0 - smoothstep(sunR * 0.75, sunR * 1.15, a);
   float horizonCut = smoothstep(-0.02, 0.01, h);
-  float diskScale = uEnvPass > 0.5 ? 0.25 : 1.0;
-  col += uGlow * uSunDisk * disk * horizonCut * diskScale * (1.0 - uMoon);
 
-  // Moon (the night "sun" light comes from it) with a faint halo and simple mottling.
-  if (uMoon > 0.001) {
-    float moonR = 0.016;
-    float md = 1.0 - smoothstep(moonR * 0.85, moonR, a);
-    vec3 mp = dir - uSunDir;
-    float mott = 0.85 + 0.15 * sin(mp.x * 900.0 + 1.3) * sin(mp.y * 700.0 + mp.z * 800.0);
-    col += vec3(0.95, 0.97, 1.0) * 3.2 * md * mott * uMoon * horizonCut;
-    col += vec3(0.35, 0.45, 0.75) * pow(max(cosA, 0.0), 120.0) * 0.6 * uMoon;
+  // Night sky first (behind the clouds): Milky Way + stars.
+  float bd = dot(dir, MW_N);
+  float mw = exp(-bd * bd * 30.0);
+  if (uMilky > 0.001 && h > 0.0) {
+    // Soft dusty band: plane-projected noise (no seams), dark rifts from a second tap.
+    vec3 t1 = normalize(cross(MW_N, vec3(0.0, 1.0, 0.0)));
+    vec3 t2 = cross(MW_N, t1);
+    vec2 muv = vec2(dot(dir, t1), dot(dir, t2)) * 1.6;
+    float glow = textureLod(uCloudTex, muv, 2.0).b;
+    float rift = textureLod(uCloudTex, muv * 2.3 + 0.41, 1.0).a;
+    float band = mw * (0.35 + 0.65 * glow) * (1.0 - 0.55 * smoothstep(0.55, 0.85, rift) * exp(-bd * bd * 160.0));
+    col += vec3(0.42, 0.48, 0.72) * band * uMilky * 0.075 * smoothstep(0.0, 0.25, h);
   }
-
-  // Stars.
   if (uStars > 0.001 && h > 0.0) {
     vec3 ip = floor(sp);
     vec3 fp = fract(sp);
     float hs = envHash13(ip);
-    if (hs > 0.991) {
+    if (hs > 0.991 - 0.007 * mw * uMilky) {
       vec3 c = vec3(envHash13(ip + 1.7), envHash13(ip + 3.1), envHash13(ip + 5.3)) * 0.6 + 0.2;
       float d = length(fp - c);
-      float b = 1.0 - smoothstep(spx * 0.6, spx * 1.6, d);
+      float b = 1.0 - smoothstep(spx * 0.3, spx * 1.05, d);
       float tw = 0.65 + 0.35 * sin(uTime * (1.5 + hs * 4.0) + hs * 91.0);
-      float mag = (hs - 0.991) / 0.009;
+      float mag = clamp((hs - 0.991) / 0.009, 0.0, 1.0);
       vec3 sc = mix(vec3(1.0, 0.85, 0.7), vec3(0.75, 0.85, 1.0), envHash13(ip + 9.9));
-      col += sc * b * tw * (0.6 + 2.2 * mag * mag) * uStars * smoothstep(0.0, 0.2, h);
+      float skyLum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col += sc * b * tw * (0.25 + 2.4 * mag * mag * mag) * uStars * smoothstep(0.0, 0.2, h) * (1.0 - smoothstep(0.03, 0.25, skyLum));
     }
   }
 
+  // Sun disk (HDR, blooms on High) with soft limb.
+  float cosA = dot(dir, uSkySun);
+  float sunR = 0.0095 * uSunSize;
+  float a = sqrt(max(0.0, 2.0 * (1.0 - cosA))); // ≈ angle for small angles
+  float disk = 1.0 - smoothstep(sunR * 0.75, sunR * 1.15, a);
+  float diskScale = uEnvPass > 0.5 ? 0.25 : 1.0;
+  vec3 sunCol = uGlow * uSunDisk * disk * horizonCut * diskScale;
+
+  // Moon with phases (lit side faces the true sun), mottled maria, faint halo.
+  vec3 moonCol = vec3(0.0);
+  if (uMoon > 0.001) {
+    float moonR = 0.017;
+    vec3 v = dir - uMoonDir * dot(dir, uMoonDir);
+    float r = length(v) / moonR;
+    if (r < 1.2 && dot(dir, uMoonDir) > 0.0) {
+      float md = 1.0 - smoothstep(0.88, 1.0, r);
+      vec3 n = v / moonR - uMoonDir * sqrt(max(0.0, 1.0 - r * r));
+      float lit = smoothstep(-0.08, 0.12, dot(normalize(n), uSkySun));
+      vec3 mp = v / moonR;
+      float mott = 0.82 + 0.18 * sin(mp.x * 9.0 + 1.3) * sin(mp.y * 7.0 + mp.z * 8.0 + 0.7);
+      moonCol += vec3(0.95, 0.97, 1.0) * 3.0 * md * mott * (0.04 + 0.96 * lit);
+    }
+    float mc = max(dot(dir, uMoonDir), 0.0);
+    moonCol += vec3(0.35, 0.45, 0.75) * pow(mc, 90.0) * 0.5;
+    moonCol *= uMoon * horizonCut;
+  }
+
+  // Weather cloud deck in front of everything.
+  vec3 deckCol;
+  float deck = cloudDeck(dir, deckCol);
+  col = mix(col + (sunCol + moonCol) * (1.0 - deck), deckCol, deck);
+  // A bright core still shines through thin cloud.
+  col += sunCol * deck * (1.0 - smoothstep(0.5, 0.95, uCover)) * 0.08;
+
+  if (uEnvPass > 0.5) {
+    // Environment capture: below the horizon a soft "ground" so cars reflect a ground, not more sky.
+    col = mix(col, uSkyGround, smoothstep(0.0, -0.18, h));
+  }
   col = mix(col, uFogColor, uWhiteout * (1.0 - uEnvPass));
   gl_FragColor = vec4(col, 1.0);
   ${GLSL_OUTPUT}

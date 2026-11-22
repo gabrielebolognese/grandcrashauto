@@ -13,6 +13,13 @@ import { forgetParam, keep, setSmooth, type Listener, type SpatialResult, type V
  * crunch / water splash, wind rush, metal scrape. Plus the horn and the landing thump.
  * Built once (when the shared noise buffers exist) and only modulated afterwards.
  */
+export interface VehicleExtra {
+  snow: number; // 0..1 falling snow (muffles tyres)
+  wet: number; // 0..1 road wetness
+  turbo: boolean; // turbo boosting
+  gliding: boolean; // turbo glide in the air
+}
+
 export class VehicleSounds {
   private built = false;
   private carOut!: GainNode;
@@ -40,6 +47,16 @@ export class VehicleSounds {
   private scOut!: GainNode;
   private scPan: StereoPannerNode | null = null;
   private srcs: AudioScheduledSourceNode[] = [];
+  // part 3: wet spray hiss, turbo turbine + rush
+  private wetBp!: BiquadFilterNode;
+  private wetG!: GainNode;
+  private tbOsc!: OscillatorNode;
+  private tbOsc2!: OscillatorNode;
+  private tbWhineG!: GainNode;
+  private tbBp!: BiquadFilterNode;
+  private tbRushG!: GainNode;
+  private turboAmt = 0;
+  private suppressLandingUntil = 0;
 
   private sp: SpatialResult = { gain: 1, pan: 0, dist: 0, cutoff: 20000 };
   private tmp = new THREE.Vector3();
@@ -153,7 +170,39 @@ export class VehicleSounds {
       this.scPan = keep(ac.createStereoPanner());
       this.scOut.connect(this.scPan).connect(bus);
     } else this.scOut.connect(bus);
+    // wet-road tyre spray
+    this.wetBp = filt('bandpass', 3800, 0.7);
+    this.wetG = gain(0);
+    white.connect(this.wetBp).connect(this.wetG).connect(this.carOut);
+    // turbo: turbine whine (two partials) + jet-like rush
+    this.tbOsc = keep(ac.createOscillator());
+    this.tbOsc.frequency.value = 2500;
+    this.tbOsc2 = keep(ac.createOscillator());
+    this.tbOsc2.type = 'triangle';
+    this.tbOsc2.frequency.value = 3700;
+    this.tbWhineG = gain(0);
+    const tb2 = gain(0.35);
+    this.tbOsc.connect(this.tbWhineG);
+    this.tbOsc2.connect(tb2).connect(this.tbWhineG);
+    this.tbWhineG.connect(this.carOut);
+    for (const o of [this.tbOsc, this.tbOsc2]) {
+      o.start();
+      this.srcs.push(o);
+    }
+    this.tbBp = filt('bandpass', 1400, 0.9);
+    this.tbRushG = gain(0);
+    pink.connect(this.tbBp).connect(this.tbRushG).connect(this.carOut);
     this.built = true;
+  }
+
+  /** A stunt landing slam was played: skip the generic landing thump for a moment. */
+  suppressLanding(sec = 0.6): void {
+    this.suppressLandingUntil = this.ac.currentTime + sec;
+  }
+
+  shift(dx: number, dz: number): void {
+    this.scrapePos.x -= dx;
+    this.scrapePos.z -= dz;
   }
 
   scrape(e: { position: Vec3Like; intensity: number }): void {
@@ -179,7 +228,7 @@ export class VehicleSounds {
     }
   }
 
-  update(now: number, dt: number, st: VehicleState, alive: boolean, model: CarModelId | null): void {
+  update(now: number, dt: number, st: VehicleState, alive: boolean, model: CarModelId | null, ext: VehicleExtra = { snow: 0, wet: 0, turbo: false, gliding: false }): void {
     if (!this.built) {
       this.build();
       if (!this.built) return;
@@ -259,19 +308,25 @@ export class VehicleSounds {
     const f = (T.squealHz * (prof?.squeal ?? 1) + T.squealHzSlip * slip) * (1 + this.squealDrift) * (1 + Math.min(speed, 40) * 0.002);
     setSmooth(ac, this.sqOsc.frequency, f, 0.05, 2e-3);
     setSmooth(ac, this.sqBp.frequency, f * 1.15, 0.05, 2e-3);
-    setSmooth(ac, this.sqTone.gain, T.squealLevel * Math.pow(tone, 1.2), 0.04, 1e-3);
-    setSmooth(ac, this.sqNoise.gain, T.squealLevel * 0.9 * Math.pow(hiss, 1.3), 0.04, 1e-3);
+    const snow = clamp(ext.snow, 0, 1) * CONFIG.audio.snowMuffle;
+    setSmooth(ac, this.sqTone.gain, T.squealLevel * Math.pow(tone, 1.2) * Math.max(0, 1 - snow * 1.1), 0.04, 1e-3);
+    setSmooth(ac, this.sqNoise.gain, T.squealLevel * 0.9 * Math.pow(hiss, 1.3) * (1 - snow * 0.6), 0.04, 1e-3);
+    setSmooth(ac, this.sqNoiseBp.frequency, 2200 * (1 - snow * 0.55), 0.2, 1e-2);
     this.dbg.slip = slip;
     this.dbg.squeal = tone;
 
     // ── rolling road noise
-    const road = alive ? T.roadLevel * Math.min(1.5, Math.pow(speed / 28, 1.3)) * hardFrac : 0;
+    const road = alive ? T.roadLevel * Math.min(1.5, Math.pow(speed / 28, 1.3)) * hardFrac * (1 - snow * 0.35) : 0;
     setSmooth(ac, this.roadG.gain, road, 0.08, 1e-3);
-    setSmooth(ac, this.roadLp.frequency, 250 + speed * 12, 0.1, 1e-2);
+    setSmooth(ac, this.roadLp.frequency, (250 + speed * 12) * (1 - snow), 0.1, 1e-2);
+    // wet spray hiss (rolling through water film), quieter in snow
+    const spray = alive ? CONFIG.audio.wetHiss * clamp(ext.wet, 0, 1) * Math.min(1.4, Math.pow(speed / 28, 1.2)) * hardFrac * (1 - snow) : 0;
+    setSmooth(ac, this.wetG.gain, spray, 0.1, 1e-3);
+    setSmooth(ac, this.wetBp.frequency, 2600 + speed * 40, 0.2, 1e-2);
     this.dbg.road = road;
 
     // ── off-road
-    const off = alive ? T.offroadLevel * Math.min(1, spd01) * offFrac : 0;
+    const off = alive ? T.offroadLevel * Math.min(1, spd01) * Math.min(1, offFrac + snow * 0.6) : 0;
     const wet = alive ? T.offroadLevel * Math.min(1, spd01 * 1.3) * wetFrac : 0;
     setSmooth(ac, this.offRumble.gain, off, 0.08, 1e-3);
     setSmooth(ac, this.offHiss.gain, off * 0.7 + wet * 1.3, 0.08, 1e-3);
@@ -280,6 +335,18 @@ export class VehicleSounds {
     setSmooth(ac, this.offBp.frequency, hz, 0.1, 1e-2);
     if (off + wet > 0.001) this.offAm.gain.setTargetAtTime(0.45 + Math.random() * 0.8, now, 0.015);
     this.dbg.off = off + wet;
+
+    // ── turbo turbine + rush (and the air-glide rush)
+    const TB = CONFIG.audio.turbo;
+    const tOn = alive && (ext.turbo || ext.gliding);
+    this.turboAmt += ((tOn ? 1 : 0) - this.turboAmt) * (1 - Math.exp(-dt * (tOn ? 4 : 1.6)));
+    const ta = this.turboAmt;
+    const tf = 2400 + Math.min(speed, 80) * 45 * (0.4 + 0.6 * ta);
+    setSmooth(ac, this.tbOsc.frequency, tf, 0.06, 2e-3);
+    setSmooth(ac, this.tbOsc2.frequency, tf * 1.48, 0.06, 2e-3);
+    setSmooth(ac, this.tbWhineG.gain, TB.whine * ta * ta, 0.05, 1e-3);
+    setSmooth(ac, this.tbRushG.gain, (TB.rush * ta + (ext.gliding && alive ? TB.glideRush : 0)) * (0.5 + 0.5 * Math.min(1, speed / 40)), 0.08, 1e-3);
+    setSmooth(ac, this.tbBp.frequency, 900 + Math.min(speed, 80) * 25, 0.1, 1e-2);
 
     // ── wind
     const W = CONFIG.audio.wind;
@@ -312,7 +379,7 @@ export class VehicleSounds {
       this.airT += dt;
       this.vyMin = Math.min(this.vyMin, st.velocity.y);
     } else {
-      if (alive && this.airT > T.landingMinAir && this.vyMin < -2) this.sfx.landing(st.position, clamp(-this.vyMin / 10, 0.15, 1));
+      if (alive && this.airT > T.landingMinAir && this.vyMin < -2 && now > this.suppressLandingUntil) this.sfx.landing(st.position, clamp(-this.vyMin / 10, 0.15, 1));
       this.airT = 0;
       this.vyMin = 0;
     }
@@ -323,7 +390,7 @@ export class VehicleSounds {
   silence(): void {
     if (!this.built) return;
     const now = this.ac.currentTime;
-    for (const g of [this.sqTone, this.sqNoise, this.roadG, this.offRumble, this.offHiss, this.scOut]) {
+    for (const g of [this.sqTone, this.sqNoise, this.roadG, this.offRumble, this.offHiss, this.scOut, this.wetG, this.tbWhineG, this.tbRushG]) {
       forgetParam(g.gain);
       g.gain.setTargetAtTime(0, now, 0.03);
     }

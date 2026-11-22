@@ -30,19 +30,22 @@ export class PauseMenu implements Screen {
   readonly el: HTMLDivElement;
   private hints: HTMLDivElement;
   private stats: HTMLDivElement;
+  private resetBtn: HTMLButtonElement;
 
   constructor(private host: UIHost) {
     const { ctx } = host;
     const g = ctx.game;
     const resume = button('Resume', { variant: 'primary', icon: 'play', cls: 'pm-resume', sound: 'confirm', onClick: () => g.resume() });
     const garage = button('Garage', { icon: 'garage', onClick: () => g.openGarage() });
-    const reset = button('Reset car', {
+    const reset = (this.resetBtn = button('Reset car', {
       icon: 'reset',
       onClick: () => {
         g.resume();
         g.requestReset();
       },
-    });
+    }));
+    const map = button('Map', { icon: 'map', onClick: () => ctx.nav?.openMap?.() });
+    const world = button('Time & weather', { icon: 'sunset', onClick: () => host.openSettings('world') });
     const settings = button('Settings', { icon: 'settings', onClick: () => host.openSettings() });
     const menu = button('Main menu', { icon: 'home', variant: 'ghost', sound: 'back', onClick: () => g.toMainMenu() });
     this.stats = h('div', { class: 'pm-stats' });
@@ -59,7 +62,7 @@ export class PauseMenu implements Screen {
       h(
         'div',
         { class: 'pm-wrap' },
-        h('div', { class: 'panel pm-panel' }, decoTitle('Paused'), h('div', { class: 'pm-grid' }, resume, garage, reset, settings, menu), this.stats),
+        h('div', { class: 'panel pm-panel' }, decoTitle('Paused'), h('div', { class: 'pm-grid' }, resume, garage, reset, map, world, settings, menu), this.stats),
         this.hints,
       ),
     );
@@ -68,6 +71,8 @@ export class PauseMenu implements Screen {
   setVisible(on: boolean): void {
     if (on) {
       this.hints.style.display = this.host.touchMode() ? 'none' : '';
+      const lbl = this.resetBtn.querySelector('.btn-label');
+      if (lbl) lbl.textContent = this.host.ctx.game.mode === 'plane' ? 'Respawn plane' : 'Reset car';
       const n = this.host.ctx.save.data.stats.explosions;
       this.stats.textContent = n > 0 ? `💥 ${n} explosion${n === 1 ? '' : 's'} and counting` : 'Nothing exploded yet. Yet.';
     }

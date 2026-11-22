@@ -73,15 +73,17 @@ export class Listener {
     this.fwd.setFromMatrixColumn(m, 2).multiplyScalar(-1).normalize();
   }
 
-  calc(p: Vec3Like, out: SpatialResult, ref: number = CONFIG.audio.spatial.refDistance): SpatialResult {
+  /** maxDist: audibility limit (default spatial.maxDistance; big explosions / thunder / planes pass a larger one). */
+  calc(p: Vec3Like, out: SpatialResult, ref: number = CONFIG.audio.spatial.refDistance, maxDist: number = CONFIG.audio.spatial.maxDistance): SpatialResult {
     const S = CONFIG.audio.spatial;
     const d = this.tmp.set(p.x - this.pos.x, p.y - this.pos.y, p.z - this.pos.z);
     const dist = d.length();
     let gain = dist <= ref ? 1 : ref / (ref + S.rolloff * (dist - ref));
-    gain *= 1 - smoothstep(S.maxDistance * 0.7, S.maxDistance, dist);
+    gain *= 1 - smoothstep(maxDist * 0.7, maxDist, dist);
     let pan = dist > 1e-3 ? d.dot(this.right) / dist : 0;
     pan *= S.panWidth * smoothstep(0.4, 4, dist);
-    const far = smoothstep(S.airNear, S.maxDistance, dist);
+    // air absorption: log-distance from airNear (full band) to ~3 km (airFarHz)
+    const far = dist <= S.airNear ? 0 : Math.min(1, Math.log(dist / S.airNear) / Math.log(3000 / S.airNear));
     out.gain = gain;
     out.pan = Math.max(-1, Math.min(1, pan));
     out.dist = dist;

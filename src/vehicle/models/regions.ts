@@ -29,9 +29,10 @@ export const R = {
   REVERSE: 21,
   INDICATOR: 22,
   SKIP: 23,
+  HOOD_BLACK: 24, // gloss-black vents on the hood (hood mesh)
 } as const;
 export type RegionId = (typeof R)[keyof typeof R];
-export const REGION_COUNT = 24;
+export const REGION_COUNT = 25;
 
 /** Light/emissive type codes stored in aMat.w (detail material, see materials.ts). 7 = glass (low LOD). */
 export const LT = { NONE: 0, HEAD: 1, DRL: 2, TAIL: 3, BRAKE: 4, REVERSE: 5, INDICATOR: 6, GLASS: 7, UNDERGLOW: 8 } as const;
@@ -70,18 +71,19 @@ REGION_INFO[R.BUMPER_F_BLACK] = { mesh: 'bumperF', color: gray(0.03), mat: MAT.p
 REGION_INFO[R.BUMPER_R] = { mesh: 'bumperR', color: gray(1), mat: MAT.plastic, roof: 0, gap: 11 };
 REGION_INFO[R.BUMPER_R_BLACK] = { mesh: 'bumperR', color: gray(0.03), mat: MAT.plastic, roof: 0, gap: 11 };
 REGION_INFO[R.GLASS] = { mesh: 'glass', color: gray(0.05), mat: [0, 0.05, 0, LT.GLASS], roof: 0, gap: GLASS_GAP };
-REGION_INFO[R.HEAD] = { mesh: 'lights', color: [0.9, 0.92, 0.95], mat: lamp([1, 1, 1], 0.9, 0.12, LT.HEAD), roof: 0, gap: LAMP_GAP };
+REGION_INFO[R.HEAD] = { mesh: 'lights', color: [0.62, 0.66, 0.72], mat: lamp([1, 1, 1], 0.95, 0.07, LT.HEAD), roof: 0, gap: LAMP_GAP };
 REGION_INFO[R.DRL] = { mesh: 'lights', color: [1, 1, 1], mat: lamp([1, 1, 1], 0.1, 0.2, LT.DRL), roof: 0, gap: LAMP_GAP };
 REGION_INFO[R.TAIL] = { mesh: 'lights', color: [0.5, 0.025, 0.035], mat: lamp([1, 1, 1], 0.25, 0.16, LT.TAIL), roof: 0, gap: LAMP_GAP };
 REGION_INFO[R.BRAKE] = { mesh: 'lights', color: [0.55, 0.03, 0.04], mat: lamp([1, 1, 1], 0.25, 0.16, LT.BRAKE), roof: 0, gap: LAMP_GAP };
 REGION_INFO[R.REVERSE] = { mesh: 'lights', color: [0.8, 0.8, 0.84], mat: lamp([1, 1, 1], 0.5, 0.12, LT.REVERSE), roof: 0, gap: LAMP_GAP };
 REGION_INFO[R.INDICATOR] = { mesh: 'lights', color: [0.95, 0.45, 0.05], mat: lamp([1, 1, 1], 0.3, 0.15, LT.INDICATOR), roof: 0, gap: LAMP_GAP };
+REGION_INFO[R.HOOD_BLACK] = { mesh: 'hood', color: gray(0.03), mat: MAT.plastic, roof: 0, gap: 4 };
 REGION_INFO[R.SKIP] = { mesh: 'none', color: gray(1), mat: MAT.plastic, roof: 0, gap: 0 };
 
 /** Gap width (m) between two gap groups. */
 export function gapBetween(a: number, b: number): number {
   if (a === b) return 0;
-  if (a === GLASS_GAP || b === GLASS_GAP) return 0.008;
+  if (a === GLASS_GAP || b === GLASS_GAP) return 0;
   if (a === LAMP_GAP || b === LAMP_GAP) return 0.005;
   return 0.0055;
 }

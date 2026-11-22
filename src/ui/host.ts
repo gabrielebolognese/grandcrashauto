@@ -8,7 +8,8 @@ export interface UIHost {
   readonly isMobile: boolean;
   /** True when touch controls/hints should be shown (touch device and last input was touch). */
   touchMode(): boolean;
-  openSettings(): void;
+  /** Open settings, optionally on a tab ('graphics' | 'controls' | 'world' | 'gameplay' | 'audio'). */
+  openSettings(tab?: string): void;
   openCredits(): void;
   closeSub(): void;
   confirm(opts: ConfirmOpts): Promise<boolean>;

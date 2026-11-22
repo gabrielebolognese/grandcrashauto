@@ -3,7 +3,8 @@ import { clamp, damp, smoothstep } from '../core/math';
 import type { VehicleState } from '../game/contracts';
 import type { CarBuild, CarModelId } from '../vehicle/CarBuild';
 import type { SfxBank } from './bakes';
-import { bakeEngineLayer, type EngineProfile } from './engineBake';
+import type { Baker } from './Baker';
+import { engineLayerRpm, type EngineProfile } from './engineBake';
 import type { Mixer } from './Mixer';
 import type { Sfx } from './Sfx';
 import { audioStats, forgetParam, setSmooth, type Listener, type SpatialResult } from './Voices';
@@ -36,7 +37,7 @@ const MODEL_SEED: Record<CarModelId, number> = { muscle: 101, coupe: 202, hatch:
  */
 export class EngineSound {
   private bakes = new Map<CarModelId, ModelBake>();
-  private queue: { model: CarModelId; idx: number; onLoad: boolean }[] = [];
+  private pendingCount = 0;
   private model: CarModelId | null = null;
   private perf = 0;
   private up = false;
@@ -73,7 +74,7 @@ export class EngineSound {
   private lastBlowoff = -10;
   private inactiveT = 0;
   private wasExploded = false;
-  readonly dbg = { rpm: 0, load: 0, boost: 0, weights: [] as number[], bakeMs: 0, layersReady: 0, model: '' as string, limiter: false };
+  readonly dbg = { rpm: 0, load: 0, boost: 0, weights: [] as number[], bakeMs: 0, layersReady: 0, model: '' as string, limiter: false, alive: 0, out: 0, active: false, catchIn: 0 };
 
   constructor(
     private ac: AudioContext,
@@ -81,46 +82,46 @@ export class EngineSound {
     private sfx: Sfx,
     private listener: Listener,
     private bank: SfxBank,
+    private baker: Baker,
   ) {}
+
+  private bakeSr(): number {
+    return Math.max(22050, Math.round(this.ac.sampleRate / 2));
+  }
 
   private profile(m: CarModelId | null): EngineProfile {
     return (CONFIG.audio.models as Record<string, EngineProfile>)[m ?? 'coupe'] ?? CONFIG.audio.models.coupe;
   }
 
-  /** Queue the bake of a model's loops (no-op if done / queued). */
+  /** Queue the bake of a model's loops (worker; no-op if done / queued). */
   ensureBaked(m: CarModelId): void {
     if (this.bakes.has(m)) return;
     const p = this.profile(m);
     const k = p.bakeRpm.length;
-    this.bakes.set(m, { rpm: new Array(k).fill(0), on: new Array(k).fill(null), off: new Array(k).fill(null), raw: [], ms: 0 });
+    const entry: ModelBake = { rpm: new Array(k).fill(0), on: new Array(k).fill(null), off: new Array(k).fill(null), raw: [], ms: 0 };
+    this.bakes.set(m, entry);
+    const sr = this.bakeSr();
+    const loopSeconds = CONFIG.audio.engine.loopSeconds;
     for (let i = 0; i < k; i++) {
-      this.queue.push({ model: m, idx: i, onLoad: true });
-      this.queue.push({ model: m, idx: i, onLoad: false });
+      for (const onLoad of [true, false]) {
+        this.pendingCount++;
+        const name = `engine-${m}-${i}-${onLoad ? 'on' : 'off'}`;
+        this.baker.bake(name, 'engine', { sr, seed: MODEL_SEED[m] ?? 1, profile: p, rpm: p.bakeRpm[i], onLoad, loopSeconds }, (chans) => {
+          this.pendingCount = Math.max(0, this.pendingCount - 1);
+          const data = chans[0];
+          const buf = this.ac.createBuffer(1, data.length, sr);
+          buf.getChannelData(0).set(data);
+          entry.rpm[i] = engineLayerRpm(sr, p, p.bakeRpm[i]);
+          (onLoad ? entry.on : entry.off)[i] = buf;
+          entry.raw[i * 2 + (onLoad ? 0 : 1)] = data;
+          entry.ms += this.baker.ms[name] ?? 0;
+        });
+      }
     }
   }
 
   get pendingBakes(): number {
-    return this.queue.length;
-  }
-
-  /** Bake queued loops within a time budget. Returns ms spent. */
-  bakeStep(budgetMs: number): number {
-    const t0 = performance.now();
-    while (this.queue.length && performance.now() - t0 < budgetMs) {
-      const job = this.queue.shift()!;
-      const b = this.bakes.get(job.model);
-      if (!b) continue;
-      const p = this.profile(job.model);
-      const sr = Math.max(22050, Math.round(this.ac.sampleRate / 2));
-      const L = bakeEngineLayer(sr, p, p.bakeRpm[job.idx], job.onLoad, MODEL_SEED[job.model] ?? 1, CONFIG.audio.engine.loopSeconds);
-      const buf = this.ac.createBuffer(1, L.data.length, sr);
-      buf.getChannelData(0).set(L.data);
-      b.rpm[job.idx] = L.rpm;
-      (job.onLoad ? b.on : b.off)[job.idx] = buf;
-      b.raw[job.idx * 2 + (job.onLoad ? 0 : 1)] = L.data;
-      b.ms += L.ms;
-    }
-    return performance.now() - t0;
+    return this.pendingCount;
   }
 
   private ready(m: CarModelId): boolean {
@@ -132,7 +133,7 @@ export class EngineSound {
   bakedData(m: CarModelId): { rpm: number[]; raw: Float32Array[]; sampleRate: number } | null {
     const b = this.bakes.get(m);
     if (!b) return null;
-    return { rpm: b.rpm, raw: b.raw, sampleRate: Math.max(22050, Math.round(this.ac.sampleRate / 2)) };
+    return { rpm: b.rpm, raw: b.raw, sampleRate: this.bakeSr() };
   }
 
   private node<T extends AudioNode>(n: T): T {
@@ -454,7 +455,12 @@ export class EngineSound {
 
     // ── output level + position
     this.listener.calc(st.position, this.sp, CONFIG.audio.spatial.refDistance);
-    setSmooth(ac, this.out.gain, C.level * p.level * this.alive * Math.min(1.15, this.sp.gain), 0.03, 1e-3);
+    const outG = C.level * p.level * this.alive * Math.min(1.15, this.sp.gain);
+    setSmooth(ac, this.out.gain, outG, 0.03, 1e-3);
+    this.dbg.alive = +this.alive.toFixed(2);
+    this.dbg.out = +outG.toFixed(3);
+    this.dbg.active = active;
+    this.dbg.catchIn = +(this.catchT - now).toFixed(2);
     if (this.pan) setSmooth(ac, this.pan.pan, this.sp.pan, 0.05, 1e-3);
   }
 

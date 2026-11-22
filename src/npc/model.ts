@@ -27,6 +27,8 @@ export const REGION = {
   brow: 15, // eyebrows (darker hair)
   mouth: 16,
   screen: 17,
+  white: 18, // eye whites
+  cheek: 19,
 } as const;
 
 /** Part flag bits (aPart = bit + 1). Style bits (no geometry) start at 16. */
@@ -186,8 +188,24 @@ class GeoBuilder {
   }
 
   /** Ellipsoid (lat-long), smooth. */
-  ellipsoid(cx: number, cy: number, cz: number, rx: number, ry: number, rz: number, seg: number, rings: number, b0: number, b1 = b0, w = 1): void {
+  ellipsoid(cx: number, cy: number, cz: number, rx: number, ry: number, rz: number, seg: number, rings: number, b0: number, b1 = b0, w = 1, deform?: (v: THREE.Vector3) => void): void {
     const v0 = this.vcount, i0 = this.idx.length;
+    this.ellipsoidInner(cx, cy, cz, rx, ry, rz, seg, rings, b0, b1, w);
+    if (deform) {
+      const v = new THREE.Vector3();
+      for (let i = v0; i < this.vcount; i++) {
+        v.set(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]);
+        deform(v);
+        this.pos[i * 3] = v.x;
+        this.pos[i * 3 + 1] = v.y;
+        this.pos[i * 3 + 2] = v.z;
+        this.nor[i * 3] = this.nor[i * 3 + 1] = this.nor[i * 3 + 2] = 0;
+      }
+    }
+    this.smooth(v0, i0);
+  }
+
+  private ellipsoidInner(cx: number, cy: number, cz: number, rx: number, ry: number, rz: number, seg: number, rings: number, b0: number, b1: number, w: number): void {
     const top = this.vtx(cx, cy + ry, cz, b0, b1, w);
     const rows: number[][] = [];
     for (let j = 1; j < rings; j++) {
@@ -209,7 +227,6 @@ class GeoBuilder {
       }
       this.triOut(bot, rows[rows.length - 1][k1], rows[rows.length - 1][k], cx, cy, cz);
     }
-    this.smooth(v0, i0);
   }
 
   /**
@@ -327,7 +344,9 @@ function headSurface(x: number, y: number, off: number): { p: THREE.Vector3; n: 
   const u = x / HEAD.rx, v = (y - HEAD.cy) / HEAD.ry;
   const z = HEAD.cz + HEAD.rz * Math.sqrt(Math.max(0, 1 - u * u - v * v));
   const n = new THREE.Vector3(x / (HEAD.rx * HEAD.rx), (y - HEAD.cy) / (HEAD.ry * HEAD.ry), (z - HEAD.cz) / (HEAD.rz * HEAD.rz)).normalize();
-  return { p: new THREE.Vector3(x, y, z).addScaledVector(n, off), n };
+  const p = new THREE.Vector3(x, y, z);
+  shapeHead(p);
+  return { p: p.addScaledVector(n, off), n };
 }
 /** A small flat decal quad on the face. */
 function faceDecal(B: GeoBuilder, x: number, y: number, hw: number, hh: number, tilt: number, off: number): void {
@@ -362,24 +381,47 @@ const TORSO: Ring[] = [
   { y: 1.41, rx: 0.168, rz: 0.105, cz: 0, b0: BONE.Chest },
   { y: 1.465, rx: 0.12, rz: 0.082, cz: -0.005, b0: BONE.Chest },
 ];
-const TORSO_SIDES = 10;
-const TORSO_PHASE = Math.PI / TORSO_SIDES; // flat facet facing front
+/** Head shaping: narrower jaw / chin, fuller back of the skull (applied to the head ellipsoid). */
+function shapeHead(v: THREE.Vector3): void {
+  const t = (HEAD.cy - v.y) / HEAD.ry; // 0 at the centre line, 1 at the chin
+  if (t > 0) {
+    v.x = HEAD.cx + (v.x - HEAD.cx) * (1 - 0.2 * t * t);
+    const dz = v.z - HEAD.cz;
+    v.z = HEAD.cz + dz * (dz > 0 ? 1 - 0.04 * t : 1 - 0.3 * t);
+  } else if (v.z < HEAD.cz) {
+    v.z = HEAD.cz + (v.z - HEAD.cz) * (1 + 0.06 * -t);
+  }
+}
 
-// ─────────────────────────────── LOD0 ───────────────────────────────
-export function buildLod0(): THREE.BufferGeometry {
+// ─────────────────────────────── LOD0 / LOD1 (smooth, 2-bone skinned) ───────────────────────────────
+/** hero = detailed close-up mesh (~2.5k tris incl. optional parts), mid = ~1.2k tris. */
+export const buildHero = () => buildBody(true);
+export const buildMid = () => buildBody(false);
+export const buildFar = () => buildLod1();
+
+function buildBody(hd: boolean): THREE.BufferGeometry {
   const B = new GeoBuilder();
   const R = REGION;
+  const TORSO_SIDES = hd ? 14 : 10;
+  const TORSO_PHASE = Math.PI / TORSO_SIDES; // flat facet facing front
+  const ARM = hd ? 9 : 7, HAND = hd ? 8 : 6, LEG = hd ? 10 : 8, SHOE = hd ? 10 : 8;
+  const HS = hd ? 14 : 10, HR = hd ? 6 : 4; // hair shell segments / rows
 
   // Head, neck, face
   B.region = R.skin;
-  B.ellipsoid(HEAD.cx, HEAD.cy, HEAD.cz, HEAD.rx, HEAD.ry, HEAD.rz, 10, 8, BONE.Head);
+  B.ellipsoid(HEAD.cx, HEAD.cy, HEAD.cz, HEAD.rx, HEAD.ry, HEAD.rz, hd ? 16 : 10, hd ? 12 : 8, BONE.Head, BONE.Head, 1, shapeHead);
   B.tube([
     { y: 1.44, rx: 0.047, rz: 0.045, cz: -0.004, b0: BONE.Head, b1: BONE.Chest, w: 0.4 },
     { y: 1.565, rx: 0.045, rz: 0.044, cz: 0, b0: BONE.Head },
-  ], 6);
+  ], hd ? 8 : 6);
   // ears
-  B.box(0.097, 1.638, 0.0, 0.012, 0.024, 0.016, BONE.Head);
-  B.box(-0.097, 1.638, 0.0, 0.012, 0.024, 0.016, BONE.Head);
+  if (hd) {
+    B.ellipsoid(0.097, 1.638, 0.0, 0.013, 0.027, 0.018, 6, 4, BONE.Head);
+    B.ellipsoid(-0.097, 1.638, 0.0, 0.013, 0.027, 0.018, 6, 4, BONE.Head);
+  } else {
+    B.box(0.097, 1.638, 0.0, 0.012, 0.024, 0.016, BONE.Head);
+    B.box(-0.097, 1.638, 0.0, 0.012, 0.024, 0.016, BONE.Head);
+  }
   // nose (small pyramid)
   {
     const { p, n } = headSurface(0, 1.628, -0.004);
@@ -398,24 +440,47 @@ export function buildLod0(): THREE.BufferGeometry {
       B.smooth(v0, i0);
     }
   }
+  if (hd) {
+    // eye whites behind the pupils
+    B.region = R.white;
+    faceDecal(B, 0.037, 1.655, 0.017, 0.012, 0, 0.0012);
+    faceDecal(B, -0.037, 1.655, 0.017, 0.012, 0, 0.0012);
+  }
   B.region = R.eyes;
-  faceDecal(B, 0.037, 1.656, 0.011, 0.016, 0, 0.0015);
-  faceDecal(B, -0.037, 1.656, 0.011, 0.016, 0, 0.0015);
+  faceDecal(B, hd ? 0.035 : 0.037, 1.655, hd ? 0.0085 : 0.011, hd ? 0.0115 : 0.016, 0, hd ? 0.0026 : 0.0015);
+  faceDecal(B, hd ? -0.035 : -0.037, 1.655, hd ? 0.0085 : 0.011, hd ? 0.0115 : 0.016, 0, hd ? 0.0026 : 0.0015);
   B.region = R.brow;
   faceDecal(B, 0.039, 1.689, 0.018, 0.0055, -0.12, 0.002);
   faceDecal(B, -0.039, 1.689, 0.018, 0.0055, 0.12, 0.002);
   B.region = R.mouth;
   faceDecal(B, 0, 1.589, 0.017, 0.0045, 0, 0.0015);
+  if (hd) {
+    // cheeks: a touch of warmth
+    B.region = R.cheek;
+    faceDecal(B, 0.06, 1.615, 0.014, 0.009, 0, 0.001);
+    faceDecal(B, -0.06, 1.615, 0.014, 0.009, 0, 0.001);
+  }
 
   // Torso (shirt) + pelvis (shorts/trousers top)
   B.region = R.top;
   B.tube(TORSO, TORSO_SIDES, TORSO_PHASE, 0.022, null);
+  if (hd) {
+    // collar ring and a slightly flared hem lip
+    B.tube([
+      { y: 1.445, rx: 0.06, rz: 0.058, cz: 0.0, b0: BONE.Chest },
+      { y: 1.478, rx: 0.056, rz: 0.054, cz: -0.003, b0: BONE.Chest },
+    ], 10, 0, null, null);
+    B.tube([
+      { y: 0.948, rx: 0.166, rz: 0.116, cz: 0.005, b0: BONE.Pelvis, b1: BONE.Spine, w: 0.7 },
+      { y: 0.975, rx: 0.166, rz: 0.116, cz: 0.005, b0: BONE.Pelvis, b1: BONE.Spine, w: 0.6 },
+    ], TORSO_SIDES, TORSO_PHASE, null, null);
+  }
   B.region = R.bottom;
   B.tube([
     { y: 0.84, rx: 0.118, rz: 0.088, b0: BONE.Pelvis },
     { y: 0.925, rx: 0.157, rz: 0.106, cz: 0.002, b0: BONE.Pelvis },
     { y: 1.0, rx: 0.148, rz: 0.1, cz: 0.006, b0: BONE.Pelvis, b1: BONE.Spine, w: 0.6 },
-  ], 10, TORSO_PHASE, null, 0.035);
+  ], TORSO_SIDES, TORSO_PHASE, null, 0.035);
 
   // Left arm (mirrored to the right)
   {
@@ -426,20 +491,20 @@ export function buildLod0(): THREE.BufferGeometry {
       { y: 1.27, rx: 0.057, rz: 0.056, cx: ax, b0: BONE.UArmL },
       { y: 1.39, rx: 0.061, rz: 0.06, cx: ax, b0: BONE.UArmL },
       { y: 1.445, rx: 0.056, rz: 0.056, cx: ax - 0.004, b0: BONE.UArmL },
-    ], 7, 0, 0.028, null);
+    ], ARM, 0, 0.028, null);
     B.region = R.armLow;
     B.tube([
       { y: 0.895, rx: 0.03, rz: 0.027, cx: ax, cz: 0.004, b0: BONE.LArmL },
       { y: 0.99, rx: 0.038, rz: 0.035, cx: ax, cz: 0.004, b0: BONE.LArmL },
       { y: 1.135, rx: 0.043, rz: 0.041, cx: ax, b0: BONE.UArmL, b1: BONE.LArmL, w: 0.5 },
       { y: 1.3, rx: 0.047, rz: 0.046, cx: ax, b0: BONE.UArmL },
-    ], 7);
+    ], ARM);
     B.region = R.skin;
     B.tube([
       { y: 0.80, rx: 0.024, rz: 0.033, cx: ax - 0.002, cz: 0.006, b0: BONE.LArmL },
       { y: 0.848, rx: 0.025, rz: 0.04, cx: ax, cz: 0.006, b0: BONE.LArmL },
       { y: 0.9, rx: 0.026, rz: 0.03, cx: ax, cz: 0.004, b0: BONE.LArmL },
-    ], 6, 0, null, 0.026);
+    ], HAND, 0, null, 0.026);
     // thumb
     B.box(ax - 0.022, 0.855, 0.03, 0.01, 0.022, 0.01, BONE.LArmL, BONE.LArmL, 1, new THREE.Matrix4().makeRotationZ(0.25));
     B.mirror(v0, B.vcount, i0, B.idx.length);
@@ -454,7 +519,7 @@ export function buildLod0(): THREE.BufferGeometry {
       { y: 0.62, rx: 0.079, rz: 0.08, cx: lx + 0.004, cz: 0.004, b0: BONE.ULegL },
       { y: 0.86, rx: 0.089, rz: 0.09, cx: lx + 0.004, b0: BONE.ULegL },
       { y: 0.965, rx: 0.084, rz: 0.086, cx: lx, b0: BONE.ULegL, b1: BONE.Pelvis, w: 0.6 },
-    ], 8, Math.PI / 8, 0.02, null);
+    ], LEG, Math.PI / LEG, 0.02, null);
     B.region = R.legLow;
     B.tube([
       { y: 0.095, rx: 0.036, rz: 0.037, cx: lx, cz: -0.002, b0: BONE.LLegL, b1: BONE.FootL, w: 0.7 },
@@ -462,7 +527,7 @@ export function buildLod0(): THREE.BufferGeometry {
       { y: 0.36, rx: 0.056, rz: 0.06, cx: lx, cz: -0.012, b0: BONE.LLegL },
       { y: 0.5, rx: 0.056, rz: 0.058, cx: lx, cz: 0.006, b0: BONE.ULegL, b1: BONE.LLegL, w: 0.5 },
       { y: 0.645, rx: 0.068, rz: 0.07, cx: lx + 0.003, cz: 0.004, b0: BONE.ULegL },
-    ], 8, Math.PI / 8);
+    ], LEG, Math.PI / LEG);
     // shoe: tube along +Z built vertically then rotated
     B.region = R.shoes;
     {
@@ -472,9 +537,9 @@ export function buildLod0(): THREE.BufferGeometry {
         { y: 0.0, rx: 0.046, rz: 0.047, cz: 0.05, b0: BONE.FootL },
         { y: 0.09, rx: 0.048, rz: 0.035, cz: 0.04, b0: BONE.FootL },
         { y: 0.163, rx: 0.04, rz: 0.024, cz: 0.028, b0: BONE.FootL },
-      ], 8, Math.PI / 8, 0.024, 0.02);
+      ], SHOE, Math.PI / SHOE, 0.024, 0.02);
       // tube local (x, y=forward, z=up) → world (x, up, forward)
-      const m = new THREE.Matrix4().set(1, 0, 0, lx, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1);
+      const m = new THREE.Matrix4().set(-1, 0, 0, lx, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1);
       B.transform(sv0, m);
       // normals were computed before the transform: recompute
       for (let v = sv0; v < B.vcount; v++) B.nor[v * 3] = B.nor[v * 3 + 1] = B.nor[v * 3 + 2] = 0;
@@ -490,7 +555,7 @@ export function buildLod0(): THREE.BufferGeometry {
   // short hair
   B.region = R.hair;
   B.partId = PART.hairShort + 1;
-  B.shell(H.cx, H.cy + 0.007, H.cz - 0.006, 0.108, 0.13, 0.12, 10, 4, 0, (th) => {
+  B.shell(H.cx, H.cy + 0.007, H.cz - 0.006, 0.108, 0.13, 0.12, HS, HR, 0, (th) => {
     const f = backness(th);
     return Math.PI * (f < 0.5 ? 0.34 + (0.48 - 0.34) * (f / 0.5) : 0.48 + (0.66 - 0.48) * ((f - 0.5) / 0.5));
   }, () => 0, BONE.Head);
@@ -501,11 +566,11 @@ export function buildLod0(): THREE.BufferGeometry {
     const f = backness(th);
     return smoothstep(0.18, 0.42, f) * (0.1 + 0.14 * smoothstep(0.5, 1, f));
   };
-  B.shell(H.cx, H.cy + 0.008, H.cz - 0.01, 0.112, 0.133, 0.124, 12, 4, 3, longPhi, longExt, BONE.Head);
-  B.shell(H.cx, H.cy + 0.008, H.cz - 0.01, 0.112, 0.133, 0.124, 12, 1, 3, (th) => longPhi(th), longExt, BONE.Head, true, 0, TAU, 0.94);
+  B.shell(H.cx, H.cy + 0.008, H.cz - 0.01, 0.112, 0.133, 0.124, HS + 2, HR, 3, longPhi, longExt, BONE.Head);
+  B.shell(H.cx, H.cy + 0.008, H.cz - 0.01, 0.112, 0.133, 0.124, HS + 2, 1, 3, (th) => longPhi(th), longExt, BONE.Head, true, 0, TAU, 0.94);
   // bun
   B.partId = PART.hairBun + 1;
-  B.ellipsoid(0, 1.742, -0.082, 0.052, 0.048, 0.05, 7, 5, BONE.Head);
+  B.ellipsoid(0, 1.742, -0.082, 0.052, 0.048, 0.05, hd ? 10 : 7, hd ? 7 : 5, BONE.Head);
   // ponytail
   B.partId = PART.hairPony + 1;
   B.tube([
@@ -513,18 +578,18 @@ export function buildLod0(): THREE.BufferGeometry {
     { y: 1.53, rx: 0.03, rz: 0.03, cz: -0.152, b0: BONE.Head },
     { y: 1.62, rx: 0.038, rz: 0.036, cz: -0.137, b0: BONE.Head },
     { y: 1.7, rx: 0.032, rz: 0.03, cz: -0.112, b0: BONE.Head },
-  ], 6, 0, 0.01, 0.018);
+  ], hd ? 8 : 6, 0, 0.01, 0.018);
   // beard
   B.partId = PART.beard + 1;
-  B.shell(H.cx, H.cy - 0.025, H.cz + 0.002, 0.104, 0.11, 0.117, 8, 2, 0, () => Math.PI * 0.86, () => 0, BONE.Head, false, -1.75, 1.75);
+  B.shell(H.cx, H.cy - 0.025, H.cz + 0.002, 0.104, 0.11, 0.117, hd ? 12 : 8, hd ? 3 : 2, 0, () => Math.PI * 0.86, () => 0, BONE.Head, false, -1.75, 1.75);
 
   // baseball cap
   B.region = R.acc;
   B.partId = PART.cap + 1;
-  B.shell(H.cx, H.cy + 0.02, H.cz - 0.004, 0.113, 0.118, 0.124, 10, 3, 0, (th) => Math.PI * (0.44 + 0.08 * backness(th)), () => 0, BONE.Head);
+  B.shell(H.cx, H.cy + 0.02, H.cz - 0.004, 0.113, 0.118, 0.124, HS, 3, 0, (th) => Math.PI * (0.44 + 0.08 * backness(th)), () => 0, BONE.Head);
   {
     // brim: curved strip in front, two-sided
-    const segs = 6;
+    const segs = hd ? 10 : 6;
     const top: THREE.Vector3[] = [];
     const out: THREE.Vector3[] = [];
     for (let k = 0; k <= segs; k++) {
@@ -551,9 +616,9 @@ export function buildLod0(): THREE.BufferGeometry {
   B.tube([
     { y: 1.695, rx: 0.115, rz: 0.124, cz: 0.0, b0: BONE.Head },
     { y: 1.805, rx: 0.103, rz: 0.11, cz: -0.004, b0: BONE.Head },
-  ], 10, 0, 0.018, null);
+  ], HS, 0, 0.018, null);
   {
-    const segs = 12;
+    const segs = hd ? 18 : 12;
     for (const side of [1, -1]) {
       const v0 = B.vcount, i0 = B.idx.length;
       const inner: number[] = [], outer: number[] = [];
@@ -613,7 +678,7 @@ export function buildLod0(): THREE.BufferGeometry {
   // skirt (short) and long skirt / dress
   B.region = R.skirt;
   const skirtRings = (hemY: number, hemRx: number, hemRz: number, mid: { y: number; rx: number; rz: number }[]) => {
-    const sides = 10;
+    const sides = hd ? 14 : 10;
     const v0 = B.vcount, i0 = B.idx.length;
     const ringsY = [{ y: 1.0, rx: 0.158, rz: 0.11 }, ...mid, { y: hemY, rx: hemRx, rz: hemRz }];
     const ids: number[][] = [];
@@ -664,14 +729,25 @@ export function buildLod0(): THREE.BufferGeometry {
     const v0 = B.vcount, i0 = B.idx.length;
     const rows: number[][] = [];
     const use = TORSO.slice(0, 5);
+    // follow the faceted torso across the front facets: polygon vertices at ±k·π/sides (odd k)
+    const span = hd ? 3 : 1;
+    const angles: number[] = [];
+    for (let k = -span; k <= span; k += 2) angles.push((k * Math.PI) / TORSO_SIDES);
     for (const r of use) {
-      const z = (r.cz ?? 0) + r.rz * Math.cos(TORSO_PHASE) + 0.0035;
-      const hw = r.rx * Math.sin(TORSO_PHASE) * 0.85;
-      rows.push([B.vtx(-hw, r.y + 0.004, z, r.b0, r.b1 ?? r.b0, r.w ?? 1), B.vtx(hw, r.y + 0.004, z, r.b0, r.b1 ?? r.b0, r.w ?? 1)]);
+      const row: number[] = [];
+      for (const th of angles) {
+        const x = r.rx * Math.sin(th) * (Math.abs(th) > 0 ? 0.97 : 1), z = (r.cz ?? 0) + r.rz * Math.cos(th);
+        const nl = Math.hypot(x / (r.rx * r.rx), (z - (r.cz ?? 0)) / (r.rz * r.rz));
+        const nx = x / (r.rx * r.rx) / nl, nz = (z - (r.cz ?? 0)) / (r.rz * r.rz) / nl;
+        row.push(B.vtx(x + nx * 0.0035, r.y + 0.004, z + nz * 0.0035, r.b0, r.b1 ?? r.b0, r.w ?? 1));
+      }
+      rows.push(row);
     }
     for (let j = 0; j < rows.length - 1; j++) {
-      B.triOut(rows[j][0], rows[j][1], rows[j + 1][1], 0, use[j].y, 0);
-      B.triOut(rows[j][0], rows[j + 1][1], rows[j + 1][0], 0, use[j].y, 0);
+      for (let c = 0; c < angles.length - 1; c++) {
+        B.triOut(rows[j][c], rows[j][c + 1], rows[j + 1][c + 1], 0, use[j].y, 0);
+        B.triOut(rows[j][c], rows[j + 1][c + 1], rows[j + 1][c], 0, use[j].y, 0);
+      }
     }
     B.smooth(v0, i0);
   }

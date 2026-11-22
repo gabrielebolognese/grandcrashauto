@@ -14,8 +14,10 @@ export const fullscreenSupported = (): boolean => {
 export const isFullscreen = (): boolean => !!(document.fullscreenElement || (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement);
 
 /**
- * Driving top bar (spec §9/§10): 💥 Explode / ↺ Reset (tap; long-press = reset any time, with a progress ring),
- * camera, horn (hold), look-back (hold), pause, fullscreen. Shown on desktop too (clickable, with key hints).
+ * Driving controls that are not pedals/steering:
+ *  - one grouped cluster (top-centre): map, camera, lights, horn (hold), look-back (hold), fullscreen, pause;
+ *  - 💥 Explode / ↺ Reset at the bottom-centre (tap; long-press = reset at any time, with a progress ring), and in
+ *    plane mode also Explode middle, Explode tail and Reset.
  */
 export class TopBar {
   readonly el: HTMLDivElement;
@@ -25,38 +27,53 @@ export class TopBar {
   private ring: SVGRectElement;
   private camLabel: HTMLDivElement;
   private fsBtn: HTMLButtonElement;
+  private lightsBtn: HTMLButtonElement;
+  private midBtn: HTMLButtonElement;
+  private tailBtn: HTMLButtonElement;
   private lpPtr: number | null = null;
   private lpStart = -1;
   private lpFired = false;
-  private exploded: boolean | null = null;
+  private boomState = '';
+  private lightsState = '';
   private camPending = 0;
   private camLabelT = 0;
 
   constructor(private host: UIHost) {
     const { ctx } = host;
-    // ── Explode / Reset ──
+    // ── 💥 / ↺ ──
     this.boomEmoji = h('span', { class: 'boom-emoji', text: '💥' });
     this.boomLabel = h('span', { class: 'boom-label', text: 'Explode' });
     const svgNS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('class', 'boom-ring');
-    svg.setAttribute('viewBox', '0 0 160 56');
+    svg.setAttribute('viewBox', '0 0 130 46');
     svg.setAttribute('preserveAspectRatio', 'none');
     this.ring = document.createElementNS(svgNS, 'rect');
-    for (const [k, v] of Object.entries({ x: '2', y: '2', width: '156', height: '52', rx: '26', pathLength: '100' })) this.ring.setAttribute(k, v);
+    for (const [k, v] of Object.entries({ x: '1.5', y: '1.5', width: '127', height: '43', rx: '21.5', pathLength: '100' })) this.ring.setAttribute(k, v);
     svg.append(this.ring);
     this.boom = h(
       'button',
-      { class: 'boom-btn touch-ctl', type: 'button', 'aria-label': 'Explode' },
+      { class: 'boom-btn touch-ctl boom-fade', type: 'button', 'aria-label': 'Explode' },
       h('span', { class: 'boom-face' }, svg, this.boomEmoji, this.boomLabel),
       h('kbd', { class: 'tb-key', text: 'X' }),
       h('span', { class: 'boom-hint', text: 'Hold to reset' }),
     );
     this.bindBoom();
+    const round = (name: IconName, label: string, key: string, fn: () => void) => {
+      const b = h('button', { class: 'round-act touch-ctl boom-fade only-plane', type: 'button', 'aria-label': label, title: label }, icon(name), h('kbd', { class: 'tb-key', text: key }));
+      b.addEventListener('click', () => {
+        uiSound('click');
+        fn();
+      });
+      return b;
+    };
+    this.midBtn = round('split', 'Explode middle', 'M', () => ctx.input.press('explodeMiddle'));
+    this.tailBtn = round('tail', 'Explode tail', 'T', () => ctx.input.press('explodeTail'));
+    const resetBtn = round('reset', 'Reset plane', 'R', () => ctx.game.requestReset());
 
-    // ── icon buttons ──
+    // ── grouped cluster ──
     const tap = (name: IconName, label: string, key: string | null, fn: () => void, cls = '') => {
-      const b = h('button', { class: `tb-btn touch-ctl ${cls}`, type: 'button', 'aria-label': label, title: label }, h('span', { class: 'tb-face' }, icon(name)), key ? h('kbd', { class: 'tb-key', text: key }) : null);
+      const b = h('button', { class: `tb-btn touch-ctl ${cls}`, type: 'button', 'aria-label': label, title: label }, icon(name), key ? h('kbd', { class: 'tb-key', text: key }) : null);
       b.addEventListener('click', () => {
         uiSound('click');
         fn();
@@ -64,7 +81,7 @@ export class TopBar {
       return b;
     };
     const hold = (name: IconName, label: string, key: string, cls: string, set: (on: boolean) => void) => {
-      const b = h('button', { class: `tb-btn touch-ctl ${cls}`, type: 'button', 'aria-label': label, title: label }, h('span', { class: 'tb-face' }, icon(name)), h('kbd', { class: 'tb-key', text: key }));
+      const b = h('button', { class: `tb-btn touch-ctl ${cls}`, type: 'button', 'aria-label': label, title: label }, icon(name), h('kbd', { class: 'tb-key', text: key }));
       let ptr: number | null = null;
       b.addEventListener('pointerdown', (e) => {
         if (ptr !== null) return;
@@ -89,15 +106,17 @@ export class TopBar {
       b.addEventListener('lostpointercapture', end);
       return b;
     };
-    const horn = hold('horn', 'Horn', 'H', 'tb-horn', (on) => (ctx.input.touch.horn = on));
-    const look = hold('lookBack', 'Look back', 'Q', 'tb-look', (on) => (ctx.input.touch.lookBack = on));
+    const map = tap('map', 'Map', 'N', () => ctx.nav?.openMap?.());
     const cam = tap('camera', 'Camera', 'C', () => {
       ctx.input.press('camera');
       this.camPending = 2;
     });
-    this.fsBtn = tap('fullscreen', 'Fullscreen', null, () => toggleFullscreen(), 'tb-fs');
+    this.lightsBtn = tap('headlight', 'Headlights', 'L', () => ctx.input.press('lights'), 'only-car');
+    const horn = hold('horn', 'Horn', 'H', 'only-car only-touch', (on) => (ctx.input.touch.horn = on));
+    const look = hold('lookBack', 'Look back', 'B', 'only-car only-touch', (on) => (ctx.input.touch.lookBack = on));
+    this.fsBtn = tap('fullscreen', 'Fullscreen', null, () => toggleFullscreen());
     if (!fullscreenSupported()) this.fsBtn.style.display = 'none';
-    const pause = tap('pause', 'Pause', 'Esc', () => ctx.game.pause(), 'tb-pause');
+    const pause = tap('pause', 'Pause', 'Esc', () => ctx.game.pause());
     this.camLabel = h('div', { class: 'cam-label' });
 
     const onFs = () => {
@@ -111,8 +130,8 @@ export class TopBar {
     this.el = h(
       'div',
       { class: 'topbar', 'aria-hidden': 'true' },
-      h('div', { class: 'tb-center' }, this.boom),
-      h('div', { class: 'tb-right' }, horn, look, cam, this.fsBtn, pause),
+      h('div', { class: 'tb-cluster fade-ctl', role: 'toolbar', 'aria-label': 'Game controls' }, map, cam, this.lightsBtn, horn, look, this.fsBtn, pause),
+      h('div', { class: 'boom-wrap' }, this.midBtn, this.boom, this.tailBtn, resetBtn),
       this.camLabel,
     );
   }
@@ -154,11 +173,14 @@ export class TopBar {
     });
   }
 
-  private fire(): void {
+  private isResetState(): boolean {
     const { ctx } = this.host;
-    const wasExploded = ctx.vehicle.state.exploded;
-    uiSound(wasExploded ? 'confirm' : 'click');
-    ctx.game.explodeOrReset(); // the 'explosion' event triggers the haptic buzz
+    return ctx.game.mode === 'plane' ? !!ctx.planes?.crashed : !!ctx.vehicle.state.exploded;
+  }
+
+  private fire(): void {
+    uiSound(this.isResetState() ? 'confirm' : 'click');
+    this.host.ctx.game.explodeOrReset(); // the 'explosion' event triggers the haptic buzz
   }
 
   private cancelLongPress(): void {
@@ -170,15 +192,30 @@ export class TopBar {
 
   update(dt: number): void {
     const { ctx } = this.host;
-    const exploded = !!ctx.vehicle.state.exploded;
-    if (exploded !== this.exploded) {
-      this.exploded = exploded;
-      this.boom.classList.toggle('is-reset', exploded);
-      setText(this.boomEmoji, exploded ? '↺' : '💥');
-      setText(this.boomLabel, exploded ? 'Reset' : 'Explode');
-      this.boom.setAttribute('aria-label', exploded ? 'Reset car' : 'Explode');
-      const key = this.boom.querySelector('.tb-key') as HTMLElement;
-      setText(key, exploded ? 'R' : 'X');
+    const plane = ctx.game.mode === 'plane';
+    const reset = this.isResetState();
+    const st = `${plane}|${reset}`;
+    if (st !== this.boomState) {
+      this.boomState = st;
+      this.boom.classList.toggle('is-reset', reset);
+      setText(this.boomEmoji, reset ? '↺' : '💥');
+      setText(this.boomLabel, reset ? 'Reset' : 'Explode');
+      this.boom.setAttribute('aria-label', reset ? (plane ? 'Respawn plane' : 'Reset car') : 'Explode');
+      setText(this.boom.querySelector('.tb-key') as HTMLElement, reset ? 'R' : 'X');
+    }
+    if (plane) {
+      const ps = ctx.planes?.state;
+      const crashed = !!ctx.planes?.crashed;
+      this.midBtn.disabled = crashed || !!ps?.damage.split;
+      this.tailBtn.disabled = crashed || !!ps?.damage.split || !!ps?.damage.tailLost;
+    } else {
+      const hl = ctx.vehicle.state.headlights ?? 'off';
+      if (hl !== this.lightsState) {
+        this.lightsState = hl;
+        this.lightsBtn.classList.toggle('on', hl === 'low');
+        this.lightsBtn.classList.toggle('hi', hl === 'high');
+        this.lightsBtn.title = `Headlights: ${hl}`;
+      }
     }
     // Long-press progress ring → reset at any time.
     if (this.lpStart >= 0 && !this.lpFired) {
@@ -198,7 +235,7 @@ export class TopBar {
         ctx.game.requestReset();
       }
     }
-    // Camera mode label after the camera button (read on the next frames once the rig switched).
+    // Camera mode label (read a couple of frames later, once the rig switched).
     if (this.camPending > 0 && --this.camPending === 0) {
       setText(this.camLabel, CAM_NAMES[ctx.cameraRig.mode] ?? ctx.cameraRig.mode);
       this.camLabel.classList.add('show');

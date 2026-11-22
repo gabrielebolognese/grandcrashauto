@@ -625,7 +625,7 @@ RAMPS[RAMP.STEAM] = {
   params: [[0, 0.1, 0, 1]],
 };
 RAMPS[RAMP.TAIL] = {
-  color: (t) => [1, 0.12 + 0.1 * (1 - t), 0.06, (1 - t) * (1 - t) * sstep(0, 0.05, t)],
+  color: (t) => [1, 0.04 + 0.05 * (1 - t), 0.03, (1 - t) * (1 - t) * sstep(0, 0.05, t)],
   params: [[0, 1, 1, 0]],
 };
 RAMPS[RAMP.SLICK] = {

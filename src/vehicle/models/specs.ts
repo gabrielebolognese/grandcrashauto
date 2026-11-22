@@ -94,6 +94,10 @@ export interface CarSpec {
     grilleCf: number;
     roundLamps?: { y: number; cfs: number[]; r: number };
     roofRails: boolean;
+    /** Louvred engine cover slats (top surface, z range). */
+    louvers?: { z0: number; z1: number; n: number };
+    /** Vertical fins in the rear diffuser. */
+    diffuserFins?: number;
     archFlares: boolean;
     seats4: boolean;
     cabinRear: number;
@@ -159,136 +163,156 @@ function lowerBody(
   return -1;
 }
 
-// ───────────────────────────── Tidewing GT (coupe) ─────────────────────────────
+// ───────────────────────────── Riptide R (coupe — mid-engine two-seater) ─────────────────────────────
 const CZ = {
   cowlStrip: 0.935,
-  sideF: 0.86,
-  sideR: -1.02,
-  bA: -0.45,
-  bB: -0.39,
+  sideF: 0.84,
+  sideR: -0.58,
+  bA: -0.34,
+  bB: -0.3,
   doorF: 0.9,
-  doorR: -0.42,
-  hoodF: 2.1,
-  trunkF: -1.76,
-  trunkR: -2.1,
-  headZ: 1.96,
+  doorR: -0.3,
+  hoodF: 2.14,
+  trunkF: -1.8,
+  trunkR: -2.12,
+  headZ: 1.84,
+  drlZ: 1.98,
   tailZ: -2.06,
+  blGlass: -0.72,
+  scoopR: -0.86,
+  scoopF: -0.4,
+  ventR: 1.42,
+  ventF: 1.82,
 };
 const coupe: CarSpec = {
   id: 'coupe',
-  name: 'Tidewing GT',
-  description: 'Low fastback coupe with wide rear haunches and a full-width light bar. Light, sharp and eager to rotate.',
-  zRear: -2.18,
-  zFront: 2.22,
-  axleF: 1.34,
-  axleR: -1.26,
-  halfTrack: 0.8,
-  wheelR: 0.335,
-  wheelW: 0.245,
+  name: 'Riptide R',
+  description: 'Mid-engine two-seat wedge: cab-forward canopy, gaping intakes and side scoops feeding the engine right behind your shoulders. Low, wide and very, very quick.',
+  zRear: -2.22,
+  zFront: 2.28,
+  axleF: 1.35,
+  axleR: -1.3,
+  halfTrack: 0.83,
+  wheelR: 0.345,
+  wheelW: 0.27,
   mass: 1250,
   sill: curve([
-    [-2.18, 0.31],
-    [-1.98, 0.25],
-    [-1.72, 0.215],
-    [1.7, 0.205],
-    [2.0, 0.2],
-    [2.22, 0.21],
+    [-2.22, 0.3],
+    [-2.02, 0.225],
+    [-1.75, 0.19],
+    [1.75, 0.18],
+    [2.05, 0.17],
+    [2.28, 0.175],
   ]),
   belt: curve([
-    [-2.18, 0.73],
-    [-2.02, 0.8],
-    [-1.62, 0.845],
-    [-1.26, 0.862],
-    [-0.75, 0.835],
-    [0.1, 0.8],
-    [0.85, 0.785],
-    [1.34, 0.808],
-    [1.75, 0.765],
-    [2.02, 0.655],
-    [2.22, 0.53],
+    [-2.22, 0.9],
+    [-2.1, 0.905],
+    [-1.85, 0.89],
+    [-1.3, 0.885],
+    [-0.65, 0.82],
+    [0.2, 0.76],
+    [0.85, 0.75],
+    [1.35, 0.835],
+    [1.78, 0.75],
+    [2.06, 0.6],
+    [2.28, 0.46],
   ]),
   halfW: curve([
-    [-2.18, 0.86],
-    [-1.92, 0.93],
-    [-1.3, 0.958],
-    [-0.65, 0.925],
-    [0.2, 0.9],
-    [0.95, 0.905],
-    [1.4, 0.912],
-    [1.9, 0.89],
-    [2.22, 0.84],
+    [-2.22, 0.9],
+    [-2.0, 0.965],
+    [-1.3, 0.992],
+    [-0.75, 0.955],
+    [-0.2, 0.93],
+    [0.6, 0.93],
+    [1.35, 0.958],
+    [1.9, 0.93],
+    [2.28, 0.86],
   ]),
   crown: curve([
-    [-2.18, 0.02],
-    [-1.7, 0.012],
-    [0.9, 0.02],
-    [1.15, -0.022],
-    [1.75, -0.012],
-    [2.22, 0.012],
+    [-2.22, 0.004],
+    [-2.0, -0.02],
+    [-1.3, -0.05],
+    [-0.6, 0.0],
+    [0.95, 0.02],
+    [1.1, -0.05],
+    [1.35, -0.085],
+    [1.8, -0.06],
+    [2.1, -0.02],
+    [2.28, 0.004],
   ]),
-  floorDrop: 0.06,
-  sideT: [0.06, 0.22, 0.42, 0.6, 0.82],
-  sideInset: [0.085, 0.06, 0.02, 0.0, 0.004, 0.03],
-  shoulderIn: 0.075,
-  topR: 0.06,
+  floorDrop: 0.055,
+  sideT: [0.06, 0.2, 0.4, 0.58, 0.8],
+  sideInset: [0.115, 0.085, 0.035, 0.0, 0.0, 0.022],
+  shoulderIn: 0.062,
+  topR: 0.04,
   hoodEdge: 0.3,
-  creases: [1, 2, 4, 8, 15, 17],
-  flare: { front: 0.006, rear: 0.022, len: 0.42 },
+  creases: [1, 2, 4, 8, 10, 15, 17],
+  flare: { front: 0.012, rear: 0.036, len: 0.46 },
   cabin: {
     H: curve([
-      [-1.72, 0],
-      [-1.42, 0.115],
-      [-1.0, 0.265],
-      [-0.55, 0.365],
-      [-0.1, 0.4],
-      [0.3, 0.388],
-      [0.58, 0.29],
+      [-1.75, 0],
+      [-1.3, 0.12],
+      [-0.85, 0.26],
+      [-0.42, 0.355],
+      [-0.1, 0.372],
+      [0.12, 0.362],
+      [0.45, 0.24],
       [0.98, 0],
     ]),
     cabinW: curve([
-      [-2.18, 0.5],
-      [-1.72, 0.6],
-      [-0.8, 0.735],
-      [0.3, 0.765],
+      [-2.22, 0.5],
+      [-1.75, 0.58],
+      [-0.8, 0.72],
+      [0.2, 0.765],
       [0.98, 0.745],
-      [2.22, 0.6],
+      [2.28, 0.6],
     ]),
     roofW: curve([
-      [-1.72, 0.42],
-      [-0.8, 0.59],
-      [0.2, 0.62],
-      [0.98, 0.6],
+      [-1.75, 0.36],
+      [-0.8, 0.55],
+      [0.0, 0.6],
+      [0.98, 0.58],
     ]),
-    zBl: -1.72,
-    zRoofRear: -0.55,
-    zWsTop: 0.3,
+    zBl: -1.75,
+    zRoofRear: -0.42,
+    zWsTop: 0.12,
     zCowl: 0.98,
-    cornerR: 0.07,
-    crown: 0.045,
+    cornerR: 0.065,
+    crown: 0.04,
   },
-  front: { round: 0.32, pow: 2.2, zone: 0.42, rake: 0.55, rakeY: 0.33, bulge: 0.045, crease: false },
-  rear: { round: 0.22, pow: 2.4, zone: 0.3, rake: 0.3, rakeY: 0.5, bulge: 0.02, crease: true },
-  capCols: [0, 0.16, 0.32, 0.46, 0.6, 0.74, 0.86, 1],
+  front: { round: 0.3, pow: 2.0, zone: 0.4, rake: 0.6, rakeY: 0.28, bulge: 0.03, crease: false },
+  rear: { round: 0.18, pow: 2.6, zone: 0.28, rake: -0.25, rakeY: 0.6, bulge: 0.012, crease: true },
+  capCols: [0, 0.16, 0.3, 0.42, 0.52, 0.64, 0.76, 0.9, 1],
   capColsLow: [0, 0.5, 1],
   breaks: Object.values(CZ),
   classify(q) {
     const s = coupe;
     if (q.band <= 2) return R.UNDER;
-    // Lamps
-    if (q.kind === 0 && q.z > CZ.headZ && (q.band === 10 || q.band === 11)) return q.band === 11 ? R.DRL : R.HEAD;
+    // narrow slit headlights with a DRL hook at the corners
+    if (q.kind === 0 && q.band === 11 && q.z > CZ.headZ) return R.HEAD;
+    if (q.kind === 0 && q.band === 10 && q.z > CZ.drlZ) return R.DRL;
     if (q.kind === 1) {
-      if ((q.band === 10 || q.band === 11) && q.cf > 0.46) return q.band === 11 ? R.DRL : R.HEAD;
-      if (q.band === 9 && q.cf < 0.6) return R.GRILLE;
-      if (q.band >= 4 && q.band <= 6 && q.cf < 0.74) return R.BUMPER_F_BLACK;
-      if (q.band === 4 && q.cf > 0.74) return R.BUMPER_F_BLACK;
+      if (q.band === 11 && q.cf > 0.52) return R.HEAD;
+      if (q.band === 10 && q.cf > 0.76) return R.DRL;
+      if (q.band === 3) return R.BUMPER_F_BLACK;
+      if (q.band >= 4 && q.band <= 7 && q.cf < 0.42) return R.BUMPER_F_BLACK;
+      if (q.band >= 4 && q.band <= 8 && q.cf > 0.52 && q.cf < 0.9) return R.BUMPER_F_BLACK;
     }
-    if (q.kind === 0 && q.z < CZ.tailZ && (q.band === 9 || q.band === 10)) return R.BRAKE;
+    // twin frunk vents
+    if (q.kind === 0 && (q.band === 18 || q.band === 19) && q.H <= 1e-4 && q.z > CZ.ventR && q.z < CZ.ventF) return R.HOOD_BLACK;
+    // side scoops ahead of the rear haunches (slanted leading edge)
+    if (q.kind === 0 && q.band >= 8 && q.band <= 10 && q.z > CZ.scoopR && q.z < CZ.scoopF) return R.GRILLE;
+    // full-width taillight bar
+    if (q.kind === 0 && q.band === 10 && q.z < CZ.tailZ) return R.BRAKE;
     if (q.kind === -1) {
-      if (q.band === 9 || q.band === 10) return q.cf > 0.74 ? R.BRAKE : R.TAIL;
-      if (q.band === 8 && q.cf > 0.32 && q.cf < 0.46) return R.REVERSE;
-      if (q.band >= 3 && q.band <= 5 && q.cf < 0.74) return R.BUMPER_R_BLACK;
+      if (q.band === 10) return q.cf > 0.76 ? R.BRAKE : R.TAIL;
+      if (q.band === 9 && q.cf > 0.3 && q.cf < 0.42) return R.REVERSE;
+      if (q.band === 9 && q.cf < 0.9) return R.GRILLE;
+      if (q.band >= 3 && q.band <= 6 && q.cf < 0.9) return R.BUMPER_R_BLACK;
     }
-    const g = greenhouse(q, s.cabin, { cowlStrip: CZ.cowlStrip, sideF: CZ.sideF, sideR: CZ.sideR, pillars: [[CZ.bA, CZ.bB]], pillarBlack: true });
+    // louvred engine cover behind a small rear window
+    if (q.kind === 0 && q.band >= 19 && q.H > 1e-4 && q.z > s.cabin.zBl && q.z < CZ.blGlass) return R.BLACK;
+    const g = greenhouse(q, s.cabin, { cowlStrip: CZ.cowlStrip, sideF: CZ.sideF, sideR: CZ.sideR, pillars: [[CZ.bA, CZ.bB]], pillarBlack: true, aPillarBlack: true });
     if (g >= 0) return g;
     const l = lowerBody(q, s, { hood: [s.cabin.zCowl, CZ.hoodF], trunk: [CZ.trunkR, CZ.trunkF], door: [CZ.doorR, CZ.doorF], bumperTopF: 8, bumperTopR: 8 });
     if (l >= 0) return l;
@@ -298,27 +322,29 @@ const coupe: CarSpec = {
   hood: { z0: 0.98, z1: CZ.hoodF },
   trunk: { z0: CZ.trunkR, z1: CZ.trunkF, hatch: false },
   bumperChrome: false,
-  stripe: { center: 0.16, twinIn: 0.07, twinOut: 0.2, sideY0: 0.36, sideY1: 0.42, sideSlope: 0.02, sideZ0: -1.95, sideZ1: 1.95 },
+  stripe: { center: 0.15, twinIn: 0.06, twinOut: 0.18, sideY0: 0.3, sideY1: 0.355, sideSlope: 0.025, sideZ0: -2.0, sideZ1: 1.95 },
   details: {
-    mirrorZ: 0.8,
-    handleZ: -0.3,
-    handleSlot: 9.4,
+    mirrorZ: 0.76,
+    handleZ: -0.12,
+    handleSlot: 10.4,
     exhaust: 'twinCenter',
-    exhaustX: 0.13,
-    exhaustY: 0.27,
-    plateFY: 0.3,
-    plateRY: 0.46,
+    exhaustX: 0.11,
+    exhaustY: 0.33,
+    plateFY: 0.29,
+    plateRY: 0.55,
     plateROnTrunk: false,
     grille: 'blades',
-    grilleBands: [9, 10],
-    grilleCf: 0.6,
+    grilleBands: [4, 7],
+    grilleCf: 0.4,
     roofRails: false,
     archFlares: false,
     seats4: false,
-    cabinRear: -1.15,
+    cabinRear: -0.62,
     pillarBlack: true,
+    louvers: { z0: -1.6, z1: -0.82, n: 6 },
+    diffuserFins: 5,
   },
-  kit: { spoilerZ: -2.04, spoilerRoof: false, scoop: { z0: 1.15, z1: 1.75, w: 0.2, h: 0.05 }, splitterDepth: 0.07 },
+  kit: { spoilerZ: -2.1, spoilerRoof: false, scoop: { z0: 1.25, z1: 1.85, w: 0.2, h: 0.045 }, splitterDepth: 0.08 },
 };
 
 // ───────────────────────────── Saltrunner 77 (muscle) ─────────────────────────────
@@ -334,6 +360,8 @@ const MZ = {
   trunkF: -1.48,
   trunkR: -2.27,
   tailZ: -2.3,
+  bladeF: 2.12,
+  bladeR: -2.06,
 };
 const muscle: CarSpec = {
   id: 'muscle',
@@ -435,9 +463,14 @@ const muscle: CarSpec = {
       if ((q.band === 9 || q.band === 10) && q.cf > 0.14 && q.cf < 0.93) return q.cf > 0.66 ? R.BRAKE : q.cf < 0.3 ? R.REVERSE : R.TAIL;
       if ((q.band === 9 || q.band === 10) && q.cf <= 0.14) return R.BLACK;
     }
+    // slim chrome blade bumpers wrapping the corners, black valance below
+    const blade = q.band === 5 || q.band === 6;
+    if (blade && (q.kind === 1 || (q.kind === 0 && q.z > s.zFront - 0.3))) return R.BUMPER_F;
+    if (blade && (q.kind === -1 || (q.kind === 0 && q.z < s.zRear + 0.3))) return R.BUMPER_R;
+    if (q.kind !== 0 && (q.band === 3 || q.band === 4)) return R.BLACK;
     const g = greenhouse(q, s.cabin, { cowlStrip: MZ.cowlStrip, sideF: MZ.sideF, sideR: MZ.sideR, pillars: [[MZ.bA, MZ.bB]], pillarBlack: true });
     if (g >= 0) return g;
-    const l = lowerBody(q, s, { hood: [s.cabin.zCowl, MZ.hoodF], trunk: [MZ.trunkR, MZ.trunkF], door: [MZ.doorR, MZ.doorF], bumperTopF: 8, bumperTopR: 8 });
+    const l = lowerBody(q, s, { hood: [s.cabin.zCowl, MZ.hoodF], trunk: [MZ.trunkR, MZ.trunkF], door: [MZ.doorR, MZ.doorF], bumperTopF: 3, bumperTopR: 3 });
     if (l >= 0) return l;
     return R.BODY;
   },
@@ -569,9 +602,9 @@ const hatch: CarSpec = {
   classify(q) {
     const s = hatch;
     if (q.band <= 2) return R.UNDER;
-    if (q.kind === 0 && q.z > HZ.headZ && q.band >= 9 && q.band <= 11) return q.band === 9 ? R.INDICATOR : R.HEAD;
+    if (q.kind === 0 && q.z > HZ.headZ && q.band >= 9 && q.band <= 11) return R.HEAD;
     if (q.kind === 1) {
-      if (q.band >= 9 && q.band <= 11 && q.cf > 0.46) return q.band === 9 && q.cf > 0.72 ? R.INDICATOR : R.HEAD;
+      if (q.band >= 9 && q.band <= 11 && q.cf > 0.46) return q.band === 9 && q.cf > 0.86 ? R.INDICATOR : R.HEAD;
       if (q.band === 10 && q.cf < 0.46) return R.GRILLE;
       if (q.band >= 4 && q.band <= 6 && q.cf < 0.6) return R.BUMPER_F_BLACK;
       if (q.band === 5 && q.cf > 0.72 && q.cf < 0.86) return R.DRL;

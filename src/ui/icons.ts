@@ -37,6 +37,23 @@ export const ICON = {
   copy: svg('<rect x="8" y="8" width="12" height="12" rx="2.4"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/>'),
   bolt: svg('<path d="M13 2.5L5 13.5h6l-1 8 8-11h-6z" fill="currentColor" stroke="none"/>'),
   pin: svg('<path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>'),
+  map: svg('<path d="M3.5 6.5l5.5-2 6 2 5.5-2v13l-5.5 2-6-2-5.5 2z"/><path d="M9 4.5v13M15 6.5v13"/>'),
+  plane: svg('<path d="M12 2.8c.9 0 1.5.8 1.5 2v4.6l7 4.1v2l-7-2.1v4l2.2 1.7v1.6L12 19.8l-3.7.9v-1.6l2.2-1.7v-4l-7 2.1v-2l7-4.1V4.8c0-1.2.6-2 1.5-2z" fill="currentColor" stroke="none"/>'),
+  flame: svg('<path d="M12 2.5c.6 3.2 4.8 5.6 4.8 10.3A4.8 4.8 0 0 1 12 17.6a4.8 4.8 0 0 1-4.8-4.8c0-2.2 1.1-3.7 2.3-4.8.2 1.6.9 2.6 1.9 3.1-.3-3.2.2-6 .6-8.6z" fill="currentColor" stroke="none"/><path d="M12 21.5a3 3 0 0 0 3-3c0-1.6-1.4-2.6-1.9-4-.9 1.2-2.1 1.8-2.1 1.8s-2 .6-2 2.2a3 3 0 0 0 3 3z" fill="rgba(255,255,255,.55)" stroke="none"/>'),
+  split: svg('<path d="M2.5 12h6M15.5 12h6"/><path d="M9 7.5l2 3-1.4 1.5 1.4 1.5-2 3"/><path d="M15 7.5l-2 3 1.4 1.5-1.4 1.5 2 3"/><circle cx="12" cy="4" r="1" fill="currentColor"/><circle cx="12" cy="20" r="1" fill="currentColor"/>'),
+  tail: svg('<path d="M3 15h10l3-8h3l-1.5 8H21v2H3z"/><path d="M14 4l1.5-1.5M18 4.5l1-2M10 6l.5-2"/>'),
+  skip: svg('<path d="M5 6l7 6-7 6zM12 6l7 6-7 6z" fill="currentColor" stroke="none"/>'),
+  headlight: svg('<path d="M10 6.5c-3.6 0-6 2.4-6 5.5s2.4 5.5 6 5.5c1 0 1.5-.6 1.5-1.5v-8c0-.9-.5-1.5-1.5-1.5z"/><path d="M14.5 8l6-1.5M14.5 12h6.5M14.5 16l6 1.5"/>'),
+  cloud: svg('<path d="M7 18.5h10.5a4 4 0 0 0 .4-8A6 6 0 0 0 6.4 9.6 4.5 4.5 0 0 0 7 18.5z"/>'),
+  rain: svg('<path d="M7 14.5h10.5a3.6 3.6 0 0 0 .4-7.2A5.5 5.5 0 0 0 6.6 6.5 4 4 0 0 0 7 14.5z"/><path d="M8 17.5l-1 2.5M12 17.5l-1 2.5M16 17.5l-1 2.5"/>'),
+  storm: svg('<path d="M7 13.5h10.5a3.6 3.6 0 0 0 .4-7.2A5.5 5.5 0 0 0 6.6 5.5 4 4 0 0 0 7 13.5z"/><path d="M12.5 13.5l-2.5 4h3.5l-2 4" stroke-width="2.4"/>'),
+  fog: svg('<path d="M3.5 9h17M5.5 13h13M3.5 17h17"/>'),
+  snow: svg('<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M9.5 4.5L12 6l2.5-1.5M9.5 19.5L12 18l2.5 1.5"/>'),
+  gear: svg('<circle cx="12" cy="15" r="4.5"/><circle cx="12" cy="15" r="1.5"/><path d="M12 10.5V3.5M9 6.5l3-3 3 3"/>'),
+  brakeDisc: svg('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M17.5 5.5l2-2M6.5 18.5l-2 2"/>'),
+  crack: svg('<path d="M12 3l-2 5 3 2.5-3.5 3 2.5 2.5-1.5 5"/>', 'stroke-width="2.6"'),
+  clock: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>'),
+  car: svg('<path d="M4 16.5v-3.2l1.6-4.3A2 2 0 0 1 7.5 7.7h9a2 2 0 0 1 1.9 1.3l1.6 4.3v3.2z"/><circle cx="7.8" cy="16.8" r="1.8"/><circle cx="16.2" cy="16.8" r="1.8"/><path d="M5.5 12.5h13"/>'),
 } as const;
 
 export type IconName = keyof typeof ICON;

@@ -1,0 +1,285 @@
+/* Part 3 stunt layer: speed lines, air-time counter, barrel roll button, pop-ups. Owner: ui. */
+
+.stunts {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+.stunts.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* turbo speed lines (cheap: two rotating conic layers masked to the screen edges) */
+.speedlines {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  -webkit-mask: radial-gradient(ellipse 62% 58% at 50% 52%, transparent 55%, #000 100%);
+  mask: radial-gradient(ellipse 62% 58% at 50% 52%, transparent 55%, #000 100%);
+}
+.speedlines.on {
+  opacity: 1;
+}
+.speedlines i {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  width: 170vmax;
+  height: 170vmax;
+  margin: -85vmax 0 0 -85vmax;
+  background: repeating-conic-gradient(rgba(255, 255, 255, 0.6) 0 0.35deg, transparent 0.35deg 4.1deg);
+  -webkit-mask: repeating-radial-gradient(circle at center, #000 0 6vmax, transparent 6vmax 11vmax);
+  mask: repeating-radial-gradient(circle at center, #000 0 6vmax, transparent 6vmax 11vmax);
+}
+.speedlines .sl2 {
+  background: repeating-conic-gradient(from 2deg, rgba(255, 220, 180, 0.35) 0 0.25deg, transparent 0.25deg 6.7deg);
+}
+.speedlines.on .sl1 {
+  animation: sl-zoom 0.32s linear infinite;
+}
+.speedlines.on .sl2 {
+  animation: sl-zoom 0.45s linear infinite;
+  animation-delay: -0.2s;
+}
+
+/* air time */
+.air-counter {
+  position: absolute;
+  left: 50%;
+  top: 21%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  font: 900 15px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: rgba(24, 34, 60, 0.62);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.5);
+  opacity: 0;
+  transform: translate(-50%, -6px) scale(0.92);
+  transition: opacity 0.2s, transform 0.3s var(--ease-back);
+}
+.air-counter.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.air-lbl {
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  color: var(--c-butter);
+}
+.air-counter i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.6);
+}
+.air-tag {
+  display: none;
+  padding: 3px 6px;
+  border-radius: 5px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: #0d3b47;
+  background: var(--c-aqua);
+}
+.air-tag.on {
+  display: inline-block;
+}
+
+/* barrel roll (centre-right, clear of the pedals) */
+.barrel-btn {
+  position: absolute;
+  right: calc(var(--sr) + 200px * var(--cs) + 26px);
+  top: 42%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 64px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(180deg, #ff9784, #ff6f5e 60%, #e9503f);
+  box-shadow: 0 4px 0 #c4463b, 0 10px 24px rgba(226, 88, 76, 0.45), inset 0 0 0 1.5px rgba(255, 255, 255, 0.55);
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.7);
+  transition: opacity 0.18s, transform 0.3s var(--ease-back), visibility 0s linear 0.18s;
+}
+.touch-layer.lefty ~ .stunts .barrel-btn,
+#ui-root.lefty .barrel-btn {
+  right: auto;
+  left: calc(var(--sl) + 200px * var(--cs) + 26px);
+}
+.barrel-btn.show {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: scale(1);
+  transition: opacity 0.18s, transform 0.3s var(--ease-back);
+  animation: br-pulse 0.8s ease-in-out infinite;
+}
+.barrel-btn.down {
+  filter: brightness(1.08);
+}
+.br-core {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 4px;
+  font: 900 13px/1 var(--font-display);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(120, 30, 20, 0.3);
+}
+.br-core small {
+  margin-top: 3px;
+  font: 700 8.5px/1 var(--font);
+  letter-spacing: 0.08em;
+  text-transform: none;
+  opacity: 0.85;
+}
+.br-arrow {
+  width: 34px;
+  height: 52px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.22);
+}
+.br-arrow .ic {
+  width: 18px;
+  height: 18px;
+}
+.barrel-btn.fire-l .br-arrow.l,
+.barrel-btn.fire-r .br-arrow.r {
+  animation: br-flash 0.35s ease-out;
+}
+.br-key {
+  position: absolute;
+  bottom: -18px;
+  display: none;
+  height: 15px;
+  min-width: 15px;
+  font-size: 8px;
+}
+.br-key.l {
+  left: 14px;
+}
+.br-key.r {
+  right: 14px;
+}
+#ui-root:not(.is-touch) .br-key {
+  display: inline-grid;
+}
+#ui-root:not(.is-touch) .br-core small {
+  display: none;
+}
+
+/* stunt pop-ups */
+.stunt-pops {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.stunt-pop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: pop-in 0.5s var(--ease-back) both;
+}
+.stunt-pop.out {
+  animation: pop-out 0.4s ease-in both;
+}
+.sp-title {
+  font: 900 clamp(22px, 5.4vmin, 40px) / 1 var(--font-display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 0.06em 0 var(--pc, #ff7a6b), 0 0.12em 0 rgba(0, 0, 0, 0.18), 0 0 24px var(--pg, rgba(255, 122, 107, 0.6));
+}
+.sp-sub {
+  margin-top: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font: 800 11px/1 var(--font);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: #fff;
+  background: rgba(24, 34, 60, 0.55);
+}
+.stunt-pop.mint {
+  --pc: #3db892;
+  --pg: rgba(158, 224, 200, 0.75);
+}
+.stunt-pop.aqua {
+  --pc: #2aa3c4;
+  --pg: rgba(92, 200, 214, 0.75);
+}
+.stunt-pop.coral {
+  --pc: #e2584c;
+  --pg: rgba(255, 122, 107, 0.7);
+}
+.stunt-pop.red {
+  --pc: #a0261c;
+  --pg: rgba(224, 54, 43, 0.6);
+}
+
+@keyframes sl-zoom {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.2);
+  }
+}
+@keyframes br-pulse {
+  0%,
+  100% {
+    box-shadow: 0 4px 0 #c4463b, 0 10px 24px rgba(226, 88, 76, 0.45), inset 0 0 0 1.5px rgba(255, 255, 255, 0.55);
+  }
+  50% {
+    box-shadow: 0 4px 0 #c4463b, 0 10px 34px rgba(255, 140, 110, 0.85), inset 0 0 0 1.5px #fff;
+  }
+}
+@keyframes br-flash {
+  0% {
+    background: #fff;
+  }
+  100% {
+    background: rgba(255, 255, 255, 0.22);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(1.6) rotate(-4deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.92);
+  }
+}

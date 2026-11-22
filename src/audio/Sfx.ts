@@ -50,6 +50,7 @@ export class Held {
     readonly v: Voice,
     readonly ref: number,
     public base: number,
+    readonly maxDist: number = CONFIG.audio.spatial.maxDistance,
   ) {}
   stop(fade = 0.3): void {
     if (this.dead) return;
@@ -62,6 +63,8 @@ export interface VoiceOpts {
   ref?: number;
   send?: number;
   gain?: number;
+  /** Audibility limit (m). Default CONFIG.audio.spatial.maxDistance. */
+  maxDist?: number;
 }
 
 /**
@@ -115,7 +118,7 @@ export class Sfx {
     let pan = 0;
     let cutoff = 20000;
     if (pos) {
-      this.listener.calc(pos, this.sp, o.ref);
+      this.listener.calc(pos, this.sp, o.ref, o.maxDist);
       gain *= this.sp.gain;
       pan = this.sp.pan;
       cutoff = this.sp.cutoff;
@@ -157,7 +160,7 @@ export class Sfx {
   holdVoice(bus: BusName, prio: number, pos: Vec3Like, o: VoiceOpts = {}): Held | null {
     const v = this.voice(bus, prio, pos, o, true);
     if (!v) return null;
-    const h = new Held(v, o.ref ?? CONFIG.audio.spatial.refDistance, o.gain ?? 1);
+    const h = new Held(v, o.ref ?? CONFIG.audio.spatial.refDistance, o.gain ?? 1, o.maxDist);
     h.pos.set(pos.x, pos.y, pos.z);
     this.held.push(h);
     return h;
@@ -172,10 +175,18 @@ export class Sfx {
         this.held.splice(i, 1);
         continue;
       }
-      this.listener.calc(h.pos, this.sp, h.ref);
+      this.listener.calc(h.pos, this.sp, h.ref, h.maxDist);
       setSmooth(ac, h.v.out.gain, this.sp.gain * h.base, 0.05, 1e-3);
       if (h.v.panner) setSmooth(ac, h.v.panner.pan, this.sp.pan, 0.05, 1e-3);
       if (h.v.air) setSmooth(ac, h.v.air.frequency, this.sp.cutoff, 0.1, 1e-2);
+    }
+  }
+
+  /** Floating origin: cached held positions move with the world. */
+  shiftHeld(dx: number, dz: number): void {
+    for (const h of this.held) {
+      h.pos.x -= dx;
+      h.pos.z -= dz;
     }
   }
 
@@ -575,11 +586,11 @@ export class Sfx {
     if (dv) this.play(dv, dv.out, t + 0.14, pick(this.bank.debris), rnd(0.94, 1.08), E.debrisLevel);
   }
 
-  startFire(pos: Vec3Like): Held | null {
+  startFire(pos: Vec3Like, level = CONFIG.audio.explosion.fireLevel, ref = 9, maxDist?: number): Held | null {
     const E = CONFIG.audio.explosion;
     const fire = this.bank.fire;
     if (!fire) return null;
-    const h = this.holdVoice('sfx', 9, pos, { send: 0.1, ref: 9 });
+    const h = this.holdVoice('sfx', 9, pos, { send: 0.1, ref, maxDist });
     if (!h) return null;
     this.count('fire');
     const ac = this.ac;
@@ -590,7 +601,7 @@ export class Sfx {
     s.loop = true;
     const g = v.add(ac.createGain());
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(E.fireLevel, t + E.fireFadeIn);
+    g.gain.linearRampToValueAtTime(level, t + E.fireFadeIn);
     s.connect(g);
     g.connect(v.out);
     v.src(s, t, t + 3600, Math.random() * fire.duration);
@@ -993,6 +1004,278 @@ export class Sfx {
     lp.connect(g2);
     g2.connect(v.out);
     v.src(o, t, t + dur + 0.05);
+  }
+
+  // ─────────────────────────────── part 2: planes ───────────────────────────────
+  /** Engine explosion: hard bang (crack + thump + short boom) and a metal rattle. */
+  bang(pos: Vec3Like, radius: number): void {
+    const P = CONFIG.audio.plane;
+    const big = clamp(radius / 8, 0.4, 2);
+    const v = this.voice('sfx', 9, pos, { send: 0.45, ref: 14 + radius * 2, maxDist: CONFIG.audio.farMaxDistance });
+    if (!v) return;
+    this.count('bang');
+    const t = this.now + 0.005;
+    const d = v.out;
+    const a = P.bangLevel;
+    this.noise(v, d, t, 'white', 'highpass', 1600, 1600, 0.7, a * 0.9, 0.0004, 0.016);
+    this.thump(v, d, t, a * 0.9, 130, 38, 0.16 * big);
+    this.play(v, d, t, pick(this.bank.boom), rnd(1.25, 1.5) / Math.sqrt(big), a * 0.7, 9000);
+    this.play(v, d, t + 0.06, pick(this.bank.debris), rnd(1.15, 1.35), a * 0.55);
+    this.partials(v, d, t + 0.01, rnd(380, 600), [1, 2.31, 3.9, 5.3], [1, 0.6, 0.4, 0.25], [0.5, 0.3, 0.2, 0.12], a * 0.08);
+  }
+
+  /** Big layered boom (plane explosions): sub thump + crack + baked body + debris rattle, scaled by radius. */
+  bigBoom(pos: Vec3Like, radius: number, kind: string): void {
+    const P = CONFIG.audio.plane;
+    const k = clamp(radius / 25, 0.3, 3);
+    const sec = kind === 'secondary';
+    const lvl = P.boomLevel * (sec ? 0.6 : 1);
+    const far = CONFIG.audio.farMaxDistance;
+    const v = this.voice('sfx', 10, pos, { send: 0.75, ref: 25 + radius * 1.5, maxDist: far });
+    if (v) {
+      this.count('bigBoom');
+      const t = this.now + 0.005;
+      const d = v.out;
+      const rate = clamp(1.08 - 0.16 * k, 0.55, 1.05) * rnd(0.95, 1.05);
+      if (!this.play(v, d, t, pick(this.bank.boom), rate, lvl)) this.noise(v, d, t, 'brown', 'lowpass', 2500, 120, 0.7, lvl, 0.003, 0.8);
+      this.osc(v, d, t, 'sine', 55, 22, 0.9, lvl * 0.6, 0.004, 0.45 + 0.25 * k);
+      this.noise(v, d, t, 'white', 'highpass', 1200, 1200, 0.7, lvl * 0.7, 0.0005, 0.02);
+      if (k > 1.2) this.play(v, d, t + 0.18, pick(this.bank.boom), rate * 0.8, lvl * 0.45, 900);
+    }
+    const dv = this.voice('sfx', 8, pos, { send: 0.35, ref: 18 + radius, maxDist: 4000 });
+    if (dv) {
+      const dl = CONFIG.audio.explosion.debrisLevel * (sec ? 0.6 : 1);
+      this.play(dv, dv.out, this.now + 0.16, pick(this.bank.debris), rnd(0.8, 0.95), dl);
+      if (k > 1) this.play(dv, dv.out, this.now + 0.7, pick(this.bank.debris), rnd(0.75, 0.9), dl * 0.6);
+    }
+  }
+
+  /** Metal tearing (airframe breakup). */
+  tear(pos: Vec3Like, intensity: number): void {
+    const v = this.voice('sfx', 8, pos, { send: 0.35, ref: 25, maxDist: 4000 });
+    if (!v) return;
+    this.count('tear');
+    const s = clamp(intensity, 0.15, 1);
+    const t = this.now + 0.005;
+    const a = CONFIG.audio.plane.tearLevel * (0.4 + 0.6 * s);
+    if (!this.play(v, v.out, t, pick(this.bank.tear), rnd(0.8, 1.1), a)) this.noise(v, v.out, t, 'white', 'bandpass', 2600, 1400, 6, a, 0.01, 0.4);
+    this.play(v, v.out, t + 0.02, pick(this.bank.crunch), rnd(0.6, 0.8), a * 0.6, 4000);
+    this.thump(v, v.out, t, a * 0.6, 90, 40, 0.15);
+  }
+
+  /** Sea impact: deep water roar + splash + falling spray. s = 0..1 */
+  waterRoar(pos: Vec3Like, s: number): void {
+    const v = this.voice('sfx', 9, pos, { send: 0.45, ref: 20 + 40 * s, maxDist: 5000 });
+    if (!v) return;
+    this.count('water');
+    const t = this.now + 0.005;
+    const d = v.out;
+    const a = CONFIG.audio.plane.waterLevel * (0.35 + 0.65 * s);
+    this.thump(v, d, t, a * 0.9, 70, 28, 0.3 + 0.2 * s);
+    this.noise(v, d, t, 'brown', 'lowpass', 900, 220, 0.7, a * 1.2, 0.01, 0.9 + 0.8 * s);
+    this.noise(v, d, t, 'pink', 'bandpass', 1100, 300, 0.7, a * 0.9, 0.006, 0.5 + 0.4 * s);
+    this.noise(v, d, t + 0.05, 'white', 'highpass', 2600, 1800, 0.6, a * 0.45, 0.05, 0.6 + 0.5 * s);
+    const g: Grain[] = [];
+    for (let k = 0; k < 14; k++) g.push([0.4 + k * rnd(0.06, 0.14), a * 0.25 * (1 - k / 16), rnd(0.03, 0.08)]);
+    this.grains(v, d, t, 'white', 'bandpass', 1800, 0.8, g);
+  }
+
+  /** Heavy crash on land (plane / big piece): crunch + thump + debris. */
+  heavyCrash(pos: Vec3Like, s: number): void {
+    const v = this.voice('sfx', 9, pos, { send: 0.4, ref: 18 + 30 * s, maxDist: 4000 });
+    if (!v) return;
+    this.count('crash');
+    const t = this.now + 0.005;
+    const d = v.out;
+    const a = CONFIG.audio.plane.boomLevel * (0.35 + 0.6 * s);
+    this.thump(v, d, t, a, 80, 30, 0.25 + 0.2 * s);
+    this.play(v, d, t, pick(this.bank.crunch), rnd(0.55, 0.75), a * 0.9, 6000);
+    this.noise(v, d, t, 'brown', 'lowpass', 1200, 250, 0.7, a * 0.9, 0.004, 0.35 + 0.3 * s);
+    this.play(v, d, t + 0.1, pick(this.bank.debris), rnd(0.75, 0.9), a * 0.6);
+  }
+
+  /** Wheels meeting the runway: rubber chirp + puff (+ thump when hard). */
+  touchdown(pos: Vec3Like, vs: number, hard: boolean): void {
+    const v = this.voice('sfx', 6, pos, { send: 0.12, ref: 18, maxDist: 1500 });
+    if (!v) return;
+    this.count('touchdown');
+    const t = this.now + 0.003;
+    const d = v.out;
+    const a = CONFIG.audio.plane.touchdownLevel;
+    const s = clamp(Math.abs(vs) / 4, 0.2, 1.2);
+    for (let k = 0; k < 2; k++) {
+      const tt = t + k * rnd(0.05, 0.12);
+      const m = k ? 0.7 : 1;
+      this.osc(v, d, tt, 'sawtooth', rnd(1150, 1350), rnd(800, 950), 0.15, a * 0.3 * m, 0.004, 0.08);
+      this.noise(v, d, tt, 'white', 'bandpass', 2200, 1500, 1.5, a * 0.5 * m, 0.003, 0.09);
+    }
+    this.thump(v, d, t, a * (hard ? 1.2 : 0.5) * s, 85, 40, hard ? 0.18 : 0.1);
+    if (hard) this.noise(v, d, t + 0.01, 'white', 'bandpass', 1200, 900, 2, a * 0.5, 0.002, 0.05);
+  }
+
+  /** Gear collapse: sharp strut snap + metallic ring + clunk + grinding tail. */
+  strutSnap(pos: Vec3Like): void {
+    const v = this.voice('sfx', 8, pos, { send: 0.25, ref: 18, maxDist: 2000 });
+    if (!v) return;
+    this.count('snap');
+    const t = this.now + 0.003;
+    const d = v.out;
+    const a = CONFIG.audio.plane.snapLevel;
+    this.noise(v, d, t, 'white', 'highpass', 2000, 2000, 0.7, a, 0.0002, 0.007);
+    this.partials(v, d, t, rnd(650, 800), [1, 2.3, 3.7, 5.1], [1, 0.6, 0.4, 0.25], [0.18, 0.12, 0.08, 0.05], a * 0.25);
+    this.thump(v, d, t + 0.02, a * 0.8, 95, 45, 0.12);
+    this.noise(v, d, t + 0.06, 'white', 'bandpass', 1500, 1100, 3, a * 0.4, 0.02, 0.4, 0.2);
+  }
+
+  /** Master caution: two-tone chime ('caution') or two groups of triple beeps ('warning'). Generic tones only. */
+  caution(level: 'caution' | 'warning'): void {
+    const v = this.voice('sfx', 8, null);
+    if (!v) return;
+    this.count('caution');
+    const t = this.now + 0.005;
+    const d = v.out;
+    const a = CONFIG.audio.plane.cautionLevel;
+    if (level === 'caution') {
+      this.partials(v, d, t, 1046, [1, 2, 3.01], [1, 0.35, 0.15], [0.45, 0.22, 0.12], a);
+      this.partials(v, d, t + 0.33, 784, [1, 2, 3.01], [1, 0.35, 0.15], [0.55, 0.25, 0.12], a);
+    } else {
+      for (let gI = 0; gI < 2; gI++) {
+        for (let k = 0; k < 3; k++) {
+          const tt = t + gI * 0.62 + k * 0.15;
+          this.osc(v, d, tt, 'triangle', 1250, 1250, 0, a * 0.9, 0.004, 0.012, 0.075);
+          this.osc(v, d, tt, 'sine', 2500, 2500, 0, a * 0.25, 0.004, 0.012, 0.075);
+        }
+      }
+    }
+  }
+
+  /** Short beep (out-of-map warning). */
+  beep(freq: number, dur: number, gain = 1): void {
+    const v = this.voice('sfx', 7, null);
+    if (!v) return;
+    this.count('beep');
+    const t = this.now + 0.005;
+    const a = CONFIG.audio.plane.beepLevel * gain;
+    this.osc(v, v.out, t, 'triangle', freq, freq, 0, a, 0.005, 0.015, dur);
+    this.osc(v, v.out, t, 'sine', freq * 2, freq * 2, 0, a * 0.3, 0.005, 0.015, dur);
+  }
+
+  /** Cockpit alarm "whoop" (explode-middle sequence). */
+  alarmTone(): void {
+    const v = this.voice('sfx', 7, null);
+    if (!v) return;
+    this.count('alarmTone');
+    const t = this.now + 0.005;
+    const a = CONFIG.audio.plane.alarmLevel;
+    this.osc(v, v.out, t, 'triangle', 620, 980, 0.32, a, 0.01, 0.04, 0.3);
+    this.osc(v, v.out, t, 'square', 620, 980, 0.32, a * 0.12, 0.01, 0.04, 0.3);
+  }
+
+  /** Stall warning horn (held; caller releases). */
+  stallHorn(): Voice | null {
+    const v = this.voice('sfx', 8, null);
+    if (!v) return null;
+    this.count('stall');
+    const ac = this.ac;
+    const t = this.now + 0.005;
+    const a = CONFIG.audio.plane.stallLevel;
+    const o = ac.createOscillator();
+    o.type = 'square';
+    o.frequency.value = 420;
+    const bp = v.add(ac.createBiquadFilter());
+    bp.type = 'bandpass';
+    bp.frequency.value = 1100;
+    bp.Q.value = 0.9;
+    const trem = v.add(ac.createGain());
+    trem.gain.value = 0.6;
+    const lfo = ac.createOscillator();
+    lfo.frequency.value = 13;
+    const lg = v.add(ac.createGain());
+    lg.gain.value = 0.4;
+    lfo.connect(lg);
+    lg.connect(trem.gain);
+    const env = v.add(ac.createGain());
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(a, t + 0.03);
+    o.connect(bp);
+    bp.connect(trem);
+    trem.connect(env);
+    env.connect(v.out);
+    v.src(o, t, t + 600);
+    v.src(lfo, t, t + 600);
+    return v;
+  }
+
+  // ─────────────────────────────── part 3: weather, turbo, stunts ───────────────────────────────
+  /** Thunder (ambience bus). The caller already delayed it by distance / 343 m/s. */
+  thunder(pos: Vec3Like, intensity: number, dist: number): void {
+    const W = CONFIG.audio.weather;
+    const near = dist < W.nearThunder;
+    const v = this.voice('ambience', 7, pos, { send: 0.4, ref: 300, maxDist: CONFIG.audio.farMaxDistance * 1.5 });
+    if (!v) return;
+    this.count('thunder');
+    const t = this.now + 0.01;
+    const a = W.thunderLevel * clamp(intensity, 0.2, 1.2);
+    const buf = near ? this.bank.thunderNear : (this.bank.thunderFar ?? this.bank.thunderNear);
+    if (!this.play(v, v.out, t, buf, rnd(0.85, 1.1), a, near ? 0 : 900)) this.noise(v, v.out, t, 'brown', 'lowpass', 300, 120, 0.7, a, 0.3, 2);
+  }
+
+  /** One wiper stroke: motor hum + rubber swish + end-stop thunk. */
+  wiper(dur: number): void {
+    const v = this.voice('sfx', 3, null);
+    if (!v) return;
+    this.count('wiper');
+    const t = this.now + 0.005;
+    const d = v.out;
+    const a = CONFIG.audio.weather.wiperLevel;
+    this.osc(v, d, t, 'triangle', 95, 108, dur, a * 0.35, 0.04, 0.05, Math.max(0, dur - 0.08));
+    this.noise(v, d, t, 'pink', 'bandpass', 1300, 2100, 1.4, a, dur * 0.4, dur * 0.25, dur * 0.2);
+    this.thump(v, d, t + dur, a * 0.7, 140, 90, 0.03);
+  }
+
+  /** Turbo kick-in: rising whoosh + turbine spin-up chirp. */
+  turboWhoosh(pos: Vec3Like): void {
+    const v = this.voice('sfx', 6, pos, { send: 0.1 });
+    if (!v) return;
+    this.count('turboWhoosh');
+    const t = this.now + 0.005;
+    const a = CONFIG.audio.turbo.whoosh;
+    this.noise(v, v.out, t, 'pink', 'bandpass', 350, 3400, 1.3, a, 0.35, 0.25, 0.15);
+    this.osc(v, v.out, t, 'sine', 900, 4200, 0.6, a * 0.12, 0.2, 0.2, 0.25);
+  }
+
+  /** Barrel-roll whoosh sweeping across the stereo field. */
+  rollWhoosh(pos: Vec3Like): void {
+    const v = this.voice('sfx', 6, pos, { send: 0.12 }, true);
+    if (!v) return;
+    this.count('rollWhoosh');
+    const t = this.now + 0.005;
+    const a = CONFIG.audio.stunt.whoosh;
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    if (v.panner) {
+      v.panner.pan.setValueAtTime(-0.7 * dir, t);
+      v.panner.pan.linearRampToValueAtTime(0.7 * dir, t + 0.7);
+    }
+    this.noise(v, v.out, t, 'pink', 'bandpass', 450, 1900, 1.2, a, 0.3, 0.18, 0.12);
+    this.osc(v, v.out, t, 'sine', 130, 70, 0.6, a * 0.4, 0.2, 0.15, 0.15);
+  }
+
+  /** Landing slam after a jump (crash = crash landing). */
+  slam(pos: Vec3Like, s: number, crash: boolean): void {
+    const v = this.voice('sfx', 7, pos, { send: 0.15 });
+    if (!v) return;
+    this.count('slam');
+    const t = this.now + 0.003;
+    const d = v.out;
+    const a = CONFIG.audio.stunt.slam * clamp(s, 0.3, 1.2);
+    this.thump(v, d, t, a, 72, 32, 0.18);
+    this.noise(v, d, t, 'brown', 'lowpass', 650, 300, 0.7, a * 0.8, 0.002, 0.1);
+    this.noise(v, d, t + 0.01, 'white', 'bandpass', 900, 900, 2, a * 0.4, 0.001, 0.04);
+    this.osc(v, d, t + 0.02, 'sawtooth', 1050, 760, 0.1, a * 0.08, 0.003, 0.06);
+    if (crash) {
+      this.play(v, d, t, pick(this.bank.crunch), rnd(0.8, 1), a * 0.8, 9000);
+      this.partials(v, d, t + 0.03, rnd(3500, 5500), [1, 1.47, 2.1], [1, 0.6, 0.35], [0.05, 0.03, 0.02], a * 0.15);
+    }
   }
 
   // ─────────────────────────────── UI ───────────────────────────────

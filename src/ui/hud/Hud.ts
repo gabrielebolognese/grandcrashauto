@@ -1,85 +1,80 @@
 import { MPH, KMH } from '../../core/math';
 import { h, setText, setVisible } from '../dom';
 import type { UIHost } from '../host';
-import { icon } from '../icons';
+import { ICON, icon, type IconName } from '../icons';
 import { uiSound } from '../widgets';
 import { Minimap } from './Minimap';
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const ARC = 'M27.25 142 A84 84 0 1 1 172.75 142'; // 240° gauge arc, r = 84 around (100,100)
 const REDLINE = 0.86;
+const WEATHER_ICON: Record<string, IconName> = {
+  clear: 'sun',
+  fewClouds: 'cloud',
+  cloudy: 'cloud',
+  overcast: 'cloud',
+  lightRain: 'rain',
+  heavyRain: 'rain',
+  storm: 'storm',
+  fog: 'fog',
+  snow: 'snow',
+};
 
-function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
-  const el = document.createElementNS(SVG_NS, tag);
-  for (const k in attrs) el.setAttribute(k, String(attrs[k]));
-  return el;
-}
-
-/** Driving HUD: minimap, speed/gear/rev gauge, prompts (flip car), post-explosion hint, FPS counter. */
+/**
+ * Driving HUD: minimap + clock (top-left), compact speed card with gear, rev bar and turbo meter (top-right),
+ * prompts (flip car, board/exit plane), post-explosion hint and the FPS counter.
+ */
 export class Hud {
   readonly el: HTMLDivElement;
   readonly minimap: Minimap;
   readonly fps: HTMLDivElement;
-  private gauge: HTMLDivElement;
+  private speedo: HTMLDivElement;
   private speed: HTMLDivElement;
   private unit: HTMLDivElement;
   private gear: HTMLDivElement;
-  private rev: SVGPathElement;
-  private boost: SVGPathElement;
+  private revFill: HTMLElement;
+  private turboFill: HTMLElement;
+  private clock: HTMLDivElement;
+  private clockIcon: HTMLSpanElement;
+  private clockText: HTMLSpanElement;
   private prompts: HTMLDivElement;
   private hint: HTMLDivElement;
   private promptEls = new Map<string, HTMLElement>();
   private lastSpeed = -1;
   private lastGear = 99;
   private lastRev = -1;
-  private lastBoost = -1;
+  private lastTurbo = -1;
+  private lastClock = '';
+  private lastWeather = '';
   private wasExploded = false;
   private hintT = 0;
   private fpsT = 0;
+  private boardKey = '';
+  private exitShown = false;
 
   constructor(private host: UIHost) {
     const { ctx } = host;
     this.minimap = new Minimap(ctx);
     this.fps = h('div', { class: 'fps-counter', 'aria-hidden': 'true' });
 
-    // ── gauge ──
-    const svg = svgEl('svg', { viewBox: '0 0 200 200', class: 'g-svg', 'aria-hidden': 'true' });
-    const defs = svgEl('defs', {});
-    const grad = svgEl('linearGradient', { id: 'cl-g-rev', x1: '0', y1: '0', x2: '1', y2: '0' });
-    grad.append(svgEl('stop', { offset: '0', 'stop-color': '#5cc8d6' }), svgEl('stop', { offset: '0.55', 'stop-color': '#ffd36e' }), svgEl('stop', { offset: '1', 'stop-color': '#ff6a59' }));
-    defs.append(grad);
-    svg.append(defs);
-    svg.append(svgEl('circle', { class: 'g-plate', cx: 100, cy: 100, r: 97 }));
-    svg.append(svgEl('circle', { class: 'g-plate-ring', cx: 100, cy: 100, r: 90 }));
-    svg.append(svgEl('path', { class: 'g-track', d: ARC, pathLength: 100 }));
-    svg.append(svgEl('path', { class: 'g-red', d: ARC, pathLength: 100, 'stroke-dasharray': `0 ${REDLINE * 100} ${(1 - REDLINE) * 100} 100` }));
-    this.rev = svgEl('path', { class: 'g-rev', d: ARC, pathLength: 100, 'stroke-dasharray': '0 100' });
-    svg.append(this.rev);
-    this.boost = svgEl('path', { class: 'g-boost', d: 'M45 132 A62 62 0 1 1 155 132', pathLength: 100, 'stroke-dasharray': '0 100' });
-    svg.append(this.boost);
-    const ticks = svgEl('g', { class: 'g-ticks' });
-    for (let i = 0; i <= 10; i++) {
-      const a = ((150 + i * 24) * Math.PI) / 180;
-      const r0 = i % 5 === 0 ? 66 : 70;
-      ticks.append(
-        svgEl('line', {
-          x1: (100 + Math.cos(a) * r0).toFixed(2),
-          y1: (100 + Math.sin(a) * r0).toFixed(2),
-          x2: (100 + Math.cos(a) * 75).toFixed(2),
-          y2: (100 + Math.sin(a) * 75).toFixed(2),
-          class: i / 10 >= REDLINE ? 'hot' : '',
-        }),
-      );
-    }
-    svg.append(ticks);
-    this.speed = h('div', { class: 'g-speed', text: '0' });
-    this.unit = h('div', { class: 'g-unit', text: 'KM/H' });
-    this.gear = h('div', { class: 'g-gear', text: 'N' });
-    this.gauge = h('div', { class: 'gauge' }, svg, h('div', { class: 'g-center' }, this.speed, this.unit), this.gear);
+    // ── speed card ──
+    this.speed = h('div', { class: 'sp-speed', text: '0' });
+    this.unit = h('div', { class: 'sp-unit', text: 'KM/H' });
+    this.gear = h('div', { class: 'sp-gear', text: 'N' });
+    this.revFill = h('i', { class: 'fill' });
+    this.turboFill = h('i');
+    this.speedo = h(
+      'div',
+      { class: 'speedo only-car' },
+      h('div', { class: 'sp-row' }, this.speed, h('div', { class: 'sp-side' }, this.unit, this.gear)),
+      h('div', { class: 'sp-rev' }, this.revFill, h('i', { class: 'red' })),
+      h('div', { class: 'sp-turbo' }, icon('flame'), h('div', { class: 'sp-tbar' }, this.turboFill), h('kbd', { text: 'Shift' })),
+    );
 
+    this.clockIcon = icon('sun');
+    this.clockText = h('span');
+    this.clock = h('div', { class: 'hud-chip hud-clock off' }, this.clockIcon, this.clockText);
     this.prompts = h('div', { class: 'hud-prompts' });
     this.hint = h('div', { class: 'hud-hint' });
-    this.el = h('div', { class: 'hud', 'aria-hidden': 'true' }, h('div', { class: 'hud-tl' }, this.minimap.el), this.gauge, this.prompts, this.hint);
+    this.el = h('div', { class: 'hud', 'aria-hidden': 'true' }, h('div', { class: 'hud-tl' }, this.minimap.el, this.clock), this.speedo, this.prompts, this.hint);
 
     ctx.events.on('prompt', ({ id, show, text }) => this.setPrompt(id, show, text));
     ctx.events.on('gearShift', () => {
@@ -92,13 +87,15 @@ export class Hud {
       this.hint.classList.remove('show');
       this.setPrompt('flip', false);
     });
+    ctx.events.on('originShift', () => this.minimap.onOriginShift());
   }
 
   setVisible(on: boolean): void {
     setVisible(this.el, on);
   }
 
-  setPrompt(id: string, show: boolean, text?: string): void {
+  /** Generic prompt API: 'flip' (and 'board' / 'exit' from the UI itself) become big buttons, others text pills. */
+  setPrompt(id: string, show: boolean, text?: string, sub?: string): void {
     let el = this.promptEls.get(id);
     if (!show) {
       if (el) {
@@ -111,23 +108,32 @@ export class Hud {
     }
     const { ctx } = this.host;
     if (!el) {
-      if (id === 'flip') {
-        const b = h('button', { class: 'prompt-btn touch-ctl', type: 'button' }, icon('flip'), h('span', { class: 'pb-label', text: text ?? 'Flip car' }), h('kbd', { class: 'pb-key', text: 'F' }));
+      const action = (name: IconName, label: string, key: string, cls: string, fn: () => void) => {
+        const b = h(
+          'button',
+          { class: `prompt-btn touch-ctl ${cls}`, type: 'button' },
+          icon(name),
+          h('span', { class: 'pb-label', text: label }),
+          sub ? h('small', { class: 'pb-sub', text: sub }) : null,
+          h('kbd', { class: 'pb-key', text: key }),
+        );
         b.addEventListener('pointerdown', (e) => {
           e.preventDefault();
           uiSound('confirm');
-          ctx.input.press('flip');
-          this.host.vibrate(20);
+          fn();
+          this.host.vibrate(15);
         });
-        el = b;
-      } else {
-        el = h('div', { class: 'prompt-pill' }, h('span', { text: text ?? id }));
-      }
+        return b;
+      };
+      if (id === 'flip') el = action('flip', text ?? 'Flip car', 'F', '', () => ctx.input.press('flip'));
+      else if (id === 'board') el = action('plane', text ?? 'Board', 'F', 'blue', () => ctx.input.press('interact'));
+      else if (id === 'exit') el = action('car', text ?? 'Exit plane', 'F', 'mint', () => ctx.input.press('interact'));
+      else el = h('div', { class: 'prompt-pill' }, h('span', { text: text ?? id }));
       this.promptEls.set(id, el);
       this.prompts.append(el);
       void el.offsetWidth;
     } else if (text) {
-      const lbl = el.querySelector('.pb-label, span');
+      const lbl = el.querySelector('.pb-label') ?? el.querySelector('span');
       if (lbl) setText(lbl as HTMLElement, text);
     }
     el.classList.add('show');
@@ -135,44 +141,89 @@ export class Hud {
 
   update(dt: number): void {
     const { ctx } = this.host;
+    const plane = ctx.game.mode === 'plane';
     const s = ctx.vehicle.state;
-    const mph = ctx.settings.values.units === 'mph';
-    const spd = Math.round(Math.abs(s.speed) * (mph ? MPH : KMH));
-    if (spd !== this.lastSpeed) {
-      this.lastSpeed = spd;
-      this.speed.textContent = String(spd);
-      setText(this.unit, mph ? 'MPH' : 'KM/H');
+    if (!plane) {
+      const mph = ctx.settings.values.units === 'mph';
+      const spd = Math.round(Math.abs(s.speed) * (mph ? MPH : KMH));
+      if (spd !== this.lastSpeed) {
+        this.lastSpeed = spd;
+        this.speed.textContent = String(spd);
+        setText(this.unit, mph ? 'MPH' : 'KM/H');
+      }
+      const gear = s.gear | 0;
+      if (gear !== this.lastGear) {
+        this.lastGear = gear;
+        this.gear.textContent = gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear);
+        this.gear.classList.toggle('rev', gear < 0);
+      }
+      const rev = Math.round(Math.max(0, Math.min(1, s.rpmNorm || 0)) * 100) / 100;
+      if (rev !== this.lastRev) {
+        this.lastRev = rev;
+        this.revFill.style.transform = `scaleX(${rev})`;
+        this.speedo.classList.toggle('redline', rev >= REDLINE);
+      }
+      const hasTurbo = typeof s.turboCharge === 'number';
+      this.speedo.classList.toggle('has-turbo', hasTurbo);
+      if (hasTurbo) {
+        const t = Math.round(Math.max(0, Math.min(1, s.turboCharge!)) * 100) / 100;
+        if (t !== this.lastTurbo) {
+          this.lastTurbo = t;
+          this.turboFill.style.transform = `scaleX(${t})`;
+        }
+        this.speedo.classList.toggle('turbo-on', !!s.turboActive);
+      }
+      // After an explosion, explain how to get back on the road.
+      if (s.exploded && !this.wasExploded) {
+        this.hintT = 3.2;
+        this.hint.textContent = this.host.touchMode() ? 'Tap ↺ Reset to respawn' : 'Press R or click ↺ Reset to respawn';
+        this.hint.classList.add('show');
+      }
+      this.wasExploded = s.exploded;
     }
-    const gear = s.gear | 0;
-    if (gear !== this.lastGear) {
-      this.lastGear = gear;
-      this.gear.textContent = gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear);
-      this.gear.classList.toggle('rev', gear < 0);
-    }
-    const rev = Math.round(Math.max(0, Math.min(1, s.rpmNorm || 0)) * 200) / 2;
-    if (rev !== this.lastRev) {
-      this.lastRev = rev;
-      this.rev.style.strokeDasharray = `${rev} 100`;
-      this.gauge.classList.toggle('redline', rev >= REDLINE * 100);
-    }
-    const boost = Math.round(Math.max(0, Math.min(1, s.boost || 0)) * 50) * 2;
-    if (boost !== this.lastBoost) {
-      this.lastBoost = boost;
-      this.boost.style.strokeDasharray = `${boost} 100`;
-      this.gauge.classList.toggle('boosting', boost > 4);
-    }
-    // After an explosion, explain how to get back on the road.
-    if (s.exploded && !this.wasExploded) {
-      this.hintT = 3.2;
-      this.hint.textContent = this.host.touchMode() ? 'Tap ↺ Reset to respawn' : 'Press R or click ↺ Reset to respawn';
-      this.hint.classList.add('show');
-    }
-    this.wasExploded = s.exploded;
     if (this.hintT > 0) {
       this.hintT -= dt;
       if (this.hintT <= 0) this.hint.classList.remove('show');
     }
-    this.minimap.update(dt);
+    // BOARD (car near a parked plane) / EXIT (plane stopped on the ground).
+    const cand = !plane ? ctx.planes?.boardCandidate ?? null : null;
+    const key = cand ? `${cand.type}|${cand.name}` : '';
+    if (key !== this.boardKey) {
+      this.boardKey = key;
+      this.setPrompt('board', false);
+      if (cand) this.setPrompt('board', true, `Board`, cand.name);
+    }
+    const canExit = plane && !!ctx.planes?.state?.canExit && !ctx.planes.crashed;
+    if (canExit !== this.exitShown) {
+      this.exitShown = canExit;
+      this.setPrompt('exit', canExit, 'Exit plane');
+    }
+    // Clock + weather chip (part 3 env; hidden until the env provides a clock).
+    const hours = ctx.env?.clockHours;
+    if (typeof hours === 'number' && Number.isFinite(hours)) {
+      const hh = Math.floor(((hours % 24) + 24) % 24);
+      const mm = Math.floor((((hours % 1) + 1) % 1) * 60);
+      const txt = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+      const kind = ctx.env.weather?.kind ?? 'clear';
+      const night = hh < 6 || hh >= 20;
+      const wkey = `${kind}|${night}`;
+      if (wkey !== this.lastWeather) {
+        this.lastWeather = wkey;
+        const name: IconName = kind === 'clear' || kind === 'fewClouds' ? (night ? 'moon' : 'sun') : WEATHER_ICON[kind] ?? 'cloud';
+        this.clockIcon.innerHTML = ICON[name];
+        this.clockIcon.className = `ic ${name}`;
+      }
+      if (txt !== this.lastClock) {
+        this.lastClock = txt;
+        this.clockText.textContent = txt;
+        this.clock.classList.remove('off');
+      }
+    }
+    // Hide the minimap until there is road data to show.
+    const d = ctx.world?.data;
+    const hasRoads = !!d && ((d.roads?.edges?.length ?? 0) > 0 || (ctx.highways?.graph?.edges?.length ?? 0) > 0);
+    this.minimap.el.classList.toggle('nodata', !hasRoads);
+    if (hasRoads) this.minimap.update(dt);
   }
 
   /** FPS counter runs in every state when enabled. */
@@ -197,7 +248,6 @@ export class Toasts {
     this.el = h('div', { class: 'toasts', 'aria-live': 'polite' });
   }
   show(text: string, ms: number): void {
-    // De-duplicate identical toasts that are still visible.
     for (const c of Array.from(this.el.children)) if (c.textContent === text && !c.classList.contains('out')) c.remove();
     const t = h('div', { class: 'toast' }, h('span', { text }));
     this.el.append(t);

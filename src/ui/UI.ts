@@ -1,5 +1,6 @@
 import './theme.css';
 import './ui.css';
+import './hud.css';
 import { CONFIG } from '../config';
 import type { GameState } from '../core/events';
 import type { InputDevice } from '../core/Input';
@@ -23,6 +24,9 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { TitleScreen } from './screens/TitleScreen';
 import { Tilt } from './touch/Tilt';
 import { TouchControls } from './touch/TouchControls';
+import { FlightControls } from './touch/FlightControls';
+import { FlightHud } from './hud/FlightHud';
+import { Stunts } from './hud/Stunts';
 import { setWidgetSound } from './widgets';
 
 type SubScreen = { kind: 'settings' | 'credits'; parent: GameState };
@@ -48,6 +52,9 @@ export class UI implements IUI, UIHost {
   private toasts!: Toasts;
   private topbar!: TopBar;
   private touch!: TouchControls;
+  private flightCtl!: FlightControls;
+  private flightHud!: FlightHud;
+  private stunts!: Stunts;
   private fader!: Fader;
   private rotate!: RotateOverlay;
   private debugPanel: DebugPanel | null = null;
@@ -66,6 +73,9 @@ export class UI implements IUI, UIHost {
   private lastImpactVib = 0;
   private rotateT = 0;
   private padHeld = true;
+  private moving = false;
+  private pedaling = false;
+  private planeMode: boolean | null = null;
 
   constructor(readonly ctx: GameContext) {
     this.device = isTouchPrimary() || this.isMobile ? 'touch' : 'keyboard';
@@ -94,6 +104,9 @@ export class UI implements IUI, UIHost {
     this.toasts = new Toasts();
     this.topbar = new TopBar(this);
     this.touch = new TouchControls(this);
+    this.flightCtl = new FlightControls(this);
+    this.flightHud = new FlightHud(this);
+    this.stunts = new Stunts(this);
     this.title = new TitleScreen(this, () => this.startFromTitle());
     this.menu = new MainMenu(this);
     this.pause = new PauseMenu(this);
@@ -103,7 +116,12 @@ export class UI implements IUI, UIHost {
     this.fader = new Fader();
     this.rotate = new RotateOverlay(() => this.onRotateTap());
     root.append(
+      this.flightHud.overlay,
+      this.stunts.lines,
       this.hud.el,
+      this.flightHud.el,
+      this.stunts.el,
+      this.flightCtl.el,
       this.touch.el,
       this.topbar.el,
       this.hud.fps,
@@ -135,6 +153,11 @@ export class UI implements IUI, UIHost {
       this.vibrate(Math.round(12 + Math.min(1, strength) * 60));
     });
     ctx.events.on('explosion', () => this.vibrate([60, 40, 150]));
+    ctx.events.on('turbo', ({ on }) => on && this.vibrate(22));
+    ctx.events.on('modeChanged', () => this.refreshMode());
+
+    // 'Opacity while moving' replaced the old idle opacity (old default 0.55 → new default 0.3).
+    if (Math.abs(ctx.settings.values.controlsOpacity - 0.55) < 1e-6) ctx.settings.set({ controlsOpacity: 0.3 });
 
     // ── title: any key / gamepad button also starts ──
     window.addEventListener(
@@ -181,8 +204,9 @@ export class UI implements IUI, UIHost {
     return this.forceTouch || this.device === 'touch';
   }
 
-  openSettings(): void {
+  openSettings(tab?: string): void {
     if (this.state !== 'menu' && this.state !== 'paused') return;
+    if (tab) this.settings.showTab(tab);
     this.sub = { kind: 'settings', parent: this.state };
     this.menu.setVisible(false);
     this.pause.setVisible(false);
@@ -245,6 +269,7 @@ export class UI implements IUI, UIHost {
     this.pause.setVisible(to === 'paused' && !this.sub);
     this.hud.setVisible(to === 'driving');
     this.topbar.setVisible(to === 'driving');
+    this.refreshLayers();
     this.dragId = null;
     this.refreshTouchMode(true);
     this.checkRotate();
@@ -266,6 +291,7 @@ export class UI implements IUI, UIHost {
     this.root.style.setProperty('--co', String(s.controlsOpacity));
     this.root.classList.toggle('lefty', s.leftHanded);
     this.touch.applyMode();
+    this.flightCtl.el.classList.toggle('lefty', s.leftHanded);
   }
 
   /** Track the active input device; show touch controls only for touch play. */
@@ -280,7 +306,7 @@ export class UI implements IUI, UIHost {
       this.touchOn = on;
       this.root.classList.toggle('is-touch', on);
     }
-    this.touch.setVisible(this.state === 'driving' && on && !this.rotate.shown);
+    this.refreshLayers();
   }
 
   private checkRotate(): void {
@@ -288,7 +314,7 @@ export class UI implements IUI, UIHost {
     const show = portrait && (this.isMobile || this.device === 'touch') && this.state !== 'boot';
     this.rotate.set(show);
     if (show && this.state === 'driving') this.ctx.game.pause();
-    this.touch.setVisible(this.state === 'driving' && this.touchOn && !show);
+    this.refreshLayers();
   }
 
   private onRotateTap(): void {
@@ -349,6 +375,8 @@ export class UI implements IUI, UIHost {
     if (!this.inited) return;
     const st = this.state;
     this.refreshTouchMode();
+    this.refreshMode();
+    this.refreshMoving();
     this.rotateT -= dt;
     if (this.rotateT <= 0) {
       this.rotateT = 0.5;
@@ -357,12 +385,69 @@ export class UI implements IUI, UIHost {
     this.nav.update(dt);
     if (st === 'title') this.pollTitlePad();
     if (st === 'driving') {
+      this.refreshLayers();
       this.hud.update(dt);
       this.topbar.update(dt);
       this.touch.update(dt);
+      this.flightHud.update(dt);
+      this.flightCtl.update(dt);
+      this.stunts.update();
+    } else if (st === 'paused') {
+      // The nav Map screen can open from the pause menu: get out of its way while it is up.
+      const mapOpen = !!this.ctx.nav?.mapOpen;
+      this.pause.el.classList.toggle('under-map', mapOpen);
     }
     this.hud.updateFps(dt);
     this.debugPanel?.update(dt);
+  }
+
+  /** Which control/HUD layers are up: car vs plane, touch vs desktop, crash/cockpit sequence, portrait. */
+  private refreshLayers(): void {
+    const driving = this.state === 'driving';
+    const plane = driving && this.ctx.game.mode === 'plane';
+    const touch = this.touchOn && !this.rotate?.shown;
+    const planes = this.ctx.planes;
+    this.touch.setVisible(driving && !plane && touch);
+    this.flightHud.setVisible(plane);
+    this.flightCtl.setVisible(plane && touch && !planes?.crashed && !planes?.inCockpitSequence);
+    this.stunts.setVisible(driving && !plane);
+  }
+
+  private refreshMode(): void {
+    const plane = this.ctx.game.mode === 'plane';
+    if (plane === this.planeMode) return;
+    this.planeMode = plane;
+    this.root.classList.toggle('mode-plane', plane);
+    this.touch.releaseAll();
+    this.flightCtl.releaseAll();
+  }
+
+  /** Controls are fully opaque when (nearly) stopped and fade to settings.controlsOpacity while moving. */
+  private refreshMoving(): void {
+    const { ctx } = this;
+    let kmh = 0;
+    if (this.state === 'driving') {
+      if (ctx.game.mode === 'plane') kmh = ctx.planes?.state?.groundSpeedKmh ?? ctx.planes?.state?.airspeedKmh ?? 0;
+      else kmh = ctx.vehicle.state.speedKmh || 0;
+    }
+    const on = CONFIG.ui.fadeMovingKmh;
+    const moving = this.moving ? kmh > on * 0.6 : kmh > on;
+    if (moving !== this.moving) {
+      this.moving = moving;
+      this.root.classList.toggle('moving', moving);
+    }
+    // Gas/brake (car) or stick (plane) held → the explode button may fade; released → solid at once.
+    const st = ctx.input.state;
+    const t = ctx.input.touch;
+    const pedaling =
+      this.state === 'driving' &&
+      (ctx.game.mode === 'plane'
+        ? Math.abs(st.pitch) > 0.05 || Math.abs(st.roll) > 0.05 || Math.abs(t.pitch) > 0.05 || Math.abs(t.roll) > 0.05
+        : st.throttle > 0.05 || st.brake > 0.05 || t.throttle > 0.05 || t.brake > 0.05 || t.turbo);
+    if (pedaling !== this.pedaling) {
+      this.pedaling = pedaling;
+      this.root.classList.toggle('pedaling', pedaling);
+    }
   }
 
   private pollTitlePad(): void {

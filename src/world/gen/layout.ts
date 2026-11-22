@@ -45,7 +45,7 @@ export const Z_PROF: StreetProfile[] = [P_STREET2, P_STREET2, P_STREET4, P_STREE
 export const BEACH_LINE = 8;
 export const VIADUCT_LINE = 7;
 /** The beach boulevard continues past the edge streets to the map edge. */
-export const BEACH_EXT_X = 394;
+export const BEACH_EXT_X = 420;
 
 /** Cell merges (park, hub) — cells are [i0..i1] x [j0..j1] (cell i is between X_LINES[i] and X_LINES[i+1]). */
 export const PARK_CELLS = { i0: 1, i1: 2, j0: 1, j1: 3 };

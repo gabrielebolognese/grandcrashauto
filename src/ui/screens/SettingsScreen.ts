@@ -5,10 +5,11 @@ import type { Screen, UIHost } from '../host';
 import { icon, type IconName } from '../icons';
 import { button, decoTitle, iconButton, row, sectionTitle, Segmented, Slider, Toggle, uiSound } from '../widgets';
 
-type TabId = 'graphics' | 'controls' | 'gameplay' | 'audio';
+type TabId = 'graphics' | 'controls' | 'world' | 'gameplay' | 'audio';
 const TABS: { id: TabId; label: string; icon: IconName }[] = [
   { id: 'graphics', label: 'Graphics', icon: 'sun' },
   { id: 'controls', label: 'Controls', icon: 'controller' },
+  { id: 'world', label: 'World', icon: 'clock' },
   { id: 'gameplay', label: 'Gameplay', icon: 'flip' },
   { id: 'audio', label: 'Audio', icon: 'volume' },
 ];
@@ -39,6 +40,7 @@ export class SettingsScreen implements Screen {
     this.body = h('div', { class: 'set-body scroll' });
     this.pages.set('graphics', this.graphics());
     this.pages.set('controls', this.controls());
+    this.pages.set('world', this.world());
     this.pages.set('gameplay', this.gameplay());
     this.pages.set('audio', this.audio());
     for (const p of this.pages.values()) this.body.append(p);
@@ -67,6 +69,11 @@ export class SettingsScreen implements Screen {
     uiSound('back');
     this.onBack();
     return true;
+  }
+
+  /** Jump to a tab by id (used by the pause menu's Time & weather button). */
+  showTab(id: string): void {
+    if (this.pages.has(id as TabId)) this.show(id as TabId);
   }
 
   private show(id: TabId): void {
@@ -133,16 +140,17 @@ export class SettingsScreen implements Screen {
     const presetRow = row('Quality', null, preset.el, 'row-wide');
     presetRow.querySelector('.set-text')!.append(h('div', { class: 'set-desc' }, presetDesc));
 
-    const tod = new Segmented<Settings['timeOfDay']>(
-      'Time of day',
-      [
-        { value: 'day', label: 'Day', icon: 'sun' },
-        { value: 'sunset', label: 'Sunset', icon: 'sunset' },
-        { value: 'night', label: 'Night', icon: 'moon' },
-      ],
-      (v) => this.set({ timeOfDay: v }),
-    );
-    this.sync.push(() => tod.set(this.s.timeOfDay));
+    const details = h('div', { class: 'set-desc' });
+    this.sync.push(() => {
+      const q = ctx.quality.current as unknown as Partial<Record<string, number | boolean>>;
+      const parts: string[] = [];
+      if (typeof q.terrainViewDistance === 'number') parts.push(`View ${(q.terrainViewDistance / 1000).toFixed(1)} km`);
+      if (typeof q.treeDensity === 'number') parts.push(`Trees ${Math.round(q.treeDensity * 100)}%`);
+      if (typeof q.weatherLevel === 'number') parts.push(`Weather FX ${['low', 'medium', 'high'][q.weatherLevel] ?? q.weatherLevel}`);
+      if (typeof q.realtimeLights === 'number') parts.push(`${q.realtimeLights} real-time lights`);
+      details.textContent = parts.length ? `${parts.join(' · ')} (follow the preset)` : '';
+    });
+    presetRow.querySelector('.set-text')!.append(details);
     const custom = (v: boolean, k: keyof Settings) => ({ [k]: v, qualityUserSet: true }) as Partial<Settings>;
 
     return h(
@@ -151,9 +159,9 @@ export class SettingsScreen implements Screen {
       sectionTitle('Preset'),
       presetRow,
       sectionTitle('Look'),
-      row('Time of day', 'Sunset and night light up windows, streetlights and headlights', tod.el, 'row-wide'),
       this.toggle('Shadows', 'Soft sun shadows (costly on older phones)', 'shadows', undefined, (v) => custom(v, 'shadows')),
       this.toggle('Bloom', 'Glow around bright lights', 'bloom', undefined, (v) => custom(v, 'bloom')),
+      this.toggle('Post effects', 'Turbo blur and colour fringing', 'postFx', undefined, (v) => custom(v, 'postFx')),
       sectionTitle('Performance'),
       this.slider('Pedestrians', 'Crowd density relative to the preset', 'npcDensity', 0, 1.5, 0.05, (v) => {
         const n = Math.round(CONFIG.quality.presets[this.s.quality].npcCount * v);
@@ -212,7 +220,7 @@ export class SettingsScreen implements Screen {
       calibRow,
       this.toggle('Left-handed', 'Pedals on the left, steering on the right', 'leftHanded'),
       this.slider('Controls size', null, 'controlsScale', 0.75, 1.4, 0.05, pct),
-      this.slider('Controls opacity', null, 'controlsOpacity', 0.2, 1, 0.05, pct),
+      this.slider('Opacity while moving', 'Buttons are solid when stopped and fade while you drive', 'controlsOpacity', 0.1, 1, 0.1, pct),
       this.toggle('Vibration', 'Buzz on crashes and explosions', 'vibration', (v) => v && host.vibrate(40)),
     );
     const keys = h(
@@ -239,9 +247,122 @@ export class SettingsScreen implements Screen {
       'div',
       { class: 'set-page' },
       touchSection,
+      this.flight(),
       sectionTitle('Driving'),
       this.slider('Steering sensitivity', null, 'steerSensitivity', 0.5, 1.5, 0.05, (v) => `×${v.toFixed(2)}`),
       keys,
+    );
+  }
+
+  private flight(): HTMLDivElement {
+    const { host } = this;
+    const mode = new Segmented<'assisted' | 'realistic'>(
+      'Flight model',
+      [
+        { value: 'assisted', label: 'Assisted', icon: 'plane' },
+        { value: 'realistic', label: 'Realistic' },
+      ],
+      (v) => this.set({ flightAssisted: v === 'assisted' }),
+    );
+    this.sync.push(() => mode.set(this.s.flightAssisted ? 'assisted' : 'realistic'));
+    const tilt = new Toggle('Tilt to fly', (v) => {
+      if (!v) {
+        this.set({ flightTilt: false });
+        return;
+      }
+      void host.tilt.request().then((ok) => {
+        if (ok) {
+          host.tilt.calibrate();
+          this.set({ flightTilt: true });
+        } else {
+          host.toast(host.tilt.permission === 'unsupported' ? 'This device has no motion sensor' : 'Motion access was denied');
+          this.refresh();
+        }
+      });
+    });
+    this.sync.push(() => tilt.set(this.s.flightTilt));
+    return h(
+      'div',
+      { class: 'set-group' },
+      sectionTitle('Flying'),
+      row('Flight model', 'Assisted: coordinated turns, auto-trim, soft limits, landing help', mode.el, 'row-wide'),
+      row('Tilt to fly', 'Bank the plane by tilting the phone (the stick still works)', tilt.el),
+      this.toggle('Invert pitch', 'Stick up = nose up', 'invertPitch'),
+    );
+  }
+
+  private world(): HTMLDivElement {
+    const { ctx } = this.host;
+    const fmtTime = (hrs: number) => {
+      const hh = Math.floor(((hrs % 24) + 24) % 24);
+      const mm = Math.floor((((hrs % 1) + 1) % 1) * 60);
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    };
+    const legacy = (hrs: number): Settings['timeOfDay'] => (hrs >= 6.5 && hrs < 18 ? 'day' : (hrs >= 18 && hrs < 20.5) || (hrs >= 5 && hrs < 6.5) ? 'sunset' : 'night');
+    const setTime = (hrs: number) => {
+      ctx.env?.setTime?.(hrs);
+      this.set({ timeOfDay: legacy(hrs) });
+    };
+    const time = new Slider({ label: 'Time of day', min: 0, max: 23.75, step: 0.25, format: fmtTime, onInput: (v) => setTime(v) });
+    const quick = h('div', { class: 'quick-times' });
+    for (const [label, hrs, ic] of [
+      ['Dawn', 6.25, 'sunset'],
+      ['Noon', 12.5, 'sun'],
+      ['Sunset', 19.25, 'sunset'],
+      ['Night', 23, 'moon'],
+    ] as [string, number, IconName][]) {
+      quick.append(
+        button(label, {
+          icon: ic,
+          cls: 'btn-sm',
+          variant: 'ghost',
+          onClick: () => {
+            setTime(hrs);
+            time.set(hrs);
+          },
+        }),
+      );
+    }
+    this.sync.push(() => {
+      const hrs = ctx.env?.clockHours;
+      const fallback = { day: 12.5, sunset: 19.25, night: 23 }[this.s.timeOfDay] ?? 12.5;
+      time.set(typeof hrs === 'number' && Number.isFinite(hrs) ? ((hrs % 24) + 24) % 24 : fallback);
+    });
+    const kinds: { value: Settings['weather']; label: string; icon?: IconName }[] = [
+      { value: 'auto', label: 'Auto' },
+      { value: 'clear', label: 'Clear', icon: 'sun' },
+      { value: 'fewClouds', label: 'Few clouds', icon: 'cloud' },
+      { value: 'cloudy', label: 'Cloudy', icon: 'cloud' },
+      { value: 'overcast', label: 'Overcast', icon: 'cloud' },
+      { value: 'lightRain', label: 'Light rain', icon: 'rain' },
+      { value: 'heavyRain', label: 'Heavy rain', icon: 'rain' },
+      { value: 'storm', label: 'Storm', icon: 'storm' },
+      { value: 'fog', label: 'Fog', icon: 'fog' },
+      { value: 'snow', label: 'Snow', icon: 'snow' },
+    ];
+    const weather = new Segmented<Settings['weather']>('Weather', kinds, (v) => this.set({ weather: v }));
+    weather.el.classList.add('seg-wrap');
+    const nowDesc = h('div', { class: 'set-desc' });
+    this.sync.push(() => {
+      weather.set(this.s.weather);
+      const k = ctx.env?.weather?.kind;
+      const name = kinds.find((x) => x.value === k)?.label;
+      nowDesc.textContent = this.s.weather === 'auto' ? (name ? `Changes on its own · now: ${name}` : 'Changes on its own') : 'Locked to this weather';
+    });
+    const weatherRow = row('Weather', null, weather.el, 'row-block');
+    weatherRow.querySelector('.set-text')!.append(nowDesc);
+    return h(
+      'div',
+      { class: 'set-page' },
+      sectionTitle('Clock'),
+      row('Time of day', null, time.el, 'row-slider'),
+      row('Quick set', null, quick, 'row-wide'),
+      this.slider('Day length', 'Real minutes for a full day', 'dayLengthMin', 4, 120, 1, (v) => `${Math.round(v)} min`),
+      this.toggle('Lock time', 'Freeze the clock', 'timeLocked'),
+      sectionTitle('Weather'),
+      weatherRow,
+      sectionTitle('Roads'),
+      this.toggle('Highway traffic', 'A few cars cruising the highways', 'traffic'),
     );
   }
 

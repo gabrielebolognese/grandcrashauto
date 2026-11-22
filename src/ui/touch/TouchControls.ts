@@ -5,7 +5,7 @@ import type { UIHost } from '../host';
 import { icon } from '../icons';
 import { uiSound } from '../widgets';
 
-type PedalId = 'gas' | 'brake' | 'hand';
+type PedalId = 'gas' | 'brake' | 'hand' | 'turbo';
 type SteerMode = 'slider' | 'buttons' | 'tilt';
 
 /**
@@ -41,19 +41,20 @@ export class TouchControls {
   private btnTarget = 0;
   private btnSteer = 0;
   private tiltFallbackToasted = false;
+  private lastCharge = -1;
 
   constructor(private host: UIHost) {
     // ── steering zone ──
     this.knob = h('div', { class: 'ss-knob' }, icon('wheel'));
     this.slider = h(
       'div',
-      { class: 'steer-slider' },
+      { class: 'steer-slider fade-ctl' },
       h('div', { class: 'ss-track' }, h('i', { class: 'ss-chev l' }, icon('left')), h('i', { class: 'ss-mid' }), h('i', { class: 'ss-chev r' }, icon('right'))),
       this.knob,
     );
-    this.btnL = h('div', { class: 'sb-btn l' }, icon('left'));
-    this.btnR = h('div', { class: 'sb-btn r' }, icon('right'));
-    this.tiltWheel = h('div', { class: 'st-wheel' }, icon('wheel'));
+    this.btnL = h('div', { class: 'sb-btn l fade-ctl' }, icon('left'));
+    this.btnR = h('div', { class: 'sb-btn r fade-ctl' }, icon('right'));
+    this.tiltWheel = h('div', { class: 'st-wheel fade-ctl' }, icon('wheel'));
     const cal = h('button', { class: 'st-cal btn btn-sm btn-ghost', type: 'button' }, icon('reset'), h('span', { text: 'Centre' }));
     cal.addEventListener('click', () => {
       uiSound('click');
@@ -78,7 +79,7 @@ export class TouchControls {
 
     // ── pedals ──
     const pedal = (id: PedalId, cls: string, ...kids: (Node | string)[]) => {
-      const el = h('div', { class: `pedal ${cls} touch-ctl`, 'data-id': id, role: 'button', 'aria-label': id }, ...kids);
+      const el = h('div', { class: `${id === 'turbo' ? '' : 'pedal '}${cls} touch-ctl fade-ctl`, 'data-id': id, role: 'button', 'aria-label': id }, ...kids);
       this.bindPedal(el, id);
       return el;
     };
@@ -86,8 +87,14 @@ export class TouchControls {
       hand: pedal('hand', 'p-hand', icon('handbrake'), h('span', { class: 'p-lbl', text: 'Handbrake' })),
       brake: pedal('brake', 'p-brake', h('span', { class: 'p-chev', text: '▼' }), h('span', { class: 'p-lbl', text: 'Brake' }), h('span', { class: 'p-sub', text: 'Reverse' })),
       gas: pedal('gas', 'p-gas', h('span', { class: 'p-chev', text: '▲' }), h('span', { class: 'p-lbl', text: 'Gas' })),
+      turbo: pedal('turbo', 'turbo-btn no-turbo', h('span', { class: 'tbo-core' }, icon('flame'), h('span', { text: 'Turbo' }))),
     };
-    const pedals = h('div', { class: 'pedals' }, h('div', { class: 'pedal-col' }, this.pedalEls.hand, this.pedalEls.brake), this.pedalEls.gas);
+    const pedals = h(
+      'div',
+      { class: 'pedals' },
+      h('div', { class: 'pedal-col' }, this.pedalEls.hand, this.pedalEls.brake),
+      h('div', { class: 'gas-col' }, this.pedalEls.turbo, this.pedalEls.gas),
+    );
 
     this.el = h('div', { class: 'touch-layer', 'aria-hidden': 'true' }, this.zone, pedals);
     this.bindSteer();
@@ -131,6 +138,7 @@ export class TouchControls {
     t.throttle = 0;
     t.brake = 0;
     t.handbrake = false;
+    t.turbo = false;
     t.steer = 0;
   }
 
@@ -299,15 +307,20 @@ export class TouchControls {
     let gas = false;
     let brake = false;
     let hand = false;
+    let turbo = false;
     for (const p of this.pedalPtrs.values()) {
       if (p === 'gas') gas = true;
       else if (p === 'brake') brake = true;
+      else if (p === 'turbo') turbo = true;
       else hand = true;
     }
     const t = this.host.ctx.input.touch;
-    t.throttle = gas ? 1 : 0;
+    if (turbo && !t.turbo) this.host.vibrate(18);
+    t.throttle = gas || turbo ? 1 : 0; // boosting implies full throttle (thumb can slide gas → turbo)
     t.brake = brake ? 1 : 0;
     t.handbrake = hand;
+    t.turbo = turbo;
+    this.pedalEls.turbo.classList.toggle('down', turbo);
     this.pedalEls.gas.classList.toggle('down', gas);
     this.pedalEls.brake.classList.toggle('down', brake);
     this.pedalEls.hand.classList.toggle('down', hand);
@@ -325,6 +338,20 @@ export class TouchControls {
   update(dt: number): void {
     if (!this.visible) return;
     const t = this.host.ctx.input.touch;
+    // Turbo charge ring (part 3; hidden until the vehicle reports a turbo meter).
+    const vs = this.host.ctx.vehicle.state;
+    const tb = this.pedalEls.turbo;
+    const hasTurbo = typeof vs.turboCharge === 'number';
+    tb.classList.toggle('no-turbo', !hasTurbo);
+    if (hasTurbo) {
+      const c = Math.round(Math.max(0, Math.min(1, vs.turboCharge!)) * 100) / 100;
+      if (c !== this.lastCharge) {
+        this.lastCharge = c;
+        tb.style.setProperty('--charge', String(c));
+        tb.classList.toggle('empty', c < 0.03);
+      }
+      tb.classList.toggle('boosting', !!vs.turboActive);
+    }
     if (this.mode === 'buttons') {
       const c = CONFIG.ui.steer;
       const target = this.btnTarget;

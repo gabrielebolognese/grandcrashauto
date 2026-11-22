@@ -109,7 +109,9 @@ export interface WanderArea {
 }
 
 export type PropKind =
-  | 'streetlight' | 'palm' | 'tree' | 'bench' | 'bin' | 'hydrant' | 'cone' | 'barrier' | 'busStop' | 'trafficLight' | 'sign';
+  | 'streetlight' | 'palm' | 'tree' | 'bench' | 'bin' | 'hydrant' | 'cone' | 'barrier' | 'busStop' | 'trafficLight' | 'sign'
+  // part 2/3 (airport) — rendered by the props agent
+  | 'fuelTruck' | 'baggageCart' | 'windsock';
 
 export interface PropPlacement {
   kind: PropKind;
@@ -197,6 +199,13 @@ export interface CityData {
   pois?: { id: string; name: string; pose: Pose }[];
   /** Part 2: island land bounds (the ocean surrounds it). */
   island?: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /**
+   * Part 3: road-graph nodes at the city/airport edge where the external highway network attaches (world module).
+   * `dir` = unit direction the road leaves in (x/z). Tags: 'north' (inland), 'east' (inland), 'coastEast' (beach
+   * boulevard → south-coast road), 'coastWest' (beach boulevard west), 'west' (toward the airport), 'airport' (airport
+   * access road east end).
+   */
+  exits?: { node: number; dir: Vec3; tag?: string }[];
   /** Coastline: the beach/ocean is on the +Z side. Sand starts at seaWallZ, water line (y = waterLevel) at shoreZ. */
   coast: { seaWallZ: number; shoreZ: number };
   /** Coarse district map: districtGrid[iz * districtGridSize + ix], cell = size / districtGridSize meters. */

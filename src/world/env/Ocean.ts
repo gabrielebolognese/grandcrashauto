@@ -9,9 +9,10 @@ import { makeWaterTexture } from './textures';
  * reflection, sun/moon glitter, depth-tinted body colour (turquoise shallows → deep blue), transparent shallows over
  * the sand, animated shoreline foam, aerial haze to the horizon. One draw call.
  *
- * Seabed depth comes from a low-res depth field baked progressively from `world.groundHeightAt` (works for any
- * coastline shape: city beach now, whole island later). Until it's ready (or if the world gives no seabed) an
- * analytic fallback is used: shore line at `coast.shoreZ`, land = the city square.
+ * Seabed depth comes from a camera-following depth field (CONFIG.env.ocean.seabedRes² texels, extent growing with
+ * altitude) baked progressively (time-budgeted) from `world.groundHeightAt`, so any coastline works (endless coast,
+ * islets, lakes). Outside it / before it is ready: the analytic base coast lines of CONFIG.world.coast.
+ * Floating origin: wave phases & texture offsets include the origin (CPU, double precision) → nothing jumps.
  */
 
 const MAX_WAVES = 8;
@@ -32,14 +33,20 @@ const WAVES: [number, number, number, number][] = [
 const GLSL_SEABED = /* glsl */ `
 uniform sampler2D uSeabed;
 uniform vec4 uSeabedBounds; // minX, minZ, 1/sizeX, 1/sizeZ
-uniform vec4 uShore;        // shoreZ, slope, cityHalf, seabedValid
+uniform vec4 uShore;        // westX (local), southZ (local), slope, seabedValid
 float seabedDepth(vec2 xz) {
-  float o = max(abs(xz.x) - uShore.z, -xz.y - uShore.z);
-  float d = max(xz.y - uShore.x, o) * uShore.y;
+  // Analytic base coast lines (ocean west of westX and south of southZ).
+  float w = uShore.x - xz.x;
+  float s = xz.y - uShore.y;
+  float d = ((w > 0.0 && s > 0.0) ? length(vec2(w, s)) : max(w, s)) * uShore.z;
   if (uShore.w > 0.5) {
     vec2 uv = (xz - uSeabedBounds.xy) * uSeabedBounds.zw;
     if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
-      d = textureLod(uSeabed, uv, 0.0).r * ${(DEPTH_MAX - DEPTH_MIN).toFixed(1)} + ${DEPTH_MIN.toFixed(1)};
+      float baked = textureLod(uSeabed, uv, 0.0).r * ${(DEPTH_MAX - DEPTH_MIN).toFixed(1)} + ${DEPTH_MIN.toFixed(1)};
+      vec2 e = min(uv, 1.0 - uv);
+      d = mix(max(d, 1.5), baked, smoothstep(0.0, 0.04, min(e.x, e.y)));
+    } else {
+      d = max(d, 1.5); // outside the baked field: never cut holes (terrain covers the water on land)
     }
   }
   return d;
@@ -97,12 +104,14 @@ uniform vec3 uWaterMid;
 uniform vec3 uWaterShallow;
 uniform vec4 uDepthParams; // shallowDepth, deepDepth, clearDepth, foamWidth
 uniform vec4 uOcean;       // hazeDist, fadeStart, fadeEnd, glitter
+uniform vec2 uOrgMod;      // floating origin mod 1024 (texture continuity)
 varying vec3 vWorld;
 varying float vHeight;
 
 void main() {
   vec2 xz = vWorld.xz;
   // Derivatives first (uniform control flow), explicit-gradient texture fetches after the discard.
+  vec2 xzT = xz + uOrgMod;
   vec2 dX = dFdx(xz);
   vec2 dY = dFdy(xz);
   float fp = length(abs(dX) + abs(dY)); // pixel footprint in metres
@@ -123,14 +132,14 @@ void main() {
     g += a.xy * (a.z * a.w * cos(f) * fade);
   }
   // Groups of waves: slow amplitude modulation kills the regular "corduroy" look at grazing angles.
-  float grp = textureGrad(uDetail, xz * 0.0063 + uScroll.zw * 0.05, dX * 0.0063, dY * 0.0063).a;
+  float grp = textureGrad(uDetail, xzT * 0.0068359375 + uScroll.zw * 0.05, dX * 0.0068359375, dY * 0.0068359375).a;
   g *= clamp(depth / 4.0, 0.25, 1.0) * (0.45 + 1.1 * grp);
 
   // Ripple detail (tileable texture, two scales scrolling in different directions).
-  vec4 t1 = textureGrad(uDetail, xz * 0.085 + uScroll.xy, dX * 0.085, dY * 0.085);
+  vec4 t1 = textureGrad(uDetail, xzT * 0.0849609375 + uScroll.xy, dX * 0.0849609375, dY * 0.0849609375);
   vec2 rip = t1.xy * 2.0 - 1.0;
   if (uScroll2.w > 1.5) {
-    vec2 r2 = textureGrad(uDetail, vec2(xz.y, -xz.x) * 0.031 + uScroll.zw, vec2(dX.y, -dX.x) * 0.031, vec2(dY.y, -dY.x) * 0.031).xy * 2.0 - 1.0;
+    vec2 r2 = textureGrad(uDetail, vec2(xzT.y, -xzT.x) * 0.03125 + uScroll.zw, vec2(dX.y, -dX.x) * 0.03125, vec2(dY.y, -dY.x) * 0.03125).xy * 2.0 - 1.0;
     rip = rip * 0.55 + r2 * 0.75;
   }
   float far = smoothstep(30.0, 900.0, dist);
@@ -138,11 +147,13 @@ void main() {
   vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
 
   // Large-scale blotches break up tiling when seen from far / high.
-  float blotch = textureGrad(uDetail, xz * 0.0021 + uScroll2.xy * 0.1, dX * 0.0021, dY * 0.0021).a;
+  float blotch = textureGrad(uDetail, xzT * 0.001953125 + uScroll2.xy * 0.1, dX * 0.001953125, dY * 0.001953125).a;
 
   vec3 L = uSunDir;
   vec3 R = reflect(-V, N);
-  vec3 refl = skyColor(normalize(vec3(R.x, abs(R.y) + 0.1, R.z)));
+  vec3 refl = skyColor(normalize(vec3(R.x, abs(R.y) + 0.2, R.z)));
+  refl = mix(refl, mix(uCloudLit, uCloudShade, 0.55), smoothstep(0.3, 1.0, uCover) * 0.85);
+  refl += vec3(0.7, 0.75, 1.0) * uLightning * 1.5;
   float NdV = clamp(dot(N, V), 0.0, 1.0);
   float fres = 0.02 + 0.98 * pow(1.0 - NdV, 5.0);
 
@@ -158,7 +169,7 @@ void main() {
   float sss = clamp(vHeight * 1.4 + 0.15, 0.0, 1.0) * pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 3.0);
   col += uWaterShallow * uSunLight * sss * 0.05;
 
-  col = mix(col, refl, fres * 0.82);
+  col = mix(col, refl, min(fres, 0.62) * 0.85);
 
   // Sun (or moon) glitter: sharp up close, a broad sheen far away / from altitude.
   vec3 Hh = normalize(L + V);
@@ -170,7 +181,7 @@ void main() {
   col += uSunLight * spec * (0.06 + 0.94 * fres) * uOcean.w * sunUp * 1.6;
 
   // Shoreline foam: band at the waterline that laps with the waves + swash lines rolling in.
-  vec4 fz = textureGrad(uDetail, xz * 0.04 + uScroll2.xy, dX * 0.04, dY * 0.04);
+  vec4 fz = textureGrad(uDetail, xzT * 0.0400390625 + uScroll2.xy, dX * 0.0400390625, dY * 0.0400390625);
   float fn = fz.b;
   float dEff = depth - vHeight * 0.35;
   float band = 1.0 - smoothstep(0.0, uDepthParams.w, dEff);
@@ -178,7 +189,9 @@ void main() {
   float swash = sin(dEff * 13.0 + uScroll2.z + fn * 2.2) * 0.5 + 0.5;
   float lines = smoothstep(0.86, 0.985, swash) * smoothstep(0.02, 0.15, depth) * (1.0 - smoothstep(0.35, 0.8, depth));
   float foam = band * smoothstep(0.12, 0.45, fn + band * 0.45) + lines * smoothstep(0.3, 0.6, fn) * 0.9;
-  foam = max(foam, smoothstep(0.62, 0.95, vHeight) * smoothstep(0.62, 0.82, fn) * 0.5 * (1.0 - far));
+  float caps = smoothstep(0.62, 0.95, vHeight) * smoothstep(0.62, 0.82, fn) * 0.5;
+  caps = max(caps, smoothstep(0.45, 0.85, vHeight) * smoothstep(0.55, 0.75, fn) * smoothstep(8.0, 15.0, length(uWind)) * 0.8);
+  foam = max(foam, caps * (1.0 - far));
   foam = clamp(foam, 0.0, 1.0) * step(0.0, depth + 0.3);
   vec3 foamCol = (uAmbient * 0.9 + uSunLight * max(L.y, 0.15)) * 0.3183 * 0.92;
   col = mix(col, foamCol, foam * 0.92);
@@ -199,16 +212,15 @@ void main() {
 }
 `;
 
-interface CoastInfo {
-  shoreZ: number;
-  cityHalf: number;
-}
-
-/** Progressive bake of water depth (waterLevel - ground height) into a small R8 texture. */
+/** Progressive bake of water depth (waterLevel - ground height) into a small R8 texture (LOCAL coordinates). */
 class SeabedField {
   readonly texture: THREE.DataTexture;
   readonly bounds = new THREE.Vector4(0, 0, 1, 1);
   valid = false;
+  /** Centre and extent (local) of the baked region. */
+  cx = 0;
+  cz = 0;
+  extent = 0;
   private data: Uint8Array;
   private w: number;
   private h: number;
@@ -221,6 +233,7 @@ class SeabedField {
   private hasDeep = false;
   private hasLand = false;
   private sampler: ((x: number, z: number) => number) | null = null;
+  private fallback: ((x: number, z: number) => number) | null = null;
 
   constructor(w: number, h: number) {
     this.w = w;
@@ -239,16 +252,30 @@ class SeabedField {
     return this.sampler !== null;
   }
 
-  begin(sampler: (x: number, z: number) => number, minX: number, minZ: number, maxX: number, maxZ: number): void {
+  begin(sampler: (x: number, z: number) => number, fallback: (x: number, z: number) => number, cx: number, cz: number, extent: number): void {
     this.sampler = sampler;
-    this.minX = minX;
-    this.minZ = minZ;
-    this.sx = (maxX - minX) / this.w;
-    this.sz = (maxZ - minZ) / this.h;
+    this.fallback = fallback;
+    this.cx = cx;
+    this.cz = cz;
+    this.extent = extent;
+    this.minX = cx - extent / 2;
+    this.minZ = cz - extent / 2;
+    this.sx = extent / this.w;
+    this.sz = extent / this.h;
     this.next = 0;
     this.flat = 0;
     this.hasDeep = false;
     this.hasLand = false;
+  }
+
+  /** Floating origin moved the world by -(dx, dz). */
+  shift(dx: number, dz: number): void {
+    this.cx -= dx;
+    this.cz -= dz;
+    this.minX -= dx;
+    this.minZ -= dz;
+    this.bounds.x -= dx;
+    this.bounds.y -= dz;
   }
 
   /** Bake for up to `budgetMs`; returns true when finished this call. */
@@ -260,7 +287,7 @@ class SeabedField {
     const total = this.w * this.h;
     const range = DEPTH_MAX - DEPTH_MIN;
     while (this.next < total) {
-      const end = Math.min(total, this.next + 256);
+      const end = Math.min(total, this.next + 128);
       for (let i = this.next; i < end; i++) {
         const ix = i % this.w;
         const iz = (i / this.w) | 0;
@@ -268,18 +295,23 @@ class SeabedField {
         const z = this.minZ + (iz + 0.5) * this.sz;
         let gh = fn(x, z);
         if (!Number.isFinite(gh)) gh = wl - DEPTH_MAX;
-        const d = wl - gh;
-        if (Math.abs(d) < 1e-4) this.flat++;
-        if (d > 2) this.hasDeep = true;
-        if (d < -0.5) this.hasLand = true;
+        let d = wl - gh;
+        if (Math.abs(d) < 1e-4) {
+          // Exactly at the water level = "no data" (stub terrain): use the analytic coast estimate there.
+          this.flat++;
+          d = this.fallback ? this.fallback(x, z) : d;
+        }
+        if (d > 0.5) this.hasDeep = true;
+        if (d < -0.3) this.hasLand = true;
         this.data[i] = Math.round(Math.min(1, Math.max(0, (d - DEPTH_MIN) / range)) * 255);
       }
       this.next = end;
       if (performance.now() - t0 > budgetMs) return false;
     }
     this.sampler = null;
-    // A world that returns exactly the water level over big areas has no seabed model → keep the analytic fallback.
-    this.valid = this.hasDeep && this.hasLand && this.flat < total * 0.25;
+    // A world that returns exactly the water level over big areas has no seabed model → analytic fallback.
+    // All-land or all-sea fields are valid too (inland / far offshore).
+    this.valid = this.flat < total || this.fallback !== null;
     if (this.valid) {
       this.bounds.set(this.minX, this.minZ, 1 / (this.sx * this.w), 1 / (this.sz * this.h));
       this.texture.needsUpdate = true;
@@ -298,13 +330,17 @@ export class Ocean {
   private geometry: THREE.BufferGeometry;
   private detailTex: THREE.DataTexture;
   private seabed: SeabedField;
+  private baking: SeabedField | null = null;
+  private sampler: ((x: number, z: number) => number) | null = null;
   private detail = -1;
   private radius = 0;
   private gridS0 = 1;
   private vertWaves = 4;
   private fragWaves = 6;
   private omegas: number[] = [];
-  private coast: CoastInfo = { shoreZ: 360, cityHalf: CONFIG.world.size / 2 };
+  private amps: number[] = [];
+  private chops: number[] = [];
+  private ampScale = -1;
 
   constructor(anisotropy: number) {
     this.detailTex = makeWaterTexture(256);
@@ -328,7 +364,7 @@ export class Ocean {
         uAmpNorm: { value: 1 },
         uSeabed: { value: this.seabed.texture },
         uSeabedBounds: { value: this.seabed.bounds },
-        uShore: { value: new THREE.Vector4(360, 0.045, 400, 0) },
+        uShore: { value: new THREE.Vector4(-3800, 350, 0.03, 0) },
         uDetail: { value: this.detailTex },
         uScroll: { value: new THREE.Vector4() },
         uScroll2: { value: new THREE.Vector4(0, 0, 0, 2) },
@@ -337,6 +373,7 @@ export class Ocean {
         uWaterShallow: { value: new THREE.Color() },
         uDepthParams: { value: new THREE.Vector4(2.5, 14, 1.4, 0.55) },
         uOcean: { value: new THREE.Vector4(650, 1000, 1400, 1) },
+        uOrgMod: { value: new THREE.Vector2() },
       },
       vertexShader: VERT,
       fragmentShader: FRAG,
@@ -350,9 +387,15 @@ export class Ocean {
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -10; // first among transparents (particles over the sea draw after it)
     this.mesh.matrixAutoUpdate = false;
+    this.mesh.userData.noOriginShift = true; // follows the camera every frame
   }
 
-  /** 0 = low, 1 = medium, 2 = high. Rebuilds the grid; no shader recompiles. */
+  /** The detail texture doubles as the sky's cloud noise. */
+  get noiseTexture(): THREE.Texture {
+    return this.detailTex;
+  }
+
+  /** 0 = low, 1 = medium, 2 = high. Rebuilds the grid (polar rings, geometric growth → huge radius, few verts). */
   setDetail(level: number, radius: number): void {
     level = Math.max(0, Math.min(2, Math.round(level)));
     radius = Math.max(600, radius);
@@ -377,7 +420,7 @@ export class Ocean {
     while (r < radius) {
       r = Math.min(radius, r + s);
       radii.push(r);
-      s = Math.min(s * growth, 400);
+      s = Math.min(s * growth, 600);
     }
     const rings = radii.length - 1;
     const pos = new Float32Array((1 + rings * segs) * 3);
@@ -411,90 +454,130 @@ export class Ocean {
     this.geometry.dispose();
     this.geometry = geo;
     this.mesh.geometry = geo;
-    this.applyWaves();
+    this.initWaves();
   }
 
   get triangleCount(): number {
     return (this.geometry.index?.count ?? 0) / 3;
   }
 
-  private applyWaves(): void {
-    const u = this.material.uniforms;
-    const A = u.uWaveA.value as THREE.Vector4[];
-    const B = u.uWaveB.value as THREE.Vector4[];
-    const scale = CONFIG.env.ocean.waveScale;
-    let ampSum = 0;
+  private initWaves(): void {
+    const A = this.material.uniforms.uWaveA.value as THREE.Vector4[];
+    const B = this.material.uniforms.uWaveB.value as THREE.Vector4[];
     this.omegas.length = 0;
+    this.amps.length = 0;
+    this.chops.length = 0;
     for (let i = 0; i < MAX_WAVES; i++) {
       const w = WAVES[i];
       if (!w) {
         A[i].set(0, 0, 1, 0);
         B[i].set(0, 0, 0, 0);
         this.omegas.push(0);
+        this.amps.push(0);
+        this.chops.push(0);
         continue;
       }
       const [deg, lambda, amp, chop] = w;
       const a = (deg * Math.PI) / 180;
       const k = (Math.PI * 2) / lambda;
-      A[i].set(Math.sin(a), Math.cos(a), k, amp * scale);
-      // Choppiness bounded so crests never loop over.
-      const q = Math.min(chop, 0.9 / (k * amp * scale * WAVES.length + 1e-6));
-      B[i].set(q, 0, 0, 0);
+      A[i].set(Math.sin(a), Math.cos(a), k, amp);
       this.omegas.push(Math.sqrt(9.81 * k));
-      if (i < this.vertWaves) ampSum += amp * scale;
+      this.amps.push(amp);
+      this.chops.push(chop);
+    }
+    this.ampScale = -1;
+  }
+
+  /** Amplitudes follow the wind (choppier sea in storms). */
+  private scaleWaves(scale: number): void {
+    if (Math.abs(scale - this.ampScale) < 0.01) return;
+    this.ampScale = scale;
+    const u = this.material.uniforms;
+    const A = u.uWaveA.value as THREE.Vector4[];
+    const B = u.uWaveB.value as THREE.Vector4[];
+    let ampSum = 0;
+    for (let i = 0; i < WAVES.length && i < MAX_WAVES; i++) {
+      const amp = this.amps[i] * scale;
+      A[i].w = amp;
+      B[i].x = Math.min(this.chops[i], 0.9 / (A[i].z * amp * WAVES.length + 1e-6)); // crests never loop over
+      if (i < this.vertWaves) ampSum += amp;
     }
     u.uAmpNorm.value = 1 / Math.max(0.05, ampSum * 0.75);
   }
 
-  setCoast(shoreZ: number, cityHalf: number): void {
-    this.coast.shoreZ = shoreZ;
-    this.coast.cityHalf = cityHalf;
+  /** Ground-height sampler (LOCAL coords) used to bake the camera-following seabed depth field. */
+  setSampler(sampler: ((x: number, z: number) => number) | null): void {
+    this.sampler = sampler;
   }
 
-  /** Start baking the seabed depth field from a ground-height sampler over the given bounds (keeps the old one meanwhile). */
-  bakeSeabed(sampler: (x: number, z: number) => number, minX: number, minZ: number, maxX: number, maxZ: number, texel: number): void {
-    const w = Math.max(16, Math.min(1024, Math.round((maxX - minX) / texel)));
-    const h = Math.max(16, Math.min(1024, Math.round((maxZ - minZ) / texel)));
-    this.baking?.dispose();
-    this.baking = new SeabedField(w, h);
-    this.baking.begin(sampler, minX, minZ, maxX, maxZ);
-  }
-
-  private baking: SeabedField | null = null;
-
-  /** null while baking, then whether the world provided a usable seabed. */
   get seabedState(): 'baking' | 'baked' | 'analytic' {
     return this.baking ? 'baking' : this.seabed.valid ? 'baked' : 'analytic';
   }
 
-  update(camera: THREE.PerspectiveCamera, time: number, bakeBudgetMs: number): void {
+  /** Floating origin moved the world by -(dx, dz): keep the baked fields aligned. */
+  shift(dx: number, dz: number): void {
+    this.seabed.shift(dx, dz);
+    this.baking?.shift(dx, dz);
+  }
+
+  /**
+   * @param origin floating-origin offset (absolute = local + origin)
+   * @param windSpeed m/s (sea state), hazeScale multiplies the haze distance (weather fog)
+   */
+  update(camera: THREE.PerspectiveCamera, time: number, origin: THREE.Vector3, windSpeed: number, hazeScale: number): void {
     const cfg = CONFIG.env.ocean;
     const u = this.material.uniforms;
-    // Seabed bake (progressive, time-budgeted).
-    if (this.baking && this.baking.step(bakeBudgetMs)) {
-      const done = this.baking;
-      this.baking = null;
-      if (done.valid) {
+    const camH = Math.max(0, camera.position.y - CONFIG.world.waterLevel);
+
+    // Camera-following seabed field: re-bake around the camera when it drifts away (or climbs → bigger extent).
+    if (this.sampler) {
+      const want = Math.min(cfg.seabedExtentMax, Math.max(cfg.seabedExtent, camH * 6));
+      const cur = this.baking ?? this.seabed;
+      const drift = Math.hypot(camera.position.x - cur.cx, camera.position.z - cur.cz);
+      const needs = cur.extent === 0 || drift > cur.extent * 0.22 || want > cur.extent * 1.35 || want < cur.extent * 0.6;
+      if (needs && !this.baking) {
+        const res = cfg.seabedRes;
+        const texel = want / res;
+        const cx = Math.round(camera.position.x / (texel * 8)) * texel * 8;
+        const cz = Math.round(camera.position.z / (texel * 8)) * texel * 8;
+        this.baking = new SeabedField(res, res);
+        const coast = CONFIG.world.coast;
+        const wx = coast.westX - origin.x, sz = coast.southZ - origin.z, slope = cfg.shoreSlope;
+        const analytic = (x: number, z: number) => {
+          const w = wx - x, s = z - sz;
+          return (w > 0 && s > 0 ? Math.hypot(w, s) : Math.max(w, s)) * slope;
+        };
+        this.baking.begin(this.sampler, analytic, cx, cz, want);
+      }
+      if (this.baking && this.baking.step(cfg.seabedBudgetMs)) {
+        const done = this.baking;
+        this.baking = null;
         this.seabed.dispose();
         this.seabed = done;
         u.uSeabed.value = done.texture;
         u.uSeabedBounds.value = done.bounds;
-      } else {
-        done.dispose(); // the world has no seabed model: keep the analytic shore
       }
     }
-    u.uShore.value.set(this.coast.shoreZ, cfg.shoreSlope, this.coast.cityHalf, this.seabed.valid ? 1 : 0);
+    const coast = CONFIG.world.coast;
+    u.uShore.value.set(coast.westX - origin.x, coast.southZ - origin.z, cfg.shoreSlope, this.seabed.valid ? 1 : 0);
 
     // Follow the camera, snapped to the inner grid spacing (less vertex swimming).
     const snap = this.gridS0 * 2;
     this.mesh.position.set(Math.round(camera.position.x / snap) * snap, CONFIG.world.waterLevel, Math.round(camera.position.z / snap) * snap);
     this.mesh.updateMatrix();
 
-    // Wave phases computed in double precision on the CPU (no float precision loss after hours of play).
+    // Wave phases in double precision on the CPU, including the floating origin (waves never jump).
+    this.scaleWaves(cfg.waveScale * (0.72 + 0.05 * windSpeed));
+    const A = u.uWaveA.value as THREE.Vector4[];
     const B = u.uWaveB.value as THREE.Vector4[];
     const t = time * cfg.waveSpeed;
     const TAU = Math.PI * 2;
-    for (let i = 0; i < this.omegas.length; i++) B[i].z = -((this.omegas[i] * t) % TAU);
+    for (let i = 0; i < this.omegas.length; i++) {
+      const a = A[i];
+      const spatial = a.z * (a.x * origin.x + a.y * origin.z);
+      B[i].z = (spatial - this.omegas[i] * t) % TAU;
+    }
+    u.uOrgMod.value.set(((origin.x % 1024) + 1024) % 1024, ((origin.z % 1024) + 1024) % 1024);
     const sc = u.uScroll.value as THREE.Vector4;
     sc.set((t * 0.011) % 1, (-t * 0.019) % 1, (-t * 0.007) % 1, (-t * 0.0105) % 1);
     const s2 = u.uScroll2.value as THREE.Vector4;
@@ -503,10 +586,8 @@ export class Ocean {
     s2.z = (t * 1.5) % TAU;
 
     u.uDepthParams.value.set(cfg.shallowDepth, cfg.deepDepth, cfg.clearDepth, cfg.foamWidth);
-    const camH = Math.max(0, camera.position.y - CONFIG.world.waterLevel);
-    const R = this.radius;
-    const fadeEnd = Math.min(R * 0.97, camera.far * 0.97);
-    u.uOcean.value.set(cfg.hazeDist * (1 + camH / 250), fadeEnd * 0.6, fadeEnd, cfg.glitter);
+    const fadeEnd = Math.min(this.radius * 0.97, camera.far * 0.97);
+    u.uOcean.value.set(cfg.hazeDist * (1 + camH / 250) * hazeScale, fadeEnd * 0.6, fadeEnd, cfg.glitter);
   }
 
   setColors(deep: THREE.Color, mid: THREE.Color, shallow: THREE.Color): void {

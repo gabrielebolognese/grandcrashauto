@@ -229,7 +229,7 @@ export function buildStations(s: CarSpec, lod: 'high' | 'low'): Station[] {
   const add = (z: number, mode: 0 | 1 | 2 = 0, crease = false, order = 0) => {
     if (z >= s.zRear - 1e-6 && z <= s.zFront + 1e-6) list.push({ z: clamp(z, s.zRear, s.zFront), mode, crease, order });
   };
-  const endN = hi ? 8 : 3;
+  const endN = hi ? 6 : 2;
   for (const [zEnd, sign, e] of [
     [s.zFront, -1, s.front],
     [s.zRear, 1, s.rear],
@@ -241,7 +241,7 @@ export function buildStations(s: CarSpec, lod: 'high' | 'low'): Station[] {
     if (hi) for (let k = 1; k <= 3; k++) add(zEnd + sign * (e.round + (e.zone - e.round) * (k / 4)));
   }
   const Ra = archRadius(s);
-  const archN = hi ? 14 : 4;
+  const archN = hi ? 11 : 3;
   for (const az of [s.axleF, s.axleR]) {
     for (let k = 1; k < archN; k++) add(az + Ra * Math.cos((k / archN) * Math.PI), 0);
     add(az + Ra, 1, true, 0);
@@ -271,8 +271,8 @@ export function buildStations(s: CarSpec, lod: 'high' | 'low'): Station[] {
   const maxStep = (z: number) => {
     const slope = (z > c.zWsTop - 0.05 && z < c.zCowl + 0.05) || (z > c.zBl - 0.05 && z < c.zRoofRear + 0.05);
     const nearEnd = s.zFront - z < s.front.zone || z - s.zRear < s.rear.zone;
-    if (hi) return slope ? 0.036 : nearEnd ? 0.045 : 0.068;
-    return slope ? 0.16 : nearEnd ? 0.2 : 0.42;
+    if (hi) return slope ? 0.05 : nearEnd ? 0.06 : 0.1;
+    return slope ? 0.3 : nearEnd ? 0.36 : 0.8;
   };
   const out: Station[] = [dd[0]];
   for (let i = 1; i < dd.length; i++) {
@@ -323,7 +323,9 @@ export interface BodyGrid {
   regions: Map<number, RegionGeo>;
 }
 
-const capOffset = (M: number, C: number, front: boolean) => M * N + (front ? 0 : S * (C - 1));
+const ALL_SLOTS = Array.from({ length: S }, (_, i) => i);
+/** Low LOD keeps the slots that carry region boundaries / creases. */
+export const LOW_SLOTS = [0, 2, 4, 5, 8, 10, 12, 13, 15, 17, 19, 22];
 
 /** Build the full body grid, classify regions and emit per-region geometry (positions in car space). */
 export function buildGrid(s: CarSpec, lod: 'high' | 'low'): BodyGrid {
@@ -334,7 +336,11 @@ export function buildGrid(s: CarSpec, lod: 'high' | 'low'): BodyGrid {
   const C = 2 * K;
   const colCf: number[] = [];
   for (let c = 0; c <= C; c++) colCf.push(c <= K ? half[K - c] : half[c - K]);
-  const numBase = M * N + 2 * S * (C - 1);
+  const sl = lod === 'high' ? ALL_SLOTS : LOW_SLOTS;
+  const SS = sl.length;
+  const NN = 2 * (SS - 1);
+  const capOffset = (front: boolean) => M * NN + (front ? 0 : SS * (C - 1));
+  const numBase = M * NN + 2 * SS * (C - 1);
   const P = new Float32Array(numBase * 3);
   const H = new Float32Array(M);
   const ring = newRing();
@@ -345,10 +351,10 @@ export function buildGrid(s: CarSpec, lod: 'high' | 'low'): BodyGrid {
   for (let i = 0; i < M; i++) {
     evalRing(s, stations[i].z, stations[i].mode, ring);
     H[i] = ring.H;
-    for (let k = 0; k < N; k++) {
-      const left = k <= S - 1;
-      const j = left ? k : N - k;
-      const o = (i * N + k) * 3;
+    for (let k = 0; k < NN; k++) {
+      const left = k <= SS - 1;
+      const j = sl[left ? k : NN - k];
+      const o = (i * NN + k) * 3;
       P[o] = (left ? 1 : -1) * ring.x[j];
       P[o + 1] = ring.y[j];
       P[o + 2] = ring.z[j];
@@ -368,12 +374,13 @@ export function buildGrid(s: CarSpec, lod: 'high' | 'low'): BodyGrid {
     const sign = front ? 1 : -1;
     let xmax = 1e-6;
     for (let j = 0; j < S; j++) xmax = Math.max(xmax, er.x[j]);
-    const off = capOffset(M, C, front);
-    for (let j = 0; j < S; j++) {
+    const off = capOffset(front);
+    for (let jj = 0; jj < SS; jj++) {
+      const j = sl[jj];
       for (let c = 1; c < C; c++) {
         const cf = colCf[c];
         const xs = c < K ? 1 : c > K ? -1 : 0;
-        const o = (off + j * (C - 1) + (c - 1)) * 3;
+        const o = (off + jj * (C - 1) + (c - 1)) * 3;
         P[o] = xs * cf * er.x[j];
         P[o + 1] = er.y[j];
         P[o + 2] = er.z[j] + sign * e.bulge * (1 - cf * cf) * (er.x[j] / xmax);
@@ -382,13 +389,13 @@ export function buildGrid(s: CarSpec, lod: 'high' | 'low'): BodyGrid {
   }
   const capVert = (front: boolean, j: number, c: number): number => {
     const iEnd = front ? M - 1 : 0;
-    if (c === 0) return iEnd * N + j;
-    if (c === C) return iEnd * N + ((N - j) % N);
-    return capOffset(M, C, front) + j * (C - 1) + (c - 1);
+    if (c === 0) return iEnd * NN + j;
+    if (c === C) return iEnd * NN + ((NN - j) % NN);
+    return capOffset(front) + j * (C - 1) + (c - 1);
   };
 
   // Quads.
-  const maxQuads = (M - 1) * N + 2 * (S - 1) * C;
+  const maxQuads = (M - 1) * NN + 2 * (SS - 1) * C;
   const qv = new Int32Array(maxQuads * 4);
   const qvar = new Uint8Array(maxQuads * 4);
   const qreg = new Uint8Array(maxQuads);
@@ -413,10 +420,10 @@ export function buildGrid(s: CarSpec, lod: 'high' | 'low'): BodyGrid {
   };
   const tmp4 = [0, 0, 0, 0];
   for (let i = 0; i < M - 1; i++) {
-    for (let k = 0; k < N; k++) {
-      const k1 = (k + 1) % N;
-      const left = k < S - 1;
-      const band = left ? k : N - k - 1;
+    for (let k = 0; k < NN; k++) {
+      const k1 = (k + 1) % NN;
+      const left = k < SS - 1;
+      const band = left ? k : NN - k - 1;
       const corners = [
         [i, k],
         [i, k1],
@@ -425,21 +432,21 @@ export function buildGrid(s: CarSpec, lod: 'high' | 'low'): BodyGrid {
       ];
       for (let c = 0; c < 4; c++) {
         const [ii, kk] = corners[c];
-        const jj = kk <= S - 1 ? kk : N - kk;
-        const sideK = creaseSlot[jj] ? (jj === band ? 1 : 0) : 0;
+        const jj = kk <= SS - 1 ? kk : NN - kk;
+        const sideK = creaseSlot[sl[jj]] ? (jj === band ? 1 : 0) : 0;
         const sideI = stations[ii].crease ? (ii === i ? 1 : 0) : 0;
-        qv[q * 4 + c] = tmp4[c] = ii * N + kk;
+        qv[q * 4 + c] = tmp4[c] = ii * NN + kk;
         qvar[q * 4 + c] = sideK | (sideI << 1);
       }
       midOf(tmp4);
       info.kind = 0;
-      info.band = band;
+      info.band = sl[band];
       info.side = left ? 1 : -1;
       info.cf = 1;
       info.H = (H[i] + H[i + 1]) / 2;
       info.z = (stations[i].z + stations[i + 1].z) / 2;
-      qreg[q] = s.classify(info);
-      qband[q] = band;
+      qreg[q] = lod === 'high' && sl[band] === 0 ? R.SKIP : s.classify(info);
+      qband[q] = sl[band];
       qkind[q] = 0;
       qi[q] = i;
       qz[q] = info.z;
@@ -450,7 +457,7 @@ export function buildGrid(s: CarSpec, lod: 'high' | 'low'): BodyGrid {
     const iEnd = front ? M - 1 : 0;
     const loftSide = iEnd === 0 ? 1 : 0;
     const capSideI = stations[iEnd].crease ? 1 - loftSide : 0;
-    for (let j = 0; j < S - 1; j++) {
+    for (let j = 0; j < SS - 1; j++) {
       for (let c = 0; c < C; c++) {
         const corners: [number, number][] = front
           ? [
@@ -467,20 +474,20 @@ export function buildGrid(s: CarSpec, lod: 'high' | 'low'): BodyGrid {
             ];
         for (let t = 0; t < 4; t++) {
           const [jj, cc] = corners[t];
-          const sideK = creaseSlot[jj] ? (jj === j ? 1 : 0) : 0;
+          const sideK = creaseSlot[sl[jj]] ? (jj === j ? 1 : 0) : 0;
           const onLoft = cc === 0 || cc === C;
           qv[q * 4 + t] = tmp4[t] = capVert(front, jj, cc);
           qvar[q * 4 + t] = sideK | ((onLoft ? capSideI : 0) << 1);
         }
         midOf(tmp4);
         info.kind = front ? 1 : -1;
-        info.band = j;
+        info.band = sl[j];
         info.side = c < K ? 1 : -1;
         info.cf = (colCf[c] + colCf[c + 1]) / 2;
         info.H = H[iEnd];
         info.z = stations[iEnd].z;
         qreg[q] = s.classify(info);
-        qband[q] = j;
+        qband[q] = sl[j];
         qkind[q] = front ? 1 : -1;
         qi[q] = j;
         qz[q] = info.z;

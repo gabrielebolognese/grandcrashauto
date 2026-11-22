@@ -1,0 +1,594 @@
+/* Flight HUD + flight touch controls (part 2). Owner: ui. */
+
+.flight-hud {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, visibility 0s linear 0.3s;
+}
+.flight-hud.visible {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.3s;
+}
+.fl-tape {
+  position: absolute;
+  top: 50%;
+  width: 64px;
+  height: clamp(130px, 40vh, 230px);
+  transform: translateY(-46%);
+  filter: drop-shadow(0 4px 10px rgba(20, 28, 50, 0.3));
+}
+.fl-speed {
+  left: max(calc(var(--gl) + var(--mm) + 24px), 20%);
+}
+.fl-alt {
+  right: max(calc(var(--gr) + 150px), 22%);
+}
+.flight-hud.crashed .fl-tape,
+.flight-hud.crashed .fl-top {
+  opacity: 0.35;
+}
+.fl-top {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--gt) + 50px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.fl-hdg {
+  width: min(240px, 40vw);
+  height: 26px;
+  filter: drop-shadow(0 3px 8px rgba(20, 28, 50, 0.3));
+}
+.fl-status {
+  display: flex;
+  gap: 4px;
+}
+.fl-chip {
+  padding: 3px 7px;
+  border-radius: 6px;
+  font: 800 9.5px/1.1 var(--font);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: rgba(24, 34, 60, 0.55);
+  white-space: nowrap;
+}
+.fl-chip.warn {
+  color: #22304d;
+  background: var(--c-butter);
+}
+.fl-brk {
+  display: none;
+}
+.fl-brk.on {
+  display: inline;
+  color: #fff;
+  background: var(--c-coral);
+}
+.fl-alerts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+}
+.fl-stall {
+  display: none;
+  padding: 5px 14px;
+  border-radius: 7px;
+  font: 900 15px/1 var(--font-display);
+  letter-spacing: 0.3em;
+  padding-right: calc(14px - 0.3em);
+  color: #fff;
+  background: #e0362b;
+  box-shadow: 0 0 0 2px #fff, 0 0 18px rgba(224, 54, 43, 0.7);
+  animation: fl-blink 0.5s steps(2, jump-none) infinite;
+}
+.fl-stall.show {
+  display: block;
+}
+.fl-caution {
+  display: none;
+  padding: 6px 13px;
+  border-radius: 7px;
+  font: 900 12px/1 var(--font-display);
+  letter-spacing: 0.14em;
+  color: #3b2a00;
+  background: #ffc93a;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 6px 16px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+}
+.fl-caution.warning {
+  color: #fff;
+  background: #e0362b;
+}
+.fl-caution.show {
+  display: block;
+  animation: fl-blink 0.8s steps(2, jump-none) infinite;
+}
+.oom-banner {
+  display: none;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 7px 6px 13px;
+  border-radius: 999px;
+  font: 900 12.5px/1 var(--font-display);
+  letter-spacing: 0.14em;
+  color: #fff;
+  background: linear-gradient(180deg, #ff5a4c, #d4281e);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 8px 22px rgba(200, 30, 20, 0.45);
+  white-space: nowrap;
+}
+.oom-banner .ic {
+  width: 16px;
+  height: 16px;
+}
+.oom-banner.show {
+  display: inline-flex;
+}
+.oom-count {
+  min-width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 900 14px/1 var(--font-display);
+  letter-spacing: 0;
+  color: #d4281e;
+  background: #fff;
+}
+.oom-count:empty {
+  display: none;
+}
+.oom-banner.failing {
+  animation: fl-blink 0.6s steps(2, jump-none) infinite;
+}
+.oom-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s;
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(220, 30, 20, 0.28) 78%, rgba(200, 20, 10, 0.62) 100%);
+}
+.oom-vignette.on {
+  opacity: 1;
+  animation: oom-pulse 1.1s ease-in-out infinite;
+}
+.oom-vignette.failing {
+  animation-duration: 0.55s;
+}
+
+/* engine buttons (bottom centre, above the explode group) */
+.fl-engines {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(10px, var(--sb)) + 54px);
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+}
+.flight-hud.visible .fl-engines {
+  pointer-events: auto;
+}
+.eng-btn {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--c-ink);
+  background: radial-gradient(circle at 35% 30%, #fffdf6, var(--c-cream) 60%, #f0dcc4);
+  box-shadow: 0 0 0 2.5px #4fb894, 0 3px 0 rgba(34, 48, 77, 0.25), 0 6px 14px rgba(34, 48, 77, 0.25);
+  cursor: pointer;
+  touch-action: none;
+}
+.eng-num {
+  font: 900 16px/1 var(--font-display);
+}
+.eng-ic {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.eng-ic .ic {
+  width: 62%;
+  height: 62%;
+}
+.eng-btn:active {
+  transform: scale(0.93);
+}
+.eng-btn[data-status='fire'] {
+  color: #fff;
+  background: radial-gradient(circle at 40% 35%, #ffc35a, #ff5a2c 75%);
+  box-shadow: 0 0 0 2.5px #fff, 0 0 16px rgba(255, 90, 40, 0.85);
+  animation: fl-flicker 0.35s ease-in-out infinite alternate;
+}
+.eng-btn[data-status='fire'] .eng-num {
+  opacity: 0.35;
+}
+.eng-btn[data-status='fire'] .eng-ic {
+  color: #fff7cf;
+}
+.eng-btn[data-status='destroyed'],
+.eng-btn[data-status='detached'] {
+  color: #fff;
+  background: radial-gradient(circle at 40% 35%, #e85a4f, #9e2219 80%);
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.6);
+}
+.eng-btn[data-status='destroyed'] .eng-num,
+.eng-btn[data-status='detached'] .eng-num {
+  opacity: 0.4;
+}
+.eng-btn:disabled {
+  cursor: default;
+  pointer-events: none;
+}
+.eng-btn:disabled:not([data-status='destroyed']):not([data-status='detached']) {
+  opacity: 0.4;
+}
+
+/* crash choices */
+.crash-panel {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  transform: translate(-50%, -50%) scale(0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  border-radius: 18px;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, transform 0.4s var(--ease-back), visibility 0s linear 0.3s;
+}
+.crash-panel.show {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+  transition: opacity 0.3s, transform 0.4s var(--ease-back);
+}
+.cp-title {
+  font: 900 12px/1 var(--font-display);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--c-coral-d);
+}
+.cp-row {
+  display: flex;
+  gap: 8px;
+}
+.crash-btn {
+  appearance: none;
+  border: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px 0 11px;
+  border-radius: 14px;
+  font: 800 12px/1.1 var(--font);
+  color: var(--c-ink);
+  background: var(--c-white);
+  box-shadow: 0 3px 0 rgba(34, 48, 77, 0.18), inset 0 0 0 1.5px rgba(255, 170, 130, 0.5);
+  cursor: pointer;
+  text-align: left;
+}
+.crash-btn .ic {
+  width: 20px;
+  height: 20px;
+}
+.cb-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cb-label small {
+  font: 600 10px/1 var(--font);
+  color: var(--c-ink-soft);
+}
+.crash-btn.primary {
+  color: #fff;
+  background: linear-gradient(180deg, #ff9784, var(--c-coral));
+  box-shadow: 0 3px 0 var(--c-coral-d);
+}
+.crash-btn.primary small {
+  color: rgba(255, 255, 255, 0.85);
+}
+.crash-btn:active {
+  transform: translateY(2px);
+}
+
+/* skip (cockpit sequence) */
+.skip-btn {
+  appearance: none;
+  border: 0;
+  position: absolute;
+  right: var(--gr);
+  top: 50%;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 12px 0 16px;
+  border-radius: 999px;
+  font: 900 12px/1 var(--font-display);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(24, 34, 60, 0.7);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+}
+.skip-btn .ic {
+  width: 16px;
+  height: 16px;
+}
+.skip-btn.show {
+  display: inline-flex;
+  pointer-events: auto;
+}
+
+/* ───────────────────────────── flight touch controls ───────────────────────────── */
+.touch-layer.flight {
+  z-index: 2;
+}
+.fs-zone {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 36%;
+  top: 34%;
+}
+.touch-layer.flight.visible .fs-zone {
+  pointer-events: auto;
+}
+.touch-layer.flight.lefty .fs-zone {
+  left: auto;
+  right: 0;
+}
+.fs-base {
+  position: absolute;
+  left: calc(var(--sl) + 22px);
+  bottom: calc(var(--gb) + 10px);
+  width: calc(122px * var(--cs));
+  height: calc(122px * var(--cs));
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(28, 40, 68, 0.28) 0%, rgba(28, 40, 68, 0.5) 70%);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.75), 0 5px 14px rgba(34, 48, 77, 0.22);
+  will-change: transform;
+}
+.fs-base:not(.active) {
+  transition: transform 0.3s var(--ease-out), opacity 0.3s;
+}
+.touch-layer.flight.lefty .fs-base {
+  left: auto;
+  right: calc(var(--sr) + 22px);
+}
+.fs-cross {
+  position: absolute;
+  inset: 22%;
+  background: linear-gradient(rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.4)) center / 1.5px 100% no-repeat,
+    linear-gradient(rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.4)) center / 100% 1.5px no-repeat;
+}
+.fs-lbl {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 800 7.5px/1 var(--font);
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+}
+.fs-lbl.up {
+  top: 7px;
+}
+.fs-lbl.down {
+  bottom: 7px;
+}
+.fs-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(50px * var(--cs));
+  height: calc(50px * var(--cs));
+  margin: calc(-25px * var(--cs)) 0 0 calc(-25px * var(--cs));
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #4e6bff;
+  background: radial-gradient(circle at 34% 28%, #fffdf6, var(--c-cream) 58%, #f0dcc4);
+  box-shadow: 0 0 0 2.5px #6f86ff, 0 0 0 5px rgba(255, 255, 255, 0.45), 0 6px 14px rgba(34, 48, 77, 0.35);
+  transition: transform 0.35s var(--ease-back);
+}
+.fs-base.active .fs-knob {
+  transition: none;
+}
+.fs-knob .ic {
+  width: 52%;
+  height: 52%;
+}
+.fc-right {
+  position: absolute;
+  right: calc(var(--sr) + 14px);
+  bottom: calc(var(--gb) + 8px);
+  display: flex;
+  align-items: flex-end;
+  gap: calc(10px * var(--cs));
+}
+.touch-layer.flight.lefty .fc-right {
+  right: auto;
+  left: calc(var(--sl) + 14px);
+  flex-direction: row-reverse;
+}
+.fc-col {
+  display: flex;
+  flex-direction: column;
+  gap: calc(9px * var(--cs));
+}
+.touch-layer.flight.visible .fc-btn,
+.touch-layer.flight.visible .ft-track {
+  pointer-events: auto;
+}
+.fc-btn {
+  width: calc(64px * var(--cs));
+  height: calc(52px * var(--cs));
+  border-radius: calc(16px * var(--cs));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font: 900 calc(8.5px * var(--cs)) / 1 var(--font-display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #fff;
+}
+.fc-btn .ic {
+  width: calc(18px * var(--cs));
+  height: calc(18px * var(--cs));
+}
+.fc-brake {
+  background: linear-gradient(180deg, #ffa18e, #ec5a4b);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85), 0 4px 0 #c2463a, 0 7px 14px rgba(34, 48, 77, 0.28);
+}
+.fc-brake.on {
+  box-shadow: inset 0 0 0 2px #fff, 0 4px 0 #c2463a, 0 0 14px rgba(255, 122, 107, 0.8);
+}
+.fc-gear {
+  color: #22304d;
+  background: linear-gradient(180deg, #fff3c9, #ffd77a);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 4px 0 #d29a33, 0 7px 14px rgba(34, 48, 77, 0.26);
+}
+.fc-gear.up {
+  color: #fff;
+  background: linear-gradient(180deg, #7d95ff, #4e6bff);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.8), 0 4px 0 #3049c4, 0 7px 14px rgba(34, 48, 77, 0.26);
+}
+.fc-btn.down {
+  transform: translateY(2px) scale(0.96);
+  filter: brightness(1.08);
+}
+.ft-track {
+  --v: 0;
+  position: relative;
+  width: calc(52px * var(--cs));
+  height: calc(176px * var(--cs));
+  border-radius: calc(16px * var(--cs));
+  background: rgba(28, 40, 68, 0.5);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.75), 0 5px 14px rgba(34, 48, 77, 0.22);
+  overflow: hidden;
+}
+.ft-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--v) * 100%);
+  background: linear-gradient(0deg, rgba(92, 200, 214, 0.75), rgba(255, 179, 107, 0.85));
+}
+.ft-detent {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: calc(6% + 6px);
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.75);
+}
+.ft-idle,
+.ft-max {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font: 800 7px/1 var(--font);
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.8);
+  pointer-events: none;
+}
+.ft-idle {
+  bottom: 4px;
+}
+.ft-max {
+  top: 5px;
+}
+.ft-knob {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: calc(var(--v) * (100% - 30px));
+  height: 30px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 35% 30%, #fffdf6, var(--c-cream) 60%, #f0dcc4);
+  box-shadow: 0 0 0 2px #ff9a6b, 0 3px 8px rgba(34, 48, 77, 0.35);
+  pointer-events: none;
+}
+.ft-val {
+  font: 900 10px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  color: var(--c-ink);
+}
+.ft-track.active .ft-knob {
+  box-shadow: 0 0 0 2.5px #ff7a4b, 0 0 14px rgba(255, 140, 80, 0.7);
+}
+
+@keyframes fl-blink {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.35;
+  }
+}
+@keyframes fl-flicker {
+  from {
+    filter: brightness(1);
+  }
+  to {
+    filter: brightness(1.25);
+  }
+}
+@keyframes oom-pulse {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (max-height: 400px) {
+  .fl-tape {
+    height: clamp(120px, 36vh, 170px);
+    width: 58px;
+  }
+  .ft-track {
+    height: calc(150px * var(--cs));
+  }
+}

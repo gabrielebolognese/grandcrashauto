@@ -345,7 +345,7 @@ export class VehicleFx {
         s.size0 = rnd(0.26, 0.38) * cfg.size;
         s.size1 = 0.08 * cfg.size;
         s.stretch = 0.03;
-        s.heat = rnd(1.4, 2.0);
+        s.heat = rnd(1.1, 1.5);
         s.cell = CELL.FLAME_A;
         s.ramp = RAMP.TURBO;
         kit.glow.emit(s, now);
@@ -356,8 +356,8 @@ export class VehicleFx {
       s.vy = vel.y;
       s.vz = vel.z;
       s.life = Math.max(0.03, dt * 1.5);
-      s.size0 = s.size1 = rnd(0.35, 0.5) * cfg.size;
-      s.heat = 1.1;
+      s.size0 = s.size1 = rnd(0.24, 0.32) * cfg.size;
+      s.heat = 1.0;
       s.cell = CELL.GLOW;
       s.ramp = RAMP.TURBO;
       s.tint(0.6, 0.8, 1, 0.9);
@@ -537,7 +537,7 @@ export class VehicleFx {
         s.life = 0.22;
         s.size0 = s.size1 = 0.16;
         s.stretch = 0.07;
-        s.heat = 1.5;
+        s.heat = 1.0;
         s.cell = CELL.SPARK;
         s.ramp = RAMP.TAIL;
         kit.glow.emit(s, now);

@@ -1,5 +1,6 @@
 import type { CityData, DistrictId } from '../types';
 import type { StreetProfile } from './layout';
+import type { AirportModel } from './airport';
 
 /** Internal layout model shared by the generator, renderers, physics and queries. Pure data (no three.js). */
 
@@ -172,6 +173,8 @@ export interface Highway {
   halfW: number;
   /** s ranges with no inner barrier (ramp merges, spur). */
   innerGaps: [number, number][];
+  /** s ranges with no outer barrier (exits). */
+  outerGaps: [number, number][];
   pillars: { x: number; z: number; s: number }[];
 }
 
@@ -210,6 +213,8 @@ export interface CityLayout {
   hwEdges: Set<number>;
   /** Per-edge profile lookup (lane offset for respawn). */
   edgeLaneOffset: Map<number, number>;
+  /** Airport (part 2/3). */
+  airport: AirportModel | null;
 }
 
 export const Mat = {

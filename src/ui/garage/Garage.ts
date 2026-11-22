@@ -27,6 +27,7 @@ export class Garage implements IGarage, GarageHost {
   private dirty = false;
   private spin = 0;
   private prevRenderScale = 1;
+  private prevExposure = 1;
   private insetsDirty = true;
 
   constructor(private ctx: GameContext) {}
@@ -66,6 +67,8 @@ export class Garage implements IGarage, GarageHost {
     // The garage is a still scene: render it crisp (up to the player's render-scale cap), restore on close.
     this.prevRenderScale = engine.getRenderScale();
     engine.setRenderScale(Math.max(this.prevRenderScale, Math.min(1, this.ctx.settings.values.renderScale ?? 1)));
+    this.prevExposure = engine.renderer.toneMappingExposure;
+    engine.renderer.toneMappingExposure = CONFIG.garage.exposure;
     this.ui.show();
     this.ui.refresh(this.build);
     this.updateInsets();
@@ -82,6 +85,7 @@ export class Garage implements IGarage, GarageHost {
     this.ui?.hide();
     this.ctx.engine.setView(null);
     this.ctx.engine.setRenderScale(this.prevRenderScale);
+    this.ctx.engine.renderer.toneMappingExposure = this.prevExposure;
     this.ctx.save.update((d) => (d.garage.current = cloneBuild(this.build)));
   }
 
@@ -96,6 +100,7 @@ export class Garage implements IGarage, GarageHost {
     const cfg = CONFIG.garage;
     const want = this.orbit.interacting || this.orbit.idle < cfg.idleResume ? 0 : cfg.turntableSpeed;
     this.spin += (want - this.spin) * (1 - Math.exp(-dt * (want > this.spin ? 0.9 : 7)));
+    this.ctx.engine.renderer.toneMappingExposure = CONFIG.garage.exposure;
     this.scene3d.update(dt, this.spin);
   }
 

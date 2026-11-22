@@ -7,7 +7,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { readFile, stat, readdir, rm, mkdir } from 'node:fs/promises';
+import { readFile, stat, readdir, rm, mkdir, appendFile, cp } from 'node:fs/promises';
 import { tmpdir, networkInterfaces } from 'node:os';
 import { join, extname, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,8 +20,10 @@ const opt = (n, d) => {
 };
 const PORT = Number(opt('port', '5999'));
 const INTERVAL = Number(opt('interval', '90')) * 1000;
-const base = join(tmpdir(), 'crashgame-live');
+// Every published build is KEPT in the archive (timelapse compilation later) — outside OneDrive on purpose.
+const base = opt('archive', join(process.env.USERPROFILE || tmpdir(), 'crashgame-timelapse', 'builds'));
 await mkdir(base, { recursive: true });
+const manifest = join(base, 'manifest.jsonl');
 
 let current = null; // dir of the last good build
 let version = 0;
@@ -35,8 +37,11 @@ const seed = opt('seed', '');
 if (seed) {
   try {
     await stat(join(seed, 'index.html'));
-    current = seed;
-    builtAt = 'last commit';
+    const keep = join(base, `build-seed-${Date.now()}`);
+    await cp(seed, keep, { recursive: true }).catch(() => {});
+    current = keep;
+    builtAt = 'seed';
+    await appendFile(manifest, JSON.stringify({ version: 0, dir: keep, time: new Date().toISOString(), seed: true }) + String.fromCharCode(10)).catch(() => {});
     console.log('[live] serving seed build', seed);
   } catch {
     console.log('[live] seed not found', seed);
@@ -84,7 +89,8 @@ async function tick(force = false) {
       builtAt = new Date().toLocaleTimeString();
       lastError = '';
       console.log(`[live] build #${version} published in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-      if (old) setTimeout(() => rm(old, { recursive: true, force: true }).catch(() => {}), 60_000);
+      await appendFile(manifest, JSON.stringify({ version, dir, time: new Date().toISOString(), buildSec: (Date.now() - t0) / 1000 }) + String.fromCharCode(10)).catch(() => {});
+      void old; // kept for the timelapse
     } else {
       lastError = r.out.replace(/\u001b\[[0-9;]*m/g, '').split('\n').filter((l) => /error|Error|\.ts/.test(l)).slice(0, 3).join(' | ');
       console.log(`[live] build failed (keeping #${version}): ${lastError.slice(0, 200)}`);

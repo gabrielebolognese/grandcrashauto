@@ -91,7 +91,7 @@ export function buildHighway(): Highway {
     const bank = bankMax * (1 - smooth(0, HW.bankRamp, dArc));
     samples.push({ s, x: pt.x, z: pt.z, fx: pt.fx, fz: pt.fz, e: HW.gradeY + hwElevation(pt.z), bank });
   }
-  const hw: Highway = { samples, length: total, halfW: HW.halfW, innerGaps: [], pillars: [] };
+  const hw: Highway = { samples, length: total, halfW: HW.halfW, innerGaps: [], outerGaps: [], pillars: [] };
   // viaduct pillars under the south leg (median of the street below)
   for (const x of VIADUCT_PILLARS_X) hw.pillars.push({ x, z: HW.zSouth, s: nearestS(hw, x, HW.zSouth) });
   return hw;

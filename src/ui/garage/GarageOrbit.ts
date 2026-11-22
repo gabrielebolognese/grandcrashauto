@@ -113,9 +113,10 @@ export class GarageOrbit {
     const len = Math.max(s.x, s.z);
     const p = this.pitch;
     const halfV = (s.y * Math.cos(p) + len * Math.sin(p)) / 2;
-    const dV = halfV / tv + len * 0.35;
-    const dH = (len * 0.55) / th + s.x * 0.5;
-    return Math.max(dV, dH) * 1.08;
+    // + a share of the length: when the car points at the camera its near end is closer (perspective headroom).
+    const dV = halfV / tv + len * 0.32;
+    const dH = (len * 0.5) / th + len * 0.32;
+    return Math.max(dV, dH) * 1.04;
   }
 
   update(dt: number): void {

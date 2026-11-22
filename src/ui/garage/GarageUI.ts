@@ -6,6 +6,7 @@ import {
   STRIPE_STYLES,
   TYRE_PROFILES,
   sanitizePlate,
+  STOCK_BUILD,
   type CarBuild,
   type CarModelId,
   type PaintFinish,
@@ -71,6 +72,7 @@ const TYRE_LABEL: Record<TyreProfile, string> = { low: 'Low', mid: 'Mid', high: 
 const SIZE_LABEL = ['S', 'M', 'L'];
 const SIZE_TITLE = ['Small wheels', 'Medium wheels', 'Large wheels'];
 const PERF_LEVELS_LABEL = ['Stock', 'Street', 'Race'];
+const STOCK_PERF: CarBuild['perf'] = { ...STOCK_BUILD.perf };
 const TARGET_LABEL: Record<ColorTarget, string> = {
   color: 'Body colour',
   shiftColor: 'Shift colour',
@@ -196,6 +198,7 @@ export class GarageUI {
     this.buildTop();
     this.buildHint();
     this.buildDock();
+    this.buildSpecCard();
     document.body.appendChild(this.root);
     this.selectTab('car', false);
     if (typeof ResizeObserver !== 'undefined') {
@@ -210,7 +213,10 @@ export class GarageUI {
     this.root.classList.remove('gar-hidden');
     this.root.setAttribute('aria-hidden', 'false');
     this.root.classList.add('gar-entering');
-    window.setTimeout(() => this.root.classList.remove('gar-entering'), 700);
+    window.setTimeout(() => {
+      this.root.classList.remove('gar-entering');
+      this.host.layoutChanged();
+    }, 700);
     this.hint.classList.remove('is-gone');
     clearTimeout(this.hintTimer);
     this.hintTimer = window.setTimeout(() => this.hideHint(), 4500);
@@ -235,12 +241,11 @@ export class GarageUI {
 
   /** Screen insets (CSS px) covered by UI at the top and bottom — the camera frames the car in between. */
   getInsets(): { top: number; bottom: number } {
-    const H = window.innerHeight;
-    const topRect = this.top.getBoundingClientRect();
-    const dockRect = this.dock.getBoundingClientRect();
-    const panelRect = this.panel.getBoundingClientRect();
-    const dockTop = this.collapsed ? dockRect.top + panelRect.height : dockRect.top;
-    return { top: Math.max(0, topRect.bottom * 0.55), bottom: Math.max(0, H - dockTop + 4) };
+    // Layout offsets, not bounding rects: the bars slide in with transforms when the garage opens.
+    const top = this.top.offsetTop + this.top.offsetHeight;
+    let bottom = this.dock.offsetHeight;
+    if (this.collapsed) bottom -= this.panel.offsetHeight; // final size while the collapse animates
+    return { top: Math.max(0, top * 0.55), bottom: Math.max(0, bottom + 4) };
   }
 
   get activeTab(): GarageTab {
@@ -255,6 +260,7 @@ export class GarageUI {
       return;
     }
     this.tab = id;
+    this.root.dataset.tab = id;
     if (this.collapsed) this.setCollapsed(false);
     for (const [t, b] of this.tabButtons) {
       const on = t === id;
@@ -281,7 +287,8 @@ export class GarageUI {
   // ───────────────────────────── top bar ─────────────────────────────
   private buildTop(): void {
     this.top = el('div', 'gar-top');
-    const left = el('div', 'gar-tl');
+    // Left: one pill = back + title.
+    const left = el('div', 'gar-tl gar-pill');
     const back = button('gar-iconbtn gar-back', ICONS.back, 'Back to menu');
     back.addEventListener('click', () => this.host.back());
     const title = el('div', 'gar-title');
@@ -290,30 +297,35 @@ export class GarageUI {
     title.appendChild(this.carName);
     left.append(back, title);
 
+    // Right: secondary actions grouped in one capsule, then the primary DRIVE button.
     const right = el('div', 'gar-tr');
+    const group = el('div', 'gar-pill gar-actions');
+    const spinOn = (b: HTMLElement) => {
+      b.classList.remove('is-spin');
+      void b.offsetWidth;
+      b.classList.add('is-spin');
+    };
     const rnd = button('gar-iconbtn gar-rnd', ICONS.dice, 'Randomize');
     rnd.addEventListener('click', () => {
-      rnd.classList.remove('is-spin');
-      void rnd.offsetWidth;
-      rnd.classList.add('is-spin');
+      spinOn(rnd);
       this.host.randomize();
     });
     const stock = button('gar-iconbtn gar-stock', ICONS.reset, 'Reset to stock');
     stock.addEventListener('click', () => {
-      stock.classList.remove('is-spin');
-      void stock.offsetWidth;
-      stock.classList.add('is-spin');
+      spinOn(stock);
       this.host.stock();
     });
+    group.append(rnd, el('i', 'gar-pill-sep'), stock);
     const drive = button('gar-drive', `<span>DRIVE</span>${ICONS.drive}`, 'Drive this car');
     drive.addEventListener('click', () => this.host.drive());
-    right.append(rnd, stock, drive);
+    right.append(group, drive);
     this.top.append(left, right);
     this.root.appendChild(this.top);
   }
 
   private buildHint(): void {
-    this.hint = el('div', 'gar-hint', `<span>Drag to rotate</span><i></i><span>Pinch or scroll to zoom</span>`);
+    const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    this.hint = el('div', 'gar-hint', touch ? '<span>Swipe to rotate</span><i></i><span>Pinch to zoom</span>' : '<span>Drag to rotate</span><i></i><span>Scroll to zoom</span><i></i><span>Double-click to reset</span>');
     this.root.appendChild(this.hint);
   }
 
@@ -669,7 +681,7 @@ export class GarageUI {
       card.innerHTML = `<div class="gar-model-art">${modelSilhouette(id)}</div><div class="gar-model-text"><b>${info?.name ?? id}</b><small>${info?.description ?? ''}</small></div><i class="gar-model-check">${ICONS.check}</i>`;
       const bars = this.statBars((b) => {
         const mb = { ...b, model: id };
-        return { s: computeStats(mb), base: computeStats({ ...mb, perf: { engine: 0, tyres: 0, brakes: 0, suspension: 0 } }) };
+        return { s: computeStats(mb), base: computeStats({ ...mb, perf: { ...STOCK_PERF } }) };
       }, true);
       card.querySelector('.gar-model-text')!.appendChild(bars);
       card.addEventListener('click', () => {
@@ -919,6 +931,7 @@ export class GarageUI {
     const grid = el('div', 'gar-perfgrid');
     const cats: { key: keyof CarBuild['perf']; label: string }[] = [
       { key: 'engine', label: 'Engine' },
+      { key: 'turbo', label: 'Turbo' },
       { key: 'tyres', label: 'Tyres' },
       { key: 'brakes', label: 'Brakes' },
       { key: 'suspension', label: 'Suspension' },
@@ -929,16 +942,42 @@ export class GarageUI {
       ctl.appendChild(
         this.chips(
           [0, 1, 2].map((lvl) => ({ value: lvl, label: PERF_LEVELS_LABEL[lvl], icon: `<i class="gar-pips gar-pips-${lvl}"><i></i><i></i><i></i></i>`, title: `${c.label}: ${PERF_LEVELS_LABEL[lvl]}` })),
-          (b) => b.perf[c.key],
+          (b) => b.perf[c.key] ?? 0,
           (b, v) => (b.perf[c.key] = v),
           'gar-perfchip',
         ),
       );
       grid.appendChild(ctl);
     }
-    const stats = this.statBars((b) => ({ s: computeStats(b), base: computeStats({ ...b, perf: { engine: 0, tyres: 0, brakes: 0, suspension: 0 } }) }), false);
-    p.append(grid, stats);
+    // Quick presets in the sixth cell.
+    const quick = el('div', 'gar-perfctl gar-perfquick');
+    quick.appendChild(el('span', 'gar-perflabel', 'Preset'));
+    const preset = (label: string, lvl: number) => {
+      const b = button('gar-chip gar-perfchip gar-presetchip', `${ICONS.bolt}<span>${label}</span>`, `${label}: every part`);
+      b.addEventListener('click', () =>
+        this.host.change((x) => {
+          for (const c of cats) x.perf[c.key] = lvl;
+        }, 'confirm'),
+      );
+      this.refreshers.push((x) => b.classList.toggle('is-on', cats.every((c) => (x.perf[c.key] ?? 0) === lvl)));
+      return b;
+    };
+    const qc = el('div', 'gar-chips');
+    qc.append(preset('All stock', 0), preset('Full race', 2));
+    quick.appendChild(qc);
+    grid.appendChild(quick);
+    p.append(grid);
     return p;
+  }
+
+  /** Floating spec sheet (stat bars) shown over the scene while the Performance tab is open. */
+  private buildSpecCard(): void {
+    const card = el('div', 'gar-spec');
+    card.innerHTML = '<div class="gar-spec-head"><span class="gar-kicker">SPEC SHEET</span><b class="gar-spec-model"></b></div>';
+    const model = card.querySelector('.gar-spec-model') as HTMLElement;
+    card.appendChild(this.statBars((b) => ({ s: computeStats(b), base: computeStats({ ...b, perf: { ...STOCK_PERF } }) }), false));
+    this.refreshers.push((b) => (model.textContent = this.host.models.find((m) => m.id === b.model)?.name ?? b.model));
+    this.root.appendChild(card);
   }
 
   private pageSave(): HTMLDivElement {

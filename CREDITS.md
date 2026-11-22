@@ -1,6 +1,6 @@
 # Credits
 
-**Coastline** (working title) is an original game. The city, cars, characters, brands, UI and sounds are all original
+**Grand Crash Auto** (grandcrashauto.lol) is an original game. The city, cars, characters, brands, UI and sounds are all original
 and **generated in code at runtime** — the repository ships no third-party art, models, textures, fonts or audio files.
 
 ## Third-party software

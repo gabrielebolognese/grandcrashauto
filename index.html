@@ -8,8 +8,13 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="format-detection" content="telephone=no" />
-    <meta name="description" content="Coastline — a sunny low-poly city driving sandbox. Drive, customize, crash." />
-    <title>Coastline</title>
+    <meta name="description" content="Grand Crash Auto — a sunny 3D driving, flying and crashing sandbox in your browser. Drive, fly, customize, crash." />
+    <meta property="og:title" content="Grand Crash Auto" />
+    <meta property="og:description" content="Drive, fly, customize and crash in a sunny endless coastal world — free in your browser." />
+    <meta property="og:url" content="https://grandcrashauto.lol/" />
+    <meta property="og:type" content="website" />
+    <link rel="canonical" href="https://grandcrashauto.lol/" />
+    <title>Grand Crash Auto</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icon.svg" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23ff8a5b'/%3E%3Cpath d='M10 40h44l-6-12H22z' fill='%23fff'/%3E%3Ccircle cx='22' cy='42' r='5' fill='%23333'/%3E%3Ccircle cx='44' cy='42' r='5' fill='%23333'/%3E%3C/svg%3E" />
@@ -27,7 +32,7 @@
         position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center;
         background: linear-gradient(180deg, #7cc6ea 0%, #bfe6f3 55%, #ffd9a8 100%); color: #20324a; text-align: center;
       }
-      #boot h1 { font-size: clamp(36px, 9vmin, 84px); letter-spacing: .08em; margin: 0 0 .2em; font-weight: 800; color: #fff; text-shadow: 0 4px 0 #ff8a5b, 0 8px 24px rgba(0,0,0,.18); }
+      #boot h1 { font-size: clamp(28px, 7.5vmin, 76px); letter-spacing: .06em; text-align: center; padding: 0 12px; margin: 0 0 .2em; font-weight: 800; color: #fff; text-shadow: 0 4px 0 #ff8a5b, 0 8px 24px rgba(0,0,0,.18); }
       #boot .bar { width: min(60vw, 420px); height: 10px; border-radius: 6px; background: rgba(255,255,255,.55); overflow: hidden; }
       #boot .bar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #ff8a5b, #ffb36b); transition: width .25s; }
       #boot .label { margin-top: 12px; font-size: 14px; opacity: .75; min-height: 1.2em; }
@@ -39,7 +44,7 @@
     <div id="app"></div>
     <div id="ui-root"></div>
     <div id="boot">
-      <h1>COASTLINE</h1>
+      <h1>GRAND CRASH AUTO</h1>
       <div class="bar"><i id="boot-bar"></i></div>
       <div class="label" id="boot-label">Loading…</div>
     </div>

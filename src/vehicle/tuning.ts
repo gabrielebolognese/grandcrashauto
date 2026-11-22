@@ -14,6 +14,8 @@ export interface CarStats {
   accel: number; // 0..1 bar
   grip: number; // 0..1 bar
   braking: number; // 0..1 bar
+  turboTopSpeedKmh: number; // part 3: top speed while boosting
+  turbo: number; // 0..1 bar (turbo push + top speed)
 }
 
 /** Fully resolved physics parameters for one build (+ actual model dimensions when spawned). */
@@ -179,7 +181,10 @@ export function forceAtRpm(p: VehicleParams, ratio: number, rpm: number, boost =
 /** Total drive force (N) at full throttle and a road speed in a given gear (no turbo lag: full boost). */
 export function driveForceAt(p: VehicleParams, gearIndex: number, speed: number, boost = 1): number {
   const ratio = p.gears[gearIndex];
-  return forceAtRpm(p, ratio, Math.max(p.idleRpm, rpmAtSpeed(p, ratio, speed)), boost);
+  const rpm = Math.max(p.idleRpm, rpmAtSpeed(p, ratio, speed));
+  let f = forceAtRpm(p, ratio, rpm, boost);
+  if (gearIndex === 4) f *= Math.min(1, Math.max(0, (1 - rpm / p.redlineRpm) / Math.max(0.005, CONFIG.vehicle.engine.topGearSoftLimit)));
+  return f;
 }
 
 /** Predicted top speed (m/s): highest speed where some gear's drive force still beats drag + rolling resistance. */
@@ -231,7 +236,13 @@ export function computeStats(build: CarBuild): CarStats {
   const t100 = simulateZeroToHundred(p);
   const mu = (p.gripFront + p.gripRear) * 0.5 * Math.sqrt((p.sideFront + p.sideRear) * 0.5);
   const decel = p.brakeForce / p.mass;
+  const T = CONFIG.vehicle.turbo;
+  const lt = build.perf.turbo ?? 0;
+  const turboTop = top * (T.topFactor + (lt >= 2 ? T.perfTop2 : lt >= 1 ? T.perfTop1 : 0));
+  const turboAccel = T.accel * (lt >= 2 ? T.perfAccel2 : lt >= 1 ? T.perfAccel1 : 1);
   return {
+    turboTopSpeedKmh: Math.round(turboTop),
+    turbo: clamp01(((turboTop - 260) / (420 - 260)) * 0.5 + ((turboAccel - 5) / (11 - 5)) * 0.5),
     topSpeedKmh: Math.round(top),
     topSpeed: clamp01((top - 140) / (250 - 140)),
     accel: clamp01((11 - t100) / (11 - 3.5)),

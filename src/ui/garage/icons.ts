@@ -32,62 +32,52 @@ export const ICONS = {
 export type IconName = keyof typeof ICONS;
 
 // ───────────────────────────── rims ─────────────────────────────
-export const RIM_NAMES = ['Star', 'Mesh', 'Turbine', 'Twin', 'Steelie', 'Aero'];
+/** Same order/names as the car models' rim designs (src/vehicle/models/wheels.ts RIM_NAMES). */
+export const RIM_NAMES = ['Velo 5', 'Lattice', 'Deep Dish', 'Turbine', 'Split Ten', 'Steelie'];
 
-/** Small procedural rim drawing for each design index (40×40). */
+/** Small procedural rim drawing for each design index (40×40), mirroring the 3D designs. */
 export function rimIcon(i: number): string {
   const c = 20;
+  const tau = Math.PI * 2;
   const parts: string[] = [`<circle cx="${c}" cy="${c}" r="17" fill="none" stroke="currentColor" stroke-width="3.2"/>`];
   const spoke = (a: number, w: number, r0 = 4, r1 = 15.5) => {
     const ca = Math.cos(a), sa = Math.sin(a);
     return `<line x1="${(c + ca * r0).toFixed(2)}" y1="${(c + sa * r0).toFixed(2)}" x2="${(c + ca * r1).toFixed(2)}" y2="${(c + sa * r1).toFixed(2)}" stroke="currentColor" stroke-width="${w}" stroke-linecap="round"/>`;
   };
-  const tau = Math.PI * 2;
   switch (i) {
-    case 0: // star 5-spoke
+    case 0: // Velo 5: five wide spokes
       for (let k = 0; k < 5; k++) parts.push(spoke((k / 5) * tau - Math.PI / 2, 4.6));
       break;
-    case 1: // mesh
+    case 1: // Lattice: twelve slim spokes
+      for (let k = 0; k < 12; k++) parts.push(spoke((k / 12) * tau, 1.6));
+      break;
+    case 2: // Deep Dish: polished lip + small spoked centre
+      parts.push(`<circle cx="${c}" cy="${c}" r="13.6" fill="none" stroke="currentColor" stroke-width="4" opacity=".45"/>`);
+      parts.push(`<circle cx="${c}" cy="${c}" r="11" fill="none" stroke="currentColor" stroke-width="1.6"/>`);
+      for (let k = 0; k < 8; k++) parts.push(spoke((k / 8) * tau, 2.2, 3.5, 10.5));
+      break;
+    case 3: // Turbine: ten twisted vanes
       for (let k = 0; k < 10; k++) {
         const a = (k / 10) * tau;
-        parts.push(spoke(a, 1.5));
-        parts.push(spoke(a + 0.32, 1.2, 8, 15.5));
-      }
-      break;
-    case 2: {
-      // turbine vanes
-      for (let k = 0; k < 9; k++) {
-        const a = (k / 9) * tau;
         const x0 = c + Math.cos(a) * 5, y0 = c + Math.sin(a) * 5;
-        const x1 = c + Math.cos(a + 0.9) * 15, y1 = c + Math.sin(a + 0.9) * 15;
-        const cx = c + Math.cos(a + 0.2) * 12, cy = c + Math.sin(a + 0.2) * 12;
-        parts.push(`<path d="M${x0.toFixed(2)} ${y0.toFixed(2)} Q${cx.toFixed(2)} ${cy.toFixed(2)} ${x1.toFixed(2)} ${y1.toFixed(2)}" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/>`);
+        const x1 = c + Math.cos(a + 0.75) * 15, y1 = c + Math.sin(a + 0.75) * 15;
+        const qx = c + Math.cos(a + 0.18) * 11.5, qy = c + Math.sin(a + 0.18) * 11.5;
+        parts.push(`<path d="M${x0.toFixed(2)} ${y0.toFixed(2)} Q${qx.toFixed(2)} ${qy.toFixed(2)} ${x1.toFixed(2)} ${y1.toFixed(2)}" stroke="currentColor" stroke-width="2.3" fill="none" stroke-linecap="round"/>`);
       }
       break;
-    }
-    case 3: // twin 6-spoke
-      for (let k = 0; k < 6; k++) {
-        const a = (k / 6) * tau;
-        parts.push(spoke(a - 0.13, 2), spoke(a + 0.13, 2));
+    case 4: // Split Ten: five split pairs
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * tau - Math.PI / 2;
+        parts.push(spoke(a - 0.16, 1.9), spoke(a + 0.16, 1.9));
       }
       break;
-    case 4: // steelie: solid with round holes
+    default: // Steelie: solid disc with eight round holes
       parts.push(`<circle cx="${c}" cy="${c}" r="15" fill="currentColor" opacity=".9"/>`);
-      for (let k = 0; k < 6; k++) {
-        const a = (k / 6) * tau;
-        parts.push(`<circle cx="${(c + Math.cos(a) * 9.5).toFixed(2)}" cy="${(c + Math.sin(a) * 9.5).toFixed(2)}" r="2.4" fill="var(--gar-chipbg, #fff)"/>`);
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * tau + Math.PI / 8;
+        parts.push(`<circle cx="${(c + Math.cos(a) * 9.4).toFixed(2)}" cy="${(c + Math.sin(a) * 9.4).toFixed(2)}" r="2" fill="var(--gar-chipbg, #fff)"/>`);
       }
-      parts.push(`<circle cx="${c}" cy="${c}" r="4" fill="var(--gar-chipbg, #fff)"/><circle cx="${c}" cy="${c}" r="2" fill="currentColor"/>`);
-      break;
-    default: // aero disc with slots
-      parts.push(`<circle cx="${c}" cy="${c}" r="15" fill="currentColor" opacity=".9"/>`);
-      for (let k = 0; k < 3; k++) {
-        const a = (k / 3) * tau;
-        const x0 = c + Math.cos(a) * 11, y0 = c + Math.sin(a) * 11;
-        const x1 = c + Math.cos(a + 1.3) * 11, y1 = c + Math.sin(a + 1.3) * 11;
-        parts.push(`<path d="M${x0.toFixed(2)} ${y0.toFixed(2)} A11 11 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}" stroke="var(--gar-chipbg, #fff)" stroke-width="3" fill="none" stroke-linecap="round"/>`);
-      }
-      parts.push(`<circle cx="${c}" cy="${c}" r="3" fill="var(--gar-chipbg, #fff)"/>`);
+      parts.push(`<circle cx="${c}" cy="${c}" r="4.2" fill="var(--gar-chipbg, #fff)"/><circle cx="${c}" cy="${c}" r="2.4" fill="currentColor"/>`);
   }
   parts.push(`<circle cx="${c}" cy="${c}" r="2.6" fill="currentColor"/>`);
   return `<svg class="gar-rimico" viewBox="0 0 40 40" aria-hidden="true">${parts.join('')}</svg>`;

@@ -125,6 +125,22 @@ export class PedNav {
     return this.edges.length === 0;
   }
 
+  /** Floating origin: move every cached coordinate by -(dx, dz). Grids keep their cell lists (uniform shift). */
+  shift(dx: number, dz: number): void {
+    for (const n of this.nodes) {
+      n.x -= dx;
+      n.z -= dz;
+    }
+    this.gMinX -= dx;
+    this.gMinZ -= dz;
+    this.oMinX -= dx;
+    this.oMinZ -= dz;
+    for (let o = 0; o < this.obs.length; o += 7) {
+      this.obs[o + 1] -= dx;
+      this.obs[o + 2] -= dz;
+    }
+  }
+
   nearestNode(x: number, z: number): number {
     let best = -1, bd = Infinity;
     for (let i = 0; i < this.nodes.length; i++) {

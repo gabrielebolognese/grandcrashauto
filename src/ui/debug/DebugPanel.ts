@@ -391,5 +391,8 @@ function teleportTargets(c: GameContext): { label: string; pose: Pose }[] {
     }
     if (best) out.push({ label, pose: best });
   }
+  if (d.airport?.carPark) out.push({ label: 'Airport', pose: d.airport.carPark });
+  // Part 3 points of interest (local poses): highway landmarks, terrain viewpoints.
+  for (const p of [...(c.highways?.pois ?? []).slice(0, 6), ...(c.terrain?.pois ?? []).slice(0, 4)]) out.push({ label: p.name, pose: p.pose });
   return out;
 }

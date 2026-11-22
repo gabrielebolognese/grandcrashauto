@@ -1,0 +1,32 @@
+# Netlify: connect the GitHub repo (gabrielebolognese/grandcrashauto), then add the custom domain grandcrashauto.lol.
+[build]
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Playwright is a dev-only dependency for local smoke tests; never download browsers on Netlify.
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+
+# www → apex
+[[redirects]]
+  from = "https://www.grandcrashauto.lol/*"
+  to = "https://grandcrashauto.lol/:splat"
+  status = 301
+  force = true
+
+# Hashed build assets never change: cache them forever. index.html always revalidates.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/*.wasm"
+  [headers.values]
+    Content-Type = "application/wasm"

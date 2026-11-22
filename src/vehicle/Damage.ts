@@ -18,6 +18,8 @@ export interface DamageHost {
   readonly halfLength: number;
   hangBumper(end: 'F' | 'R'): void;
   detachBumper(end: 'F' | 'R'): void;
+  /** The chassis body touched something (belly = landing/bottoming on the ground). */
+  onChassisHit?(belly: boolean, strength: number): void;
 }
 
 const HARD: ReadonlySet<SurfaceMaterial> = new Set<SurfaceMaterial>(['concrete', 'asphalt', 'metal', 'glass']);
@@ -113,6 +115,7 @@ export class Damage {
     const carUp = this.up.set(0, 1, 0).applyQuaternion(this.q);
     const belly = normal.dot(carUp) > 0.7 && normal.y > 0.6; // landing / bottoming out on the ground
     const material: SurfaceMaterial = otherTag?.material ?? 'concrete';
+    if (normal.y > 0.5) this.host.onChassisHit?.(belly, force);
 
     // Sliding speed along the surface (relative to the other body if it moves).
     const vp = body.velocityAtPoint(point, this.rv);
@@ -188,6 +191,19 @@ export class Damage {
         this.host.hangBumper(end);
       }
     }
+  }
+
+  /** Crash landing / big tumble: dent the roof area and break glass (no contact data needed). */
+  crash(strength: number): void {
+    const body = this.host.chassis;
+    if (!body || this.host.exploded) return;
+    const t = body.translation();
+    const r = body.rotation();
+    this.q.set(r.x, r.y, r.z, r.w);
+    const up = this.up.set(0, 1, 0).applyQuaternion(this.q);
+    // roof point in world space, pushed in from above (relative to the car)
+    const p = this.point.set(0, 1.1, (Math.random() - 0.5) * this.host.halfLength).applyQuaternion(this.q).add(this.v3b.set(t.x, t.y, t.z));
+    this.applyDamage(p, this.normal.copy(up).negate(), strength, t);
   }
 
   /** Called once per fixed step after physics: emits the strongest scrape of the step. */

@@ -38,6 +38,9 @@ export class Mixer {
   readonly reverb: ConvolverNode;
   readonly reverbReturn: GainNode;
   masterAnalyser: AnalyserNode | null = null;
+  /** Tunnel slap-back echo (two taps + damped feedback), fed from the engine/sfx buses by setTunnel(). */
+  private echoSendE!: GainNode;
+  private echoSendS!: GainNode;
   private scratch: Float32Array<ArrayBuffer> | null = null;
 
   constructor(
@@ -93,6 +96,34 @@ export class Mixer {
       return { input, vol, send, analyser };
     };
     this.buses = { engine: mk('engine'), sfx: mk('sfx'), ambience: mk('ambience'), ui: mk('ui') };
+    // tunnel echo
+    const T = C.tunnel;
+    const echoIn = keep(ac.createGain());
+    const d1 = keep(ac.createDelay(0.5));
+    d1.delayTime.value = T.delay1;
+    const d2 = keep(ac.createDelay(0.5));
+    d2.delayTime.value = T.delay2;
+    const elp = keep(ac.createBiquadFilter());
+    elp.type = 'lowpass';
+    elp.frequency.value = 3200;
+    const efb = keep(ac.createGain());
+    efb.gain.value = T.feedback;
+    const eout = keep(ac.createGain());
+    eout.gain.value = 0.75;
+    echoIn.connect(d1);
+    echoIn.connect(d2);
+    d1.connect(elp);
+    d2.connect(elp);
+    elp.connect(efb);
+    efb.connect(d1);
+    elp.connect(eout);
+    eout.connect(this.world);
+    this.echoSendE = keep(ac.createGain());
+    this.echoSendE.gain.value = 0;
+    this.echoSendS = keep(ac.createGain());
+    this.echoSendS.gain.value = 0;
+    this.buses.engine.vol.connect(this.echoSendE).connect(echoIn);
+    this.buses.sfx.vol.connect(this.echoSendS).connect(echoIn);
     if (debug) {
       this.masterAnalyser = keep(ac.createAnalyser());
       this.masterAnalyser.fftSize = 2048;
@@ -109,7 +140,7 @@ export class Mixer {
   }
 
   /** Apply settings volumes + ducking (call every frame; only schedules automation on change). */
-  apply(s: Readonly<Settings>, duck: DuckState, extraAmbience: number, tau: number): void {
+  apply(s: Readonly<Settings>, duck: DuckState, extraAmbience: number, tau: number, tunnel = 0): void {
     const C = CONFIG.audio;
     const ac = this.ac;
     const curve = (v: number) => Math.pow(Math.max(0, Math.min(1, v)), C.volumeCurve);
@@ -117,7 +148,7 @@ export class Mixer {
     const lv: Record<BusName, number> = {
       engine: curve(s.engineVolume) * C.busGain.engine * duck.engine,
       sfx: curve(s.sfxVolume) * C.busGain.sfx * duck.sfx,
-      ambience: curve(s.ambienceVolume) * C.busGain.ambience * duck.ambience * extraAmbience,
+      ambience: curve(s.ambienceVolume) * C.busGain.ambience * duck.ambience * extraAmbience * (1 - tunnel * (1 - C.tunnel.ambienceDuck)),
       ui: curve(s.sfxVolume) * C.busGain.ui,
     };
     for (const name of BUS_NAMES) {
@@ -126,7 +157,9 @@ export class Mixer {
       if (b.send) setSmooth(ac, b.send.gain, lv[name], tau);
     }
     setSmooth(ac, this.world.frequency, duck.cutoff, tau);
-    setSmooth(ac, this.reverbReturn.gain, C.reverb.returnGain, 0.1);
+    setSmooth(ac, this.reverbReturn.gain, C.reverb.returnGain * (1 + tunnel * C.tunnel.reverbBoost), 0.15);
+    setSmooth(ac, this.echoSendE.gain, tunnel * C.tunnel.echoSend, 0.15, 1e-3);
+    setSmooth(ac, this.echoSendS.gain, tunnel * C.tunnel.echoSend * 0.8, 0.15, 1e-3);
   }
 
   /** Instantaneous RMS of a bus (post volume) or the master output, over the analyser window. */

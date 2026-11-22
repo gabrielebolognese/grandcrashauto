@@ -13,8 +13,13 @@ export interface AmbienceInput {
   npcDensity: number; // 0..~1.2 (active NPCs / preset count)
   speedKmh: number;
   schedule: boolean; // spawn one-shots (birds, far horns, pass-bys)
-  shoreZ: number;
+  /** Estimated distance to open ocean (m; 0 = over the sea) and unit direction toward it (x/z). */
+  oceanDist: number;
+  oceanDirX: number;
+  oceanDirZ: number;
   district: DistrictId;
+  rain: number; // 0..1
+  altitude: number; // listener height (m)
 }
 
 /**
@@ -187,9 +192,11 @@ export class Ambience {
     const A = CONFIG.audio.ambience;
     const ac = this.ac;
     const L = this.listener;
-    const dz = inp.shoreZ - L.pos.z; // > 0: inland of the waterline
+    const dz = Math.max(0, inp.oceanDist);
     const night = clamp(inp.night, 0, 1);
-    const day = 0.15 + 0.85 * (1 - night);
+    const rain = clamp(inp.rain, 0, 1);
+    const high = smoothstep(100, 600, inp.altitude); // city sounds fade when flying
+    const day = (0.15 + 0.85 * (1 - night)) * (1 - 0.8 * rain);
 
     const df = (A.district as Record<string, { traffic: number; crowd: number; birds: number }>)[inp.district] ?? A.district.downtown;
     this.f.traffic = damp(this.f.traffic, df.traffic, 0.6, dt);
@@ -198,7 +205,7 @@ export class Ambience {
     this.dbg.district = inp.district;
 
     // traffic
-    const traffic = A.trafficLevel * this.f.traffic * (1 - 0.35 * night);
+    const traffic = A.trafficLevel * this.f.traffic * (1 - 0.35 * night) * (1 - 0.85 * high);
     setSmooth(ac, this.trafficOut.gain, traffic, 0.5, 1e-3);
     this.dbg.traffic = traffic;
 
@@ -207,13 +214,14 @@ export class Ambience {
     const ocean = A.oceanLevel * prox;
     setSmooth(ac, this.oceanOut.gain, ocean, 0.4, 1e-3);
     setSmooth(ac, this.oceanDistLp.frequency, 12000 * Math.pow(1200 / 12000, smoothstep(A.oceanNear, A.oceanFar, dz)), 0.4, 1e-2);
-    if (this.oceanPan) setSmooth(ac, this.oceanPan.pan, clamp(L.right.z * 0.75 * smoothstep(0, 60, dz), -0.8, 0.8), 0.2, 1e-2);
+    const toSea = L.right.x * inp.oceanDirX + L.right.z * inp.oceanDirZ;
+    if (this.oceanPan) setSmooth(ac, this.oceanPan.pan, clamp(toSea * 0.75 * smoothstep(0, 60, dz), -0.8, 0.8), 0.2, 1e-2);
     if (now >= this.nextWave) this.wave(now);
     this.dbg.ocean = ocean;
     const beach = 1 - smoothstep(10, 150, dz);
 
     // crowd
-    const crowd = A.crowdLevel * clamp(inp.npcDensity, 0, 1.2) * this.f.crowd * (1 - 0.5 * night) * (1 - 0.6 * smoothstep(30, 90, inp.speedKmh));
+    const crowd = A.crowdLevel * clamp(inp.npcDensity, 0, 1.2) * this.f.crowd * (1 - 0.5 * night) * (1 - 0.6 * smoothstep(30, 90, inp.speedKmh)) * (1 - 0.6 * rain) * (1 - high);
     setSmooth(ac, this.crowdOut.gain, crowd, 0.5, 1e-3);
     this.dbg.crowd = crowd;
     if (crowd > 0.002) {
@@ -226,7 +234,7 @@ export class Ambience {
     }
 
     // crickets + breeze
-    const crickets = A.cricketLevel * night * this.f.birds * (1 - 0.5 * smoothstep(20, 70, inp.speedKmh));
+    const crickets = A.cricketLevel * night * this.f.birds * (1 - 0.5 * smoothstep(20, 70, inp.speedKmh)) * (1 - rain) * (1 - high);
     setSmooth(ac, this.cricketOut.gain, crickets, 0.8, 1e-3);
     this.dbg.crickets = crickets;
     const gust = 0.6 + 0.4 * Math.sin(now * 0.31) * Math.sin(now * 0.17 + 1);
@@ -240,8 +248,9 @@ export class Ambience {
       if (Math.random() < day * (beach + 0.12)) {
         const a = Math.random() * Math.PI * 2;
         const r = rnd(25, 70);
-        p.x = L.pos.x + Math.cos(a) * r;
-        p.z = L.pos.z + Math.abs(Math.sin(a)) * r * (beach > 0.2 ? 1 : Math.sign(Math.sin(a)));
+        const sea = beach > 0.2 ? 0.7 : 0;
+        p.x = L.pos.x + (Math.cos(a) * (1 - sea) + inp.oceanDirX * sea) * r;
+        p.z = L.pos.z + (Math.sin(a) * (1 - sea) + inp.oceanDirZ * sea) * r;
         p.y = L.pos.y + rnd(10, 25);
         this.sfx.gull(p);
       }

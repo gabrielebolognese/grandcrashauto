@@ -40,6 +40,8 @@ export const CLIP = {
   getUpBack: 22,
   getUpFront: 23,
   flinch: 24,
+  cheer: 25,
+  clap: 26,
 } as const;
 export type ClipId = (typeof CLIP)[keyof typeof CLIP];
 
@@ -886,6 +888,26 @@ function buildGetUpFront(): PoseFn {
   ]);
 }
 
+function cheer(t: number, p: Pose): void {
+  const ph = TAU * t; // 1 s cycle (loop 2 s)
+  stand(p);
+  p.root[1] = HIP_H - 0.02 + 0.03 * Math.abs(sin(ph));
+  p.set(BONE.LLegL, 6 + 8 * Math.abs(cos(ph))).set(BONE.LLegR, 6 + 8 * Math.abs(cos(ph)));
+  p.set(BONE.ULegL, -3, 0, 2).set(BONE.ULegR, -3, 0, -2);
+  p.set(BONE.UArmL, -158 + 14 * sin(2 * ph), 0, 24 + 10 * sin(ph)).set(BONE.LArmL, -22 + 16 * sin(2 * ph + 1));
+  p.set(BONE.UArmR, -158 + 14 * sin(2 * ph + 2), 0, -24 + 10 * sin(ph)).set(BONE.LArmR, -22 + 16 * sin(2 * ph + 3));
+  p.set(BONE.Head, -10 + 4 * sin(2 * ph), 8 * sin(ph * 0.5), 0);
+  p.set(BONE.Chest, -4, 6 * sin(ph * 0.5), 0);
+}
+
+function clap(t: number, p: Pose): void {
+  idle(t, p, 0.4);
+  const c = 0.5 + 0.5 * sin(TAU * 3 * t);
+  p.set(BONE.UArmL, -42, -38, -4 + 12 * c).set(BONE.LArmL, -78);
+  p.set(BONE.UArmR, -42, 38, 4 - 12 * c).set(BONE.LArmR, -78);
+  p.set(BONE.Head, -2 + 2 * sin(TAU * 3 * t), 0, 0);
+}
+
 function buildFlinch(): PoseFn {
   return keyed([
     { t: 0, build: (p) => standAt(p, 0) },
@@ -946,6 +968,8 @@ function defs(): ClipDef[] {
     { id: CLIP.getUpBack, name: 'getUpBack', duration: 2.2, loop: false, fps: 30, fn: buildGetUpBack(), rootEndZ: 0.42 },
     { id: CLIP.getUpFront, name: 'getUpFront', duration: 2.2, loop: false, fps: 30, fn: buildGetUpFront(), rootEndZ: -0.3 },
     { id: CLIP.flinch, name: 'flinch', duration: 0.7, loop: false, fps: 30, fn: buildFlinch() },
+    { id: CLIP.cheer, name: 'cheer', duration: 2, loop: true, fps: 24, fn: cheer },
+    { id: CLIP.clap, name: 'clap', duration: 1, loop: true, fps: 24, fn: clap },
   ];
 }
 

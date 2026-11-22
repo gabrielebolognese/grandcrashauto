@@ -16,6 +16,7 @@ const PARS = /* glsl */ `
 uniform highp sampler2D uNpcAnim;
 uniform vec3 uNpcPivots[${NUM_BONES}];
 uniform float uNight;
+uniform float uNpcTime;
 attribute vec4 aSkin;
 attribute float aPart;
 attribute vec4 iAnimA;
@@ -38,6 +39,21 @@ vec3 npcUnpack(float v) {
 vec3 npcLin(vec3 c) {
   return mix(c * 0.0773993808, pow(c * 0.9478672986 + 0.0521327014, vec3(2.4)), step(0.04045, c));
 }
+vec4 npcA;
+vec4 npcB;
+// dynamic NPCs: CPU writes baked rows; static crowd members: rows derived from uNpcTime (no per-frame uploads)
+void npcAnimSetup() {
+#ifdef NPC_STATIC
+  float fr = mod((uNpcTime + iAnimA.w) * iAnimA.z, iAnimA.y);
+  float i0 = floor(fr);
+  npcA = vec4(iAnimA.x + i0, iAnimA.x + mod(i0 + 1.0, iAnimA.y), fr - i0, 0.0);
+  float fade = clamp((uNpcTime - iAnimB.x) / 0.6, 0.0, 1.0) * (1.0 - clamp((uNpcTime - iAnimB.y) / 0.6, 0.0, 1.0));
+  npcB = vec4(0.0, 0.0, 0.0, fade);
+#else
+  npcA = iAnimA;
+  npcB = iAnimB;
+#endif
+}
 mat4 npcFetch(float row, int bone) {
   ivec2 uv = ivec2(bone * 3, int(row + 0.5));
   vec4 a = texelFetch(uNpcAnim, uv, 0);
@@ -46,12 +62,12 @@ mat4 npcFetch(float row, int bone) {
   return mat4(a.x, b.x, c.x, 0.0, a.y, b.y, c.y, 0.0, a.z, b.z, c.z, 0.0, a.w, b.w, c.w, 1.0);
 }
 mat4 npcBone(int bone) {
-  mat4 m = npcFetch(iAnimA.x, bone);
-  if (iAnimA.z > 0.002) m += (npcFetch(iAnimA.y, bone) - m) * iAnimA.z;
-  if (iAnimA.w > 0.002) {
-    mat4 mb = npcFetch(iAnimB.x, bone);
-    if (iAnimB.z > 0.002) mb += (npcFetch(iAnimB.y, bone) - mb) * iAnimB.z;
-    m += (mb - m) * iAnimA.w;
+  mat4 m = npcFetch(npcA.x, bone);
+  if (npcA.z > 0.002) m += (npcFetch(npcA.y, bone) - m) * npcA.z;
+  if (npcA.w > 0.002) {
+    mat4 mb = npcFetch(npcB.x, bone);
+    if (npcB.z > 0.002) mb += (npcFetch(npcB.y, bone) - mb) * npcB.z;
+    m += (mb - m) * npcA.w;
   }
   return m;
 }
@@ -68,6 +84,7 @@ void npcLook(inout vec3 p, inout vec3 n) {
 bool npcBit(uint flags, uint b) { return ((flags >> b) & 1u) != 0u; }
 
 void npcSkin(out vec3 outP, out vec3 outN) {
+  npcAnimSetup();
   uint flags = uint(iCol1.w + 0.5);
   vec3 p = position;
   vec3 n = normal;
@@ -149,10 +166,12 @@ void npcColor() {
     case 15: c = npcUnpack(iCol1.x) * 0.7; rough = 0.6; break;
     case 16: c = mix(skin, vec3(0.62, 0.3, 0.32), 0.45) * 0.82; rough = 0.5; break;
     case 17: c = vec3(0.45, 0.78, 0.95); rough = 0.2; vNpcEmit = 1.0; break;
+    case 18: c = vec3(0.95, 0.94, 0.91); rough = 0.3; break;
+    case 19: c = mix(skin, vec3(0.95, 0.5, 0.48), 0.22); rough = 0.6; break;
   }
   vNpcColor = npcLin(c);
   vNpcRough = rough;
-  vNpcFade = iAnimB.w;
+  vNpcFade = npcB.w;
 }
 `;
 
@@ -175,6 +194,7 @@ export interface NpcUniforms {
   uNpcAnim: { value: THREE.Texture | null };
   uNpcPivots: { value: THREE.Vector3[] };
   uNight: { value: number };
+  uNpcTime: { value: number };
 }
 
 export function makeNpcUniforms(anim: THREE.Texture): NpcUniforms {
@@ -182,12 +202,16 @@ export function makeNpcUniforms(anim: THREE.Texture): NpcUniforms {
     uNpcAnim: { value: anim },
     uNpcPivots: { value: PIVOTS.map((p) => new THREE.Vector3(p[0], p[1], p[2])) },
     uNight: GLOBAL_UNIFORMS.uNight,
+    uNpcTime: { value: 0 },
   };
 }
 
-export function makeNpcMaterial(uniforms: NpcUniforms, rigid: boolean): THREE.MeshStandardMaterial {
+export function makeNpcMaterial(uniforms: NpcUniforms, rigid: boolean, statik = false): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0, envMapIntensity: 0.5 });
-  if (rigid) mat.defines = { NPC_RIGID: '' };
+  const defines: Record<string, string> = {};
+  if (rigid) defines.NPC_RIGID = '';
+  if (statik) defines.NPC_STATIC = '';
+  mat.defines = defines;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -201,7 +225,7 @@ export function makeNpcMaterial(uniforms: NpcUniforms, rigid: boolean): THREE.Me
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = vNpcRough;')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vNpcColor * vNpcEmit * (0.25 + 1.4 * uNight);');
   };
-  mat.customProgramCacheKey = () => (rigid ? 'npc-skin-rigid-v1' : 'npc-skin-v1');
+  mat.customProgramCacheKey = () => `npc-skin-v2-${rigid ? 'r' : 's'}${statik ? '-static' : ''}`;
   return mat;
 }
 

@@ -11,6 +11,11 @@ export const GLASS = [0x4a8fa8, 0x5b86b5, 0x4c9a8e, 0x6f8fa6, 0x3f7a99, 0x587f9e
 export const ACCENT = [0xff7a6b, 0x5cc8d6, 0xffd166, 0x9ee0c8, 0xb8a6e8, 0xf28cb1, 0x4f9a5a, 0x2aa3c4, 0xff9a5c];
 export const ROOFS = [0xd9774f, 0xc8644a, 0x4fa3a5, 0x7d8495, 0xb5564a, 0x6a9a8a, 0xe08e5e];
 const TRIM = [0xffffff, 0xf6f1ea, 0xfff4e0, 0xe8e2d8];
+function mixHex(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  return (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);
+}
 
 export interface BuildingOut {
   lots: BuildingLot[];
@@ -74,6 +79,7 @@ function decoTower(ctx: Ctx, x0: number, x1: number, z0: number, z1: number, h: 
   const groundH = 5;
   const hp = Math.min(h * 0.3, groundH + 3.6 * rng.int(1, 3));
   part(ctx, bx, bz, 0, 0, 0, y, w, hp, d, Facade.Shop, wall, acc, seed, 3.6, 0, groundH, lit);
+  part(ctx, bx, bz, 0, 0, 0, y + hp, w + 0.5, 0.55, d + 0.5, Facade.Solid, trim, acc, seed, 3, 0, 0, 0);
   const s1 = rng.range(2, 3.5);
   let sw = w - 2 * s1, sd = d - 2 * s1;
   const h1 = hp + (h - hp) * rng.range(0.72, 0.84);
@@ -119,6 +125,7 @@ function glassTower(ctx: Ctx, x0: number, x1: number, z0: number, z1: number, h:
   const lit = rng.range(0.4, 0.7);
   const hp = 5 + 3.6 * rng.int(0, 2);
   part(ctx, bx, bz, 0, 0, 0, y, w, hp, d, Facade.Shop, wall, acc, seed, 3.6, 0, 5, lit);
+  part(ctx, bx, bz, 0, 0, 0, y + hp, w + 0.4, 0.5, d + 0.4, Facade.Solid, 0xf2efe8, acc, seed, 3, 0, 0, 0);
   const s = rng.range(2.2, 3.5);
   const gw = w - 2 * s, gd = d - 2 * s;
   if (rng.chance(0.4) && gw > 18) {
@@ -216,7 +223,7 @@ function house(ctx: Ctx, bx: number, bz: number, yaw: number, w: number, d: numb
   }
   const [yx, yz] = toWorld(bx, bz, yaw, rng.range(-w / 3, w / 3), -d / 2 - 3.5);
   ctx.out.yardSpots.push(yx, yz);
-  lot(ctx, bx, bz, yaw === 0 || Math.abs(yaw) === Math.PI ? w : w, d, top, yaw, 4);
+  lot(ctx, bx, bz, w, d, top, yaw, 4);
 }
 
 function apartment(ctx: Ctx, bx: number, bz: number, yaw: number, w: number, d: number, floorsMin: number, floorsMax: number, style: number): void {
@@ -236,7 +243,15 @@ function apartment(ctx: Ctx, bx: number, bz: number, yaw: number, w: number, d: 
     // awning over the storefront (tilted thin box handled as a flat slab with stripes)
     part(ctx, bx, bz, yaw, 0, d / 2 + 0.9, ctx.y + 3.1, w * 0.86, 0.22, 1.8, Facade.Awning, acc, 0xffffff, seed, 3, 0, 0, 0);
   }
-  if (rng.chance(0.35) && h > 9) {
+  if (style === Facade.Apartment && floors >= 2 && rng.chance(0.55)) {
+    // continuous balcony slabs with a solid parapet band on the street face
+    const trim = rng.pick(TRIM);
+    for (let f = 1; f < floors; f++) {
+      const yy = ctx.y + groundH + f * fh + (groundH ? 0 : 0.6) - 0.1;
+      part(ctx, bx, bz, yaw, 0, d / 2 + 0.55, yy, w * 0.84, 0.16, 1.1, Facade.Solid, trim, acc, seed, 3, 0, 0, 0);
+      part(ctx, bx, bz, yaw, 0, d / 2 + 1.06, yy + 0.16, w * 0.84, 0.75, 0.08, Facade.Solid, mixHex(trim, acc, 0.25), acc, seed, 3, 0, 0, 0);
+    }
+  } else if (rng.chance(0.35) && h > 9) {
     // deco stepped centre bay on the front
     part(ctx, bx, bz, yaw, 0, d / 2 + 0.35, ctx.y + groundH, Math.min(5, w * 0.3), h - groundH + 2.2, 0.7, Facade.Solid, rng.pick(TRIM), acc, seed, 3, 0, 0, 0);
   }
@@ -261,6 +276,14 @@ function hotel(ctx: Ctx, bx: number, bz: number, yaw: number, w: number, d: numb
   const bh = h + rng.range(3, 7);
   part(ctx, bx, bz, yaw, 0, d / 2 - 2.5, ctx.y, bw, bh, 6, Facade.Solid, trim, acc, seed, fh, 0, 0, 0);
   part(ctx, bx, bz, yaw, 0, d / 2 - 2.5, ctx.y + bh, bw * 0.6, 2.2, 4, Facade.Solid, acc, acc, seed, fh, 0, 0, 0);
+  // art-deco "eyebrow" sunshades over each floor's windows (front face, both sides of the bay)
+  const half = (w - bw) / 2 - 0.6;
+  if (half > 2) {
+    for (let f = 1; f < floors; f++) {
+      const yy = ctx.y + groundH + f * fh - 0.35;
+      for (const sg of [-1, 1]) part(ctx, bx, bz, yaw, sg * (bw / 2 + 0.3 + half / 2), d / 2 + 0.32, yy, half, 0.14, 0.65, Facade.Solid, trim, acc, seed, 3, 0, 0, 0);
+    }
+  }
   // vertical neon sign fin on the bay
   part(ctx, bx, bz, yaw, 0, d / 2 + 1.0, ctx.y + groundH + 1, 0.35, Math.min(h * 0.62, 16), 1.6, Facade.Neon, acc, acc, seed, fh, 0, 0, 0);
   // corner eyebrows / parapet

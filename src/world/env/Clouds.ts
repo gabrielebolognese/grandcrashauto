@@ -12,7 +12,8 @@ import { GLSL_ENV_PARS, GLSL_OUTPUT, envUniforms } from './shaders';
  */
 
 const VERT = /* glsl */ `
-uniform vec2 uWind;      // accumulated drift offset (m)
+uniform vec2 uDrift;     // wind drift minus floating origin, wrapped (m)
+uniform float uGrow;     // puff growth with cloud cover
 uniform float uSpread;   // half size of the wrapping field
 uniform float uRMax;     // pull-in radius (inside camera.far)
 attribute vec4 aCloud;   // cloud centre x, z, base y, cloud height
@@ -21,10 +22,10 @@ varying vec3 vWorld;
 varying float vH;
 varying float vTrueDist;
 void main() {
-  vec2 c = aCloud.xy + uWind;
+  vec2 c = aCloud.xy + uDrift;
   vec2 rel = mod(c - cameraPosition.xz + uSpread, 2.0 * uSpread) - uSpread;
   vec2 centre = cameraPosition.xz + rel;
-  vec4 lp = instanceMatrix * vec4(position, 1.0);
+  vec4 lp = instanceMatrix * vec4(position * uGrow, 1.0);
   vec3 wp = vec3(centre.x + lp.x, lp.y, centre.y + lp.z);
   vec3 n = normalize(position);
   float base = aCloud.z;
@@ -46,8 +47,6 @@ void main() {
 
 const FRAG = /* glsl */ `
 ${GLSL_ENV_PARS}
-uniform vec3 uCloudLit;
-uniform vec3 uCloudShade;
 uniform float uCloudHaze;
 varying vec3 vN;
 varying vec3 vWorld;
@@ -69,6 +68,7 @@ void main() {
   float back = pow(max(dot(-V, L), 0.0), 5.0);
   col += uCloudLit * rim * (0.12 + 1.3 * back);
   col *= 1.4;
+  col += vec3(0.7, 0.75, 1.0) * uLightning * 1.8 * (0.4 + vH);
   float haze = 1.0 - exp(-vTrueDist / uCloudHaze);
   col = envHaze(col, -V, haze * 0.92);
   gl_FragColor = vec4(col, 1.0);
@@ -91,7 +91,8 @@ export class Clouds {
   private mat: THREE.ShaderMaterial;
   private clouds: CloudInfo[] = [];
   private puffEnd: number[] = []; // cumulative instance count after cloud i
-  private wind = new THREE.Vector2();
+  private wind = new THREE.Vector2(); // accumulated drift (absolute)
+  private driftU = new THREE.Vector2(); // drift - origin, wrapped (shader + CPU tests)
   private spread: number;
 
   constructor() {
@@ -153,11 +154,10 @@ export class Clouds {
       name: 'env.clouds',
       uniforms: {
         ...envUniforms(),
-        uWind: { value: this.wind },
+        uDrift: { value: this.driftU },
+        uGrow: { value: 1 },
         uSpread: { value: this.spread },
         uRMax: { value: 1300 },
-        uCloudLit: { value: new THREE.Color(1, 1, 1) },
-        uCloudShade: { value: new THREE.Color(0.6, 0.6, 0.75) },
         uCloudHaze: { value: 2600 },
       },
       vertexShader: VERT,
@@ -171,6 +171,7 @@ export class Clouds {
     this.mesh.name = 'env.clouds';
     this.mesh.frustumCulled = false;
     this.mesh.matrixAutoUpdate = false;
+    this.mesh.userData.noOriginShift = true; // follows the camera; origin handled via uDrift
   }
 
   /** Fraction of the clouds to draw (quality). */
@@ -183,20 +184,21 @@ export class Clouds {
     return ((this.geo.index?.count ?? 0) / 3) * this.mesh.count;
   }
 
-  update(camera: THREE.PerspectiveCamera, dt: number, lit: THREE.Color, shade: THREE.Color): void {
+  /**
+   * @param wind world wind (m/s), origin floating-origin offset, cover 0..1 (puffs swell as the sky fills in)
+   */
+  update(camera: THREE.PerspectiveCamera, dt: number, wind: THREE.Vector3, origin: THREE.Vector3, cover: number): void {
     const cfg = CONFIG.env.clouds;
-    const a = (cfg.windAngleDeg * Math.PI) / 180;
-    this.wind.x += Math.sin(a) * cfg.wind * dt;
-    this.wind.y += Math.cos(a) * cfg.wind * dt;
     const period = this.spread * 2;
-    this.wind.x %= period;
-    this.wind.y %= period;
+    this.wind.x = (this.wind.x + wind.x * cfg.windDrift * dt) % period;
+    this.wind.y = (this.wind.y + wind.z * cfg.windDrift * dt) % period;
+    const m = (v: number) => ((v % period) + period) % period;
+    this.driftU.set(m(this.wind.x - origin.x), m(this.wind.y - origin.z));
     const u = this.mat.uniforms;
     u.uRMax.value = camera.far * 0.9;
+    u.uGrow.value = 1 + 0.3 * cover;
     const camH = Math.max(0, camera.position.y);
     u.uCloudHaze.value = 2600 * (1 + camH / 1200);
-    u.uCloudLit.value.copy(lit);
-    u.uCloudShade.value.copy(shade);
   }
 
   /** 0..1 how deep the camera is inside a cloud (for the whiteout fog). */
@@ -208,8 +210,8 @@ export class Clouds {
     for (let i = 0; i < n; i++) {
       const c = this.clouds[i];
       if (cam.y < c.base - 20 || cam.y > c.base + c.height * 1.3) continue;
-      let rx = c.x + this.wind.x - cam.x;
-      let rz = c.z + this.wind.y - cam.z;
+      let rx = c.x + this.driftU.x - cam.x;
+      let rz = c.z + this.driftU.y - cam.z;
       rx = ((((rx + this.spread) % period) + period) % period) - this.spread;
       rz = ((((rz + this.spread) % period) + period) % period) - this.spread;
       if (rx * rx + rz * rz > c.radius * c.radius) continue;
@@ -217,7 +219,7 @@ export class Clouds {
       const px = -rx, pz = -rz;
       for (const p of c.puffs) {
         const dx = px - p.x, dy = Math.max(cam.y, c.base) - p.y, dz = pz - p.z;
-        const d = Math.sqrt(dx * dx + dy * dy * 1.4 + dz * dz) / p.r;
+        const d = Math.sqrt(dx * dx + dy * dy * 1.4 + dz * dz) / (p.r * this.mat.uniforms.uGrow.value);
         if (d < 1) best = Math.max(best, 1 - d);
       }
     }

@@ -25,6 +25,12 @@ export interface EngineLayerData {
  * like an engine instead of a pitched-up synth. The loop holds an integer number of 4-stroke cycles and the filters are
  * pre-warmed on the periodic input, so it loops without a seam.
  */
+/** Exact rpm a layer is rendered at (the 4-stroke cycle is rounded to whole samples). */
+export function engineLayerRpm(sr: number, p: EngineProfile, rpmTarget: number): number {
+  const cyl = Math.max(1, Math.round(p.cylinders));
+  return (sr * 120) / Math.max(cyl * 8, Math.round((sr * 120) / rpmTarget));
+}
+
 export function bakeEngineLayer(sr: number, p: EngineProfile, rpmTarget: number, onLoad: boolean, seed: number, loopSeconds: number): EngineLayerData {
   const t0 = performance.now();
   const cyl = Math.max(1, Math.round(p.cylinders));

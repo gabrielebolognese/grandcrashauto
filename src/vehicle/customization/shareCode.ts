@@ -14,22 +14,24 @@ import { SHARE_PALETTE_V1 } from './palette';
 /**
  * Share codes (spec §7): the whole CarBuild packed into a short URL-safe string (owner: garage).
  *
- * Format v1 — a big-endian bit stream, zero-padded to a byte boundary, followed by one checksum byte, then base64url
+ * Format v2 — a big-endian bit stream, zero-padded to a byte boundary, followed by one checksum byte, then base64url
  * (no padding). Typical codes are 22–28 characters (≈ 45 worst case with every colour custom and an 8-char plate).
  *
  *   version 4 · model 2 · finish 3 · colour · shiftColour · twoTone 1 · roofColour · stripes 2 · stripeColour ·
  *   rim 3 · rimColour · tyre 2 · size 2 · splitter 1 · skirts 1 · spoiler 2 · scoop 1 ·
  *   rideHeight 5 (21 steps) · camber 5 (21 steps) · tint 5 (21 steps) · headlightColour ·
- *   underglow 1 [+ colour] · plateLen 4 + base-38 plate integer (⌈log2 38^len⌉ bits) · perf 4×2
+ *   underglow 1 [+ colour] · plateLen 4 + base-38 plate integer (⌈log2 38^len⌉ bits) · perf 4×2 · turbo 2 (v2+)
  *
  *   colour = 1 bit flag: 1 → 6-bit index into SHARE_PALETTE_V1, 0 → 24-bit RGB.
  *
  * Every field is encoded (also currently-invisible ones such as the shift colour of a non-shift finish), so
  * decode(encode(b)) deep-equals quantizeBuild(b). The garage stores builds already quantized, so the stored build
- * and the decoded build are identical.
+ * and the decoded build are identical. v1 codes (no turbo field) still decode, with perf.turbo = 0.
  */
 
-export const SHARE_VERSION = 1;
+export const SHARE_VERSION = 2;
+/** Oldest version the decoder still accepts. */
+const MIN_SHARE_VERSION = 1;
 
 // ── slider quantization (shared by the garage UI so stored builds roundtrip exactly) ──
 export const RIDE_STEPS = 10; // per unit: -1..1 → 21 values
@@ -164,9 +166,13 @@ function fromBase64Url(code: string): Uint8Array | null {
 
 /** Encode a build (it is normalized + quantized first) into a short URL-safe share code. */
 export function encodeShareCode(input: CarBuild): string {
+  return encodeVersion(input, SHARE_VERSION);
+}
+
+function encodeVersion(input: CarBuild, version: number): string {
   const b = quantizeBuild(input);
   const w = new BitWriter();
-  w.write(SHARE_VERSION, 4);
+  w.write(version, 4);
   w.write(enumIndex(CAR_MODEL_IDS, b.model), 2);
   w.write(enumIndex(PAINT_FINISHES, b.paint.finish), 3);
   writeColor(w, b.paint.color);
@@ -198,6 +204,7 @@ export function encodeShareCode(input: CarBuild): string {
   w.write(b.perf.tyres, 2);
   w.write(b.perf.brakes, 2);
   w.write(b.perf.suspension, 2);
+  if (version >= 2) w.write(b.perf.turbo, 2);
   const payload = w.toBytes();
   const out = new Uint8Array(payload.length + 1);
   out.set(payload);
@@ -226,7 +233,8 @@ export function decodeShareCode(code: string): CarBuild | null {
     const n = bytes.length - 1;
     if (checksum(bytes, n) !== bytes[n]) return null;
     const r = new BitReader(bytes, n * 8);
-    if (r.read(4) !== SHARE_VERSION) return null;
+    const version = r.read(4);
+    if (version < MIN_SHARE_VERSION || version > SHARE_VERSION) return null;
     const model = readEnum(r, CAR_MODEL_IDS, 2);
     const finish = readEnum(r, PAINT_FINISHES, 3);
     const color = readColor(r);
@@ -256,7 +264,8 @@ export function decodeShareCode(code: string): CarBuild | null {
       plate += PLATE_ALPHABET[pv % PLATE_BASE];
       pv = Math.floor(pv / PLATE_BASE);
     }
-    const perf = { engine: readRange(r, 2, 2), tyres: readRange(r, 2, 2), brakes: readRange(r, 2, 2), suspension: readRange(r, 2, 2) };
+    const perf = { engine: readRange(r, 2, 2), tyres: readRange(r, 2, 2), brakes: readRange(r, 2, 2), suspension: readRange(r, 2, 2), turbo: 0 };
+    if (version >= 2) perf.turbo = readRange(r, 2, 2);
     // Only zero padding may remain.
     const rest = r.length - r.pos;
     if (rest >= 8 || (rest > 0 && r.read(rest) !== 0)) return null;
@@ -299,7 +308,7 @@ function randomBuildForTest(rnd: () => number): CarBuild {
     kit: { splitter: rnd() < 0.5, skirts: rnd() < 0.5, spoiler: pick(SPOILER_STYLES), scoop: rnd() < 0.5 },
     stance: { rideHeight: rnd() * 2 - 1, camber: rnd() },
     extras: { tint: rnd(), headlightColor: hex(), underglow: rnd() < 0.5 ? null : hex(), plate },
-    perf: { engine: Math.floor(rnd() * 3), tyres: Math.floor(rnd() * 3), brakes: Math.floor(rnd() * 3), suspension: Math.floor(rnd() * 3) },
+    perf: { engine: Math.floor(rnd() * 3), tyres: Math.floor(rnd() * 3), brakes: Math.floor(rnd() * 3), suspension: Math.floor(rnd() * 3), turbo: Math.floor(rnd() * 3) },
   });
 }
 
@@ -331,6 +340,12 @@ export function runShareSelfTest(n = 200): ShareSelfTestResult {
     if (!d || JSON.stringify(d) !== JSON.stringify(b)) failures.push(`roundtrip ${code}`);
     // A link containing the code must decode too.
     if (i < 10 && !decodeShareCode(`https://example.test/game/?debug&car=${code}`)) failures.push(`link ${code}`);
+    // Legacy v1 codes (no turbo) must still decode: same car with turbo 0.
+    if (i < 50) {
+      const legacy = decodeShareCode(encodeVersion(b, 1));
+      const expect = quantizeBuild({ ...b, perf: { ...b.perf, turbo: 0 } });
+      if (!legacy || JSON.stringify(legacy) !== JSON.stringify(expect)) failures.push(`legacy v1 ${code}`);
+    }
     // Truncated codes must be rejected.
     if (decodeShareCode(code.slice(0, -2))) failures.push(`truncated accepted ${code}`);
   }
