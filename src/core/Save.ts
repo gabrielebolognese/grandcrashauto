@@ -19,6 +19,9 @@ export interface SaveData {
     slots: (CarBuild | null)[]; // 3 manual save slots
   };
   stats: { explosions: number; distanceKm: number };
+  /** Part 3: discovered points of interest (ids) for map teleport; last clock time. */
+  discovered: string[];
+  clockHours: number;
 }
 
 function freshSave(): SaveData {
@@ -28,6 +31,8 @@ function freshSave(): SaveData {
     detectedQuality: null,
     garage: { current: stockBuild('coupe'), slots: [null, null, null] },
     stats: { explosions: 0, distanceKm: 0 },
+    discovered: [],
+    clockHours: 10,
   };
 }
 
@@ -58,6 +63,8 @@ function migrate(raw: any): SaveData {
       explosions: Number(d.stats?.explosions) || 0,
       distanceKm: Number(d.stats?.distanceKm) || 0,
     },
+    discovered: Array.isArray(d.discovered) ? d.discovered.filter((x: unknown) => typeof x === 'string').slice(0, 500) : [],
+    clockHours: Number.isFinite(d.clockHours) ? Math.min(24, Math.max(0, d.clockHours)) : 10,
   };
 }
 

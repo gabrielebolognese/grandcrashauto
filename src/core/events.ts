@@ -85,4 +85,18 @@ export interface GameEvents extends Record<string, unknown> {
   masterCaution: { text: string; level: 'caution' | 'warning' };
   /** Out-of-map sequence state changes (planes → ui/audio). */
   outOfMap: { state: 'ok' | 'warning' | 'failing'; countdown: number };
+
+  // ── Part 3 ──
+  /** Floating origin moved the world by -delta (core). Shift your cached world-space state by -delta. */
+  originShift: { delta: THREE.Vector3; offset: THREE.Vector3 };
+  /** Weather state changed target (env). */
+  weatherChanged: { kind: string };
+  /** Lightning strike (env) — audio plays thunder delayed by distance / 343 m/s. */
+  lightning: { position: THREE.Vector3; intensity: number };
+  /** Stunt moments (vehicle → ui pop-ups, audio, camera). */
+  stunt: { kind: 'airborne' | 'cleanLanding' | 'crashLanding' | 'barrelRoll' | 'airGlide'; airTime: number; distance: number; rolls?: number };
+  /** Turbo started/stopped (vehicle → fx/audio/camera/ui). */
+  turbo: { on: boolean };
+  /** A point of interest was discovered (nav → ui toast, save). */
+  poiDiscovered: { id: string; name: string };
 }

@@ -28,6 +28,10 @@ import { PlaneFactory } from '../plane/models/PlaneFactory';
 import { PlaneSystem } from '../plane/PlaneSystem';
 import { Breakup } from '../plane/breakup/Breakup';
 import { Nav } from '../nav/Nav';
+import { Origin } from '../core/Origin';
+import { shiftCityData } from '../core/shiftData';
+import { Terrain } from '../terrain/Terrain';
+import { Highways } from '../highway/Highways';
 
 /**
  * Orchestrator: owns the context, the state machine and the system update order. Owner: core.
@@ -64,12 +68,19 @@ export class Game implements GameActions {
     const physics = new Physics(events);
     const quality = new Quality(engine, settings, save, events);
 
-    const ctx = { engine, physics, input, events, save, settings, quality, game: this, debug } as unknown as GameContext;
+    const origin = new Origin(engine, physics, events);
+    const ctx = { engine, physics, input, events, save, settings, quality, origin, game: this, debug } as unknown as GameContext;
     this.ctx = ctx;
+    // Floating origin: CityData is shifted in place before modules get the 'originShift' event.
+    origin.beforeEmit = (dx, dz) => {
+      if (ctx.world?.data) shiftCityData(ctx.world.data, dx, dz);
+    };
     // Construct every system (constructors must be cheap; real work happens in init()).
     ctx.ui = new UI(ctx);
     ctx.env = new Environment(ctx);
     ctx.world = new World(ctx);
+    ctx.terrain = new Terrain(ctx);
+    ctx.highways = new Highways(ctx);
     ctx.props = new Props(ctx);
     ctx.npcs = new NpcSystem(ctx);
     ctx.cars = new CarFactory(ctx);
@@ -86,7 +97,8 @@ export class Game implements GameActions {
     // Simulation order matters: world/props/npcs, then the car and planes (forces), breakup (water/piece aero),
     // navigation, then the camera that follows them, then fx/audio.
     this.simSystems = [
-      ctx.env, ctx.world, ctx.props, ctx.npcs, ctx.vehicle, ctx.planes, ctx.breakup, ctx.nav, ctx.cameraRig, ctx.fx, ctx.audio,
+      ctx.env, ctx.world, ctx.terrain, ctx.highways, ctx.props, ctx.npcs, ctx.vehicle, ctx.planes, ctx.breakup, ctx.nav,
+      ctx.cameraRig, ctx.fx, ctx.audio,
     ];
 
     if (debug) (window as any).__game = { game: this, ctx, CONFIG };
@@ -106,7 +118,9 @@ export class Game implements GameActions {
     ctx.quality.init();
     const order: [GameSystem, string][] = [
       [ctx.env, 'Painting the sky'],
-      [ctx.world, 'Building the island'],
+      [ctx.world, 'Building the city'],
+      [ctx.terrain, 'Raising the mountains'],
+      [ctx.highways, 'Paving the highways'],
       [ctx.props, 'Placing street furniture'],
       [ctx.cars, 'Assembling cars'],
       [ctx.planeModels, 'Rolling out the planes'],
@@ -192,6 +206,8 @@ export class Game implements GameActions {
     if (target) target.getWorldPosition(this.focus);
     else if (ctx.vehicle.active && ctx.vehicle.object) this.focus.copy(ctx.vehicle.state.position);
     else this.focus.copy(ctx.engine.camera.position);
+    // Floating origin: re-centre the world when the focus wanders > ~2 km from the local origin.
+    if (this.state === 'driving' && ctx.origin.maybeShift(this.focus)) this.focus.sub(ctx.origin.delta);
     ctx.world.setFocus(this.focus);
     ctx.env.setShadowFocus(this.focus);
 

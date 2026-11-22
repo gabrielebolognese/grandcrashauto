@@ -65,6 +65,7 @@ export interface CarBuild {
     tyres: number;
     brakes: number;
     suspension: number;
+    turbo: number; // part 3: 0..2 turbo upgrade (more boost force + top speed)
   };
 }
 
@@ -84,7 +85,7 @@ export const STOCK_BUILD: CarBuild = {
   kit: { splitter: false, skirts: false, spoiler: 'none', scoop: false },
   stance: { rideHeight: 0, camber: 0 },
   extras: { tint: 0.35, headlightColor: '#fff6e0', underglow: null, plate: 'CSTL 01' },
-  perf: { engine: 0, tyres: 0, brakes: 0, suspension: 0 },
+  perf: { engine: 0, tyres: 0, brakes: 0, suspension: 0, turbo: 0 },
 };
 
 /** Stock build of a given model (each model may have its own default colour). */
@@ -157,6 +158,7 @@ export function normalizeBuild(input: unknown): CarBuild {
       tyres: clampInt(f.tyres, 0, PERF_LEVELS - 1, 0),
       brakes: clampInt(f.brakes, 0, PERF_LEVELS - 1, 0),
       suspension: clampInt(f.suspension, 0, PERF_LEVELS - 1, 0),
+      turbo: clampInt(f.turbo, 0, PERF_LEVELS - 1, 0),
     },
   };
 }

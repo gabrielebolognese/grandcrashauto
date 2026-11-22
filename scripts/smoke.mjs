@@ -13,7 +13,7 @@
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile, rm, stat } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, openSync, writeSync, closeSync, unlinkSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, extname, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -35,6 +35,62 @@ const quality = opt('quality', 'medium');
 const extraParams = opt('params', '');
 
 await mkdir(outDir, { recursive: true });
+
+// 0) Machine-wide concurrency limit: many agents share one laptop. At most SMOKE_SLOTS (default 2) build+browser
+//    runs at once; others wait. Lock files carry the owner PID so locks of killed processes are reclaimed.
+const SLOTS = Number(process.env.SMOKE_SLOTS || 2);
+let lockPath = null;
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+}
+async function acquireSlot() {
+  const t0 = Date.now();
+  let warned = false;
+  for (;;) {
+    for (let i = 0; i < SLOTS; i++) {
+      const p = join(tmpdir(), `crashgame-smoke-slot-${i}.lock`);
+      try {
+        const fd = openSync(p, 'wx');
+        writeSync(fd, `${process.pid} ${tag}`);
+        closeSync(fd);
+        lockPath = p;
+        return;
+      } catch {
+        try {
+          const [pid] = readFileSync(p, 'utf8').split(' ');
+          const old = Date.now() - statSync(p).mtimeMs > 20 * 60 * 1000;
+          if (!pidAlive(Number(pid)) || old) unlinkSync(p);
+        } catch {
+          /* raced with another process */
+        }
+      }
+    }
+    if (!warned) {
+      console.error(`[smoke] waiting for a free smoke slot (max ${SLOTS} concurrent runs on this machine)…`);
+      warned = true;
+    }
+    if (Date.now() - t0 > 40 * 60 * 1000) throw new Error('timed out waiting for a smoke slot');
+    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 2000));
+  }
+}
+function releaseSlot() {
+  if (!lockPath) return;
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    /* already gone */
+  }
+  lockPath = null;
+}
+process.on('exit', releaseSlot);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(sig, () => process.exit(130));
+await acquireSlot();
+console.error(`[smoke] slot acquired (${tag})`);
 
 // 1) Build into a private temp dir (does not touch dist/, safe in parallel).
 if (!flag('no-build') || !existsSync(join(buildDir, 'index.html'))) {

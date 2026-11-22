@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { Engine } from '../core/Engine';
+import type { Origin } from '../core/Origin';
 import type { EventBus } from '../core/EventBus';
 import type { GameEvents, GameState } from '../core/events';
 import type { Input } from '../core/Input';
@@ -58,6 +59,10 @@ export interface GameContext {
   planes: IPlaneSystem;
   breakup: IBreakup;
   nav: INav;
+  /** Part 3: floating origin (absolute = local + origin.offset), endless terrain, highway network. */
+  origin: Origin;
+  terrain: ITerrain;
+  highways: IHighways;
   /** True when ?debug is in the URL. */
   debug: boolean;
 }
@@ -103,6 +108,11 @@ export interface IWorld extends GameSystem {
   isDeepWater(x: number, z: number): boolean;
   /** Streaming focus (player car or menu camera). Called by Game every frame. */
   setFocus(pos: THREE.Vector3): void;
+  // -- Part 3 (all coordinates LOCAL). The world delegates outside the city/airport to ctx.terrain / ctx.highways. --
+  /** Metres offshore over the ocean (0 over land). Planes' out-of-map uses it (ocean side only). */
+  oceanDistance?(x: number, z: number): number;
+  /** Is (x,z) on a highway carriageway (turbo recharge bonus)? */
+  isOnHighway?(x: number, z: number): boolean;
 }
 
 // ─────────────────────────── environment (src/world/env) ─────────────────────────
@@ -116,6 +126,36 @@ export interface IEnvironment extends GameSystem {
   setShadowFocus(pos: THREE.Vector3): void;
   /** Build an env map/lighting rig suitable for a separate scene (garage). Optional. */
   applyTo?(scene: THREE.Scene): void;
+  // -- Part 3: day/night clock + weather (optional until the env module implements them; read with fallbacks) --
+  /** Game clock in hours 0..24 (day length from settings.dayLengthMin; settings.timeLocked pauses it). */
+  readonly clockHours?: number;
+  setTime?(hours: number): void;
+  readonly weather?: WeatherState;
+  /** World wind (m/s incl. gusts), same as GLOBAL_UNIFORMS.uWind. */
+  readonly wind?: THREE.Vector3;
+  /** 0..1 puddle depth at (x,z) local (noise mask × wetness) — aquaplaning + puddle shading. */
+  puddleAt?(x: number, z: number): number;
+  /** Patch a road/ground/foliage MeshStandardMaterial so it shows wetness, puddles and snow (onBeforeCompile). */
+  patchMaterial?(material: THREE.Material, kind: 'road' | 'ground' | 'foliage' | 'building' | 'vehicle'): void;
+}
+
+export type WeatherKind = 'clear' | 'fewClouds' | 'cloudy' | 'overcast' | 'lightRain' | 'heavyRain' | 'storm' | 'fog' | 'snow';
+export const WEATHER_KINDS: readonly WeatherKind[] = ['clear', 'fewClouds', 'cloudy', 'overcast', 'lightRain', 'heavyRain', 'storm', 'fog', 'snow'];
+
+export interface WeatherState {
+  kind: WeatherKind; // current (target) state
+  transition: number; // 0..1 progress toward `kind`
+  cloudCover: number; // 0..1
+  rain: number; // 0..1 precipitation intensity (rain or snow by altitude)
+  snow: number; // 0..1 (falling snow at the focus)
+  fog: number; // 0..1 (1 = ~80 m visibility)
+  wetness: number; // 0..1 road wetness (fades in ~1 min, dries over minutes)
+  storm: number; // 0..1 (lightning, gusts, turbulence)
+  /** Tyre grip multiplier at the focus (1 clear, ~0.75 rain, ~0.65 storm, ~0.45 snow). */
+  grip: number;
+  visibility: number; // metres
+  windSpeed: number; // m/s mean
+  gust: number; // m/s current gust on top of the mean
 }
 
 // ───────────────────────── props & parked cars (src/world/props) ──────────────────
@@ -129,6 +169,9 @@ export interface IProps extends GameSystem {
 // ─────────────────────────────── pedestrians (src/npc) ───────────────────────────
 export interface INpcSystem extends GameSystem {
   readonly activeCount: number;
+  /** Part 3: register a small ambient spot (rest stop, viewpoint) where a few NPCs idle/wander; returns an id. */
+  addAmbientSpot?(spot: { position: THREE.Vector3; radius: number; count: number; benches?: { p: THREE.Vector3; yaw: number }[] }): number;
+  removeAmbientSpot?(id: number): void;
 }
 
 // ─────────────────────────── car models (src/vehicle/models) ─────────────────────
@@ -219,6 +262,12 @@ export interface VehicleState {
   exploded: boolean;
   boost: number; // 0..1 turbo spool (upgraded engine)
   wheels: WheelState[];
+  // -- Part 3 (optional until the vehicle module fills them) --
+  turboCharge?: number; // 0..1 meter
+  turboActive?: boolean; // boosting right now
+  airborne3?: { active: boolean; time: number; distance: number; predicted: number; gliding: boolean; rolling: boolean; rolls: number };
+  headlights?: 'off' | 'low' | 'high';
+  aquaplaning?: boolean;
 }
 
 export interface IPlayerVehicle extends GameSystem {
@@ -426,4 +475,41 @@ export interface INav extends GameSystem {
   openMap(): void;
   closeMap(): void;
   readonly mapOpen: boolean;
+}
+
+// =============================== PART 3: endless terrain + highway network ===============================
+
+/** Procedural terrain beyond the city/airport (src/terrain). All query coordinates are LOCAL (scene) coordinates. */
+export interface ITerrain extends GameSystem {
+  /** Final ground height (after highway corridor carving) at local x,z. Inside the city/airport bounds: their flat level. */
+  heightAt(x: number, z: number): number;
+  /** Surface material for tyres/fx (grass, sand, rock→concrete, snow→sand-like, asphalt on carved roads…). */
+  surfaceAt(x: number, z: number): SurfaceMaterial;
+  biomeAt(x: number, z: number): string;
+  /** Water surface height if (x,z) is in the ocean or a lake, else null. */
+  waterAt(x: number, z: number): number | null;
+  /** Metres offshore (0 over land). */
+  oceanDistance(x: number, z: number): number;
+  /** True once colliders around (x,z) within radius are loaded (teleports wait for it). */
+  isReady(x: number, z: number, radius: number): boolean;
+  /** Points of interest discovered/generated so far (Lighthouse, Summit Viewpoint, Fishing Pier…), local poses. */
+  readonly pois: { id: string; name: string; icon: string; pose: Pose }[];
+}
+
+/** Endless highway network + ramps + rest stops (src/highway). LOCAL coordinates. */
+export interface IHighways extends GameSystem {
+  /** Road surface height if (x,z) is on a highway deck/carriageway near height `nearY`, else null. */
+  roadHeightAt(x: number, z: number, nearY?: number): number | null;
+  isOnHighway(x: number, z: number): boolean;
+  inTunnel(pos: THREE.Vector3): boolean;
+  /** Inside a rest stop / gas station area (turbo refills instantly). */
+  restStopAt(x: number, z: number): boolean;
+  /** Nearest safe highway pose (right lane, along travel direction closest to yaw) within maxDist, or null. */
+  findRespawn(pos: THREE.Vector3, yaw: number, maxDist: number): Pose | null;
+  /** Generated highway network so far as a road graph (LOCAL coords) — joined to the city graph at interchanges, for A*. */
+  readonly graph: import('../world/types').RoadGraph;
+  /** Bumps whenever `graph` grows (nav re-indexes). */
+  readonly graphVersion: number;
+  /** Points of interest so far (Mountain Pass, Coastal Bridge, Big Jump, Rest Stop n…), local poses on the road. */
+  readonly pois: { id: string; name: string; icon: string; pose: Pose }[];
 }

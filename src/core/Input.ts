@@ -19,7 +19,8 @@ import { approach, clamp } from './math';
 
 export type TriggerAction =
   | 'explode' | 'reset' | 'camera' | 'pause' | 'flip' | 'fullscreen'
-  | 'interact' | 'map' | 'gear' | 'engine1' | 'engine2' | 'engine3' | 'engine4' | 'explodeMiddle' | 'explodeTail' | 'skip';
+  | 'interact' | 'map' | 'gear' | 'engine1' | 'engine2' | 'engine3' | 'engine4' | 'explodeMiddle' | 'explodeTail' | 'skip'
+  | 'barrelLeft' | 'barrelRight' | 'lights';
 export type InputDevice = 'keyboard' | 'touch' | 'gamepad';
 export type InputMode = 'car' | 'plane';
 
@@ -31,6 +32,7 @@ export interface ControlState {
   handbrake: boolean;
   horn: boolean;
   lookBack: boolean;
+  turbo: boolean; // part 3: hold to boost (Shift; gamepad A/Cross; touch TURBO button)
   // plane
   pitch: number; // -1..1, +1 = pull (nose up)
   roll: number; // -1..1, +1 = bank right
@@ -41,7 +43,7 @@ export interface ControlState {
 }
 
 const zero = (): ControlState => ({
-  throttle: 0, brake: 0, steer: 0, handbrake: false, horn: false, lookBack: false,
+  throttle: 0, brake: 0, steer: 0, handbrake: false, horn: false, lookBack: false, turbo: false,
   pitch: 0, roll: 0, yaw: 0, throttleAxis: 0, throttleSet: -1, planeBrake: false,
 });
 
@@ -113,6 +115,9 @@ export class Input {
         case 'Digit3': case 'Numpad3': if (plane) this.press('engine3'); break;
         case 'Digit4': case 'Numpad4': if (plane) this.press('engine4'); break;
         case 'Enter': this.press('skip'); break;
+        case 'KeyQ': if (!plane) this.press('barrelLeft'); break;
+        case 'KeyE': if (!plane) this.press('barrelRight'); break;
+        case 'KeyL': if (!plane) this.press('lights'); break;
       }
     }
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'PageUp', 'PageDown'].includes(e.code)) e.preventDefault();
@@ -154,7 +159,8 @@ export class Input {
       s.steer = clamp(pick(this.keySteer, p.steer, t.steer) * this.sensitivity, -1, 1);
       s.handbrake = k.has('Space') || t.handbrake || p.handbrake;
       s.horn = k.has('KeyH') || t.horn || p.horn;
-      s.lookBack = k.has('KeyQ') || k.has('KeyB') || t.lookBack || p.lookBack;
+      s.lookBack = k.has('KeyB') || t.lookBack || p.lookBack;
+      s.turbo = k.has('ShiftLeft') || k.has('ShiftRight') || t.turbo || p.turbo;
       s.pitch = s.roll = s.yaw = s.throttleAxis = 0;
       s.throttleSet = -1;
       s.planeBrake = false;
@@ -165,6 +171,7 @@ export class Input {
       s.handbrake = true; // the parked car holds still while the player flies
       s.horn = false;
       s.lookBack = false;
+      s.turbo = false;
       const inv = this.invertPitch ? -1 : 1;
       s.pitch = clamp(pick(this.keyPitch * inv, p.pitch * inv, t.pitch), -1, 1);
       s.roll = clamp(pick(this.keyRoll, p.roll, t.roll) * this.sensitivity, -1, 1);
@@ -197,11 +204,12 @@ export class Input {
     const plane = this.mode === 'plane';
     // car
     p.steer = axis(0);
-    p.throttle = Math.max(val(7), !plane && btn(0) ? 1 : 0); // RT or A
+    p.throttle = val(7); // RT
     p.brake = val(6); // LT
-    p.handbrake = !plane && (btn(2) || btn(5)); // X/Square or RB
+    p.turbo = !plane && btn(0); // A / Cross (part 3)
+    p.handbrake = !plane && btn(2); // X / Square
     p.horn = !plane && btn(10); // L3
-    p.lookBack = !plane && btn(4); // LB
+    p.lookBack = !plane && btn(13); // D-pad down
     // plane: left stick = pitch/bank, triggers = throttle, bumpers = rudder, A = brakes
     p.roll = axis(0);
     p.pitch = axis(1); // stick pulled back (+Y) = nose up
@@ -212,7 +220,7 @@ export class Input {
     const edges: [number, TriggerAction][] = plane
       ? [[3, 'explode'], [1, 'reset'], [8, 'reset'], [11, 'camera'], [9, 'pause'], [2, 'gear'], [10, 'interact'],
          [14, 'engine1'], [12, 'engine2'], [13, 'engine3'], [15, 'engine4']]
-      : [[3, 'explode'], [1, 'reset'], [8, 'reset'], [11, 'camera'], [9, 'pause'], [12, 'interact']];
+      : [[3, 'explode'], [1, 'reset'], [8, 'reset'], [11, 'camera'], [9, 'pause'], [12, 'interact'], [4, 'barrelLeft'], [5, 'barrelRight'], [14, 'lights']];
     for (const [i, a] of edges) {
       const now = btn(i);
       if (now && !this.padPrev[i]) this.press(a);

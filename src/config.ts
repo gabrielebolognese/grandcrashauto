@@ -44,6 +44,7 @@ export const CONFIG = {
         npcCount: 30, viewDistance: 260, chunkRadius: 2,
         propDensity: 0.6, parkedCarDensity: 0.5, particleScale: 0.5,
         clouds: false, waterDetail: 0, antialias: false,
+        terrainViewDistance: 1400, treeDensity: 0.45, weatherLevel: 0, realtimeLights: 2, postFx: false,
       },
       medium: {
         pixelRatioCap: 1.5, renderScaleMin: 0.65, targetFps: 40,
@@ -51,6 +52,7 @@ export const CONFIG = {
         npcCount: 60, viewDistance: 360, chunkRadius: 3,
         propDensity: 0.85, parkedCarDensity: 0.8, particleScale: 0.75,
         clouds: true, waterDetail: 1, antialias: false,
+        terrainViewDistance: 2200, treeDensity: 0.75, weatherLevel: 1, realtimeLights: 4, postFx: true,
       },
       high: {
         pixelRatioCap: 2.0, renderScaleMin: 0.75, targetFps: 55,
@@ -58,6 +60,7 @@ export const CONFIG = {
         npcCount: 130, viewDistance: 520, chunkRadius: 4,
         propDensity: 1.0, parkedCarDensity: 1.0, particleScale: 1.0,
         clouds: true, waterDetail: 2, antialias: true,
+        terrainViewDistance: 3600, treeDensity: 1.0, weatherLevel: 2, realtimeLights: 8, postFx: true,
       },
     },
   },
@@ -69,6 +72,21 @@ export const CONFIG = {
     waterLevel: 0, // y of the ocean surface
     deepWaterDepth: 1.1, // m of water above the ground that triggers a reset
     killY: -30, // below this the car auto-resets
+    // Part 3: floating origin — shift the world when the focus is this far from the local origin (m), in steps of:
+    originShiftDistance: 2000,
+    originShiftStep: 128,
+    // Part 3 geography (overrides the part-2 island): ocean on the WEST and SOUTH, endless land NORTH/EAST.
+    // Base coast lines in ABSOLUTE coordinates (terrain adds wiggle, headlands, cliffs, islets around them).
+    coast: {
+      westX: -3800, // west coast runs north–south near this x (ocean at x < westX)
+      southZ: 350, // south coast runs east–west near this z (the city beach); ocean at z > southZ
+      wiggle: 160, // m of procedural coastline variation
+    },
+    cityBounds: { minX: -420, maxX: 420, minZ: -420, maxZ: 420 }, // flat, owned by the city generator
+    airportBounds: { minX: -3500, maxX: -700, minZ: -900, maxZ: 300 }, // flat, west of the city by the west coast
+    // Planes: out-of-map applies only over the OCEAN: distance offshore from the coast (part 2 numbers).
+    planeWarnOffshore: 5500,
+    planeFailOffshore: 6500,
     // Part 2: the city sits on an island surrounded by ocean. Map boundary = circle around the island centre.
     island: {
       minX: -2000, maxX: 2000, minZ: -2600, maxZ: 400, // land bounds (~4 × 3 km); the city occupies [-400,400]²

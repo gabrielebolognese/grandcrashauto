@@ -1,16 +1,20 @@
 # Coastline — browser 3D city driving sandbox
 
-Read `docs/SPEC.md` (part 1 brief: city driving sandbox) and `docs/SPEC-PART2.md` (part 2 brief: island, airport,
-flyable planes, engine explosions, breakups, crashes, GPS map) — the sources of truth for features — before working. This file covers architecture,
+Read `docs/SPEC.md` (part 1: city driving sandbox), `docs/SPEC-PART2.md` (part 2: airport, flyable planes, engine
+explosions, breakups, crashes, GPS map) and `docs/SPEC-PART3.md` (part 3: endless terrain, highways, day/night,
+weather, turbo, ramps — it OVERRIDES part 2's island geography) — the sources of truth — before working. This file covers architecture,
 conventions, ownership and how to verify your work.
 
 ## Commands
-- `npm run dev` — dev server (http://localhost:5173). `npm run dev:lan` exposes it on the LAN for phone testing.
+- `npm run dev` — dev server on **port 5999** (5173 is taken on this machine). The lead keeps a LIVE preview server
+  running on 5999 (the user watches the game build itself) — never kill it, never start another server on 5999.
 - `npm run typecheck` — `tsc` (TypeScript 7, strict). Must stay clean for files you own.
 - `npm run build` — static build into `dist/` (base `./`, works from any static host/sub-path).
 - `node scripts/smoke.mjs --tag <yourname>` — headless Chromium (SwiftShader) smoke test: builds into a private temp dir,
   loads `?debug&autostart`, drives (W, D, Space), explodes (X), resets (R), screenshots to `.smoke/<tag>/*.png` and prints
   a JSON summary (fps, draw calls, triangles, errors, car position…). **Always use your own `--tag`** (parallel agents).
+  Smoke runs are limited machine-wide to 2 at a time (lock files) — a run may first wait for a slot, so give the Bash
+  call `timeout: 600000`. The previous session crashed from overload: keep runs purposeful, never in tight loops.
   Options: `--mobile` (adds a 844×390 touch phone run), `--mobile-only`, `--scenario idle|menu|garage|none`,
   `--params "seed=7&foo"`, `--quality low|medium|high`, `--seconds N`, `--script my-scenario.mjs` (see header of smoke.mjs).
   View screenshots with the Read tool. SwiftShader is a slow CPU renderer: fps numbers in smoke runs are NOT representative,
@@ -67,8 +71,50 @@ conventions, ownership and how to verify your work.
   ceiling 3 km). Airport data: optional `CityData.airport` (runways, 4 stands, car park pose). Heading 0 = north (-Z).
 - Plane spec numbers (mass, rotation/stall/top speed, fuel, explosion radius) are in `CONFIG.planes` (flight owns it).
 
+## Part 3 architecture (endless world) — see the PART 3 sections of `src/game/contracts.ts`, `src/core/events.ts`
+- **Geography (overrides part 2's island):** ocean to the WEST and SOUTH, land continues forever NORTH and EAST.
+  Base coast lines in `CONFIG.world.coast` (absolute: west coast x≈-3800 running north, south coast z≈350 = the city
+  beach, running east; terrain adds wiggle/headlands/cliffs/islets). City bounds `CONFIG.world.cityBounds`, airport
+  bounds `CONFIG.world.airportBounds` (west of the city, by the west coast) are flat zones owned by the world module.
+  Planes' out-of-map applies only over the ocean: offshore distance (`world.oceanDistance` / `terrain.oceanDistance`)
+  > `planeWarnOffshore` (5.5 km) → warning, > `planeFailOffshore` (6.5 km) → failure sequence. Inland: no limit.
+  `CONFIG.world.island` is legacy (part 2) — don't build an island.
+- **FLOATING ORIGIN (`ctx.origin`, src/core/Origin.ts) — every module must respect it:**
+  - Runtime coordinates are LOCAL everywhere (scene, physics, CityData, all world/terrain/highway queries).
+    `absolute = local + ctx.origin.offset` (X/Z only). Seeded generation (terrain, highways, ramps, scatter) MUST use
+    ABSOLUTE coordinates so the same seed gives the same world.
+  - When the focus is > `CONFIG.world.originShiftDistance` (2 km) from the local origin, core shifts the world by
+    `-delta` (multiple of 128 m) between frames: all Rapier bodies + parentless colliders, every top-level
+    `engine.scene` child (incl. the camera) unless `obj.userData.noOriginShift`, every `BodyInterpolator`,
+    `GLOBAL_UNIFORMS.uOrigin`, and CityData (in place, `core/shiftData.ts`). Then it emits `originShift {delta, offset}`.
+  - In your `originShift` handler, subtract `delta` from any world-space state YOU cache: position arrays, spatial
+    hashes/grids keyed by position, NPC/particle/skid buffers you rebuild each frame (or flag their mesh
+    `noOriginShift` and shift the data), camera smoothing/spring state, kinematic targets, route polylines, cached
+    stand/airport/POI poses copied out of CityData. Shaders computing patterns/noise from world position must add
+    `GLOBAL_UNIFORMS.uOrigin` (absolute = worldPos + uOrigin) or patterns will jump.
+- **`ctx.terrain: ITerrain`** (src/terrain): worker-pool chunk streaming (128 m), biomes, low-poly terrain, LODs,
+  heightfield colliders near the player, instanced scatter props, distant mountain ring, coast features, lakes.
+  **`ctx.highways: IHighways`** (src/highway): endless highway network (coastal + mountain + branches), terrain
+  corridor carving data, bridges, tunnels, galleries, guardrails, signs, lights, rest stops, ramps (kickers, mega
+  jumps, natural jumps), optional traffic; its road graph joins the city graph at interchanges for nav A*.
+  Pure, worker-safe generation code: `src/terrain/gen/**` (height/biome functions; terrain owns) and
+  `src/highway/net/**` (network/corridor functions; highway owns) — each may import the other's pure functions.
+  The world module delegates `groundHeightAt/surfaceAt/findRespawn/isDeepWater/oceanDistance` outside the city +
+  airport to terrain/highways.
+- **Day/night + weather** (env): clock (`settings.dayLengthMin`, `timeLocked`, `env.setTime`), weather state machine
+  (`settings.weather` 'auto' or locked kind), `env.weather` (grip, wetness, fog, rain, snow, storm, wind), events
+  `weatherChanged`, `lightning`; GLOBAL_UNIFORMS `uWetness uRain uSnow uSnowLine uWind uFogDensity uLightning`;
+  `env.patchMaterial(mat, kind)` adds wetness/puddles/snow to road/ground materials (owners of road/ground materials call it).
+- **Turbo + stunts** (vehicle): `input.state.turbo` (Shift / pad A / touch TURBO), triggers `barrelLeft`/`barrelRight`
+  (Q/E / bumpers / touch), `lights` (L: low/high beam); `VehicleState.turboCharge/turboActive/airborne3/headlights`;
+  events `turbo {on}`, `stunt {kind…}`. `CarBuild.perf.turbo` (0..2) garage upgrade.
+- **Light budget** (never add/remove lights at runtime): sun/moon directional (env), player headlight spot pair
+  (vehicle), `quality.current.realtimeLights` pooled point lights for the nearest streetlights (props), 2–4 pooled fx
+  fire lights (fx). New quality fields: `terrainViewDistance, treeDensity, weatherLevel, realtimeLights, postFx`.
+
 ## Conventions
-- Units: meters, seconds, kilograms, newtons, radians. Y is up. City spans [-400, 400] on X and Z; the ocean is at +Z (south).
+- Units: meters, seconds, kilograms, newtons, radians. Y is up. City spans [-400, 400] on X and Z (absolute); the
+  ocean is south (+Z) and west (-X); endless land north (-Z) and east (+X).
 - Yaw: rotation about +Y; yaw 0 faces +Z; forward = (sin yaw, 0, cos yaw); right = (-cos yaw, 0, sin yaw).
 - Cars face +Z in local space; their LEFT side is +X. Wheel order everywhere: FL, FR, RL, RR (FL at +X, +Z).
 - Rapier raycast vehicle: `indexUpAxis = 1`, `setIndexForwardAxis = 2` (sic — that's the setter's name in 0.21),
@@ -119,6 +165,8 @@ conventions, ownership and how to verify your work.
 | flight (part 2) | `src/plane/**` except `models/`, `breakup/` and `types.ts` |
 | breakup (part 2) | `src/plane/breakup/**` |
 | nav (part 2) | `src/nav/**`, `src/ui/map/**` |
+| terrain (part 3) | `src/terrain/**` |
+| highway (part 3) | `src/highway/**` |
 
 Shared files: `src/config.ts` (edit only your section; re-read right before editing — others edit it concurrently),
 `src/game/contracts.ts`, `src/core/events.ts`, `src/world/types.ts`, `src/plane/types.ts` (only ADD optional members/events if you truly need them,

@@ -26,6 +26,12 @@ export interface Settings {
   flightAssisted: boolean; // Assisted (default) / Realistic
   flightTilt: boolean; // tilt the phone to steer the plane
   invertPitch: boolean; // stick up = nose up when true
+  // part 3: time, weather, traffic, post fx
+  dayLengthMin: number; // 4..120 real minutes per game day
+  timeLocked: boolean;
+  weather: 'auto' | 'clear' | 'fewClouds' | 'cloudy' | 'overcast' | 'lightRain' | 'heavyRain' | 'storm' | 'fog' | 'snow'; // non-auto = locked
+  traffic: boolean; // optional light highway traffic
+  postFx: boolean; // turbo blur / chromatic aberration (Medium/High)
   // gameplay
   units: 'kmh' | 'mph';
   autoReset: boolean; // auto reset 6 s after explosion
@@ -56,6 +62,11 @@ export const DEFAULT_SETTINGS: Settings = {
   flightAssisted: true,
   flightTilt: false,
   invertPitch: false,
+  dayLengthMin: 24,
+  timeLocked: false,
+  weather: 'auto',
+  traffic: false,
+  postFx: true,
   units: 'kmh',
   autoReset: false,
   muted: false,
@@ -77,6 +88,8 @@ export function normalizeSettings(raw: unknown): Settings {
   if (!['day', 'sunset', 'night'].includes(out.timeOfDay)) out.timeOfDay = 'day';
   if (!['slider', 'buttons', 'tilt'].includes(out.steeringMode)) out.steeringMode = 'slider';
   if (!['kmh', 'mph'].includes(out.units)) out.units = 'kmh';
+  if (!['auto', 'clear', 'fewClouds', 'cloudy', 'overcast', 'lightRain', 'heavyRain', 'storm', 'fog', 'snow'].includes(out.weather)) out.weather = 'auto';
+  out.dayLengthMin = Math.min(120, Math.max(4, out.dayLengthMin));
   return out;
 }
 
@@ -108,6 +121,6 @@ export class SettingsStore {
   /** Apply a quality preset: sets the preset and resets the per-feature toggles to the preset's values. */
   applyPreset(level: QualityLevel, userSet: boolean): void {
     const p = CONFIG.quality.presets[level];
-    this.set({ quality: level, qualityUserSet: userSet, shadows: p.shadows, bloom: p.bloom, npcDensity: 1, renderScale: 1 });
+    this.set({ quality: level, qualityUserSet: userSet, shadows: p.shadows, bloom: p.bloom, npcDensity: 1, renderScale: 1, postFx: p.postFx });
   }
 }

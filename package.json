@@ -4,13 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:lan": "vite --host",
+    "dev": "vite --port 5999",
+    "dev:lan": "vite --host --port 5999",
     "build": "vite build",
     "preview": "vite preview --host",
     "typecheck": "tsc -p tsconfig.json",
     "smoke": "node scripts/smoke.mjs",
-    "check": "npm run typecheck && npm run build && npm run smoke"
+    "check": "npm run typecheck && npm run build && npm run smoke",
+    "live": "vite --host --port 5999"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
