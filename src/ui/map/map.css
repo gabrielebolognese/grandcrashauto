@@ -36,6 +36,44 @@
 .nm-canvas.dragging {
   cursor: grabbing;
 }
+/* player pulse: CSS-animated so the map canvas never needs idle redraws */
+.nm-pulse {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.nm-pulse i {
+  position: absolute;
+  left: -22px;
+  top: -22px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 122, 107, 0.8);
+  background: rgba(255, 122, 107, 0.1);
+  animation: nm-pulse 1.6s ease-out infinite;
+}
+@keyframes nm-pulse {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+/* no backdrop blur over the (redrawn) map canvas: costly on phones; near-opaque glass instead */
+.nav-map .panel,
+.nav-map .nm-title {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--glass-strong);
+}
 .nm-vignette {
   position: absolute;
   inset: 0;

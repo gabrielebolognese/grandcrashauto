@@ -20,9 +20,9 @@ export const ST = {
 export const ST_COUNT = 16;
 /** Types drawn with the structures BatchedMesh (few, varied); the rest are InstancedMeshes. */
 export const ST_IS_STRUCTURE = [false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true];
-/** Floats per instance: 16 (matrix, translation relative to the chunk corner, y absolute) + 4 (rgb tint, rank). */
+/** Floats per instance: 16 (matrix, translation relative to the chunk corner, y absolute) + 3 (rgb tint) + 1 (rank). */
 export const ST_MAT = 16;
-export const ST_COL = 4;
+export const ST_COL = 3;
 
 export interface ScatterData {
   cx: number;
@@ -31,4 +31,6 @@ export interface ScatterData {
   offsets: Int32Array; // per type, instance offset into mats/cols
   mats: Float32Array;
   cols: Float32Array;
+  /** per instance, ascending within each type (so "rank < density" is a prefix → memcpy rebuilds) */
+  ranks: Float32Array;
 }

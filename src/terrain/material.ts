@@ -14,7 +14,7 @@ import type { GameContext } from '../game/contracts';
  */
 
 export const TERRAIN_UNIFORMS = {
-  /** x = haze mul, y = terrain view distance (m), z = squash enabled (0/1), w = unused */
+  /** x = haze mul, y = terrain view distance incl. altitude boost (m), z = squash enabled (0/1), w = base (ground) view distance */
   uTHaze: { value: new THREE.Vector4(0.62, 2200, 1, 0) },
   /** x = squash start, y = squash limit, z = falloff (m) */
   uTSquash: { value: new THREE.Vector3(1e6, 1e6 + 1, 1000) },
@@ -53,13 +53,14 @@ vec3 terrainHaze(vec3 col) {
   vec3 V = (vTWorld - cameraPosition) / max(d, 1e-3);
   // aerial perspective follows our view distance; dense weather fog / cloud whiteout (short env fog) takes over
   float hd = uTHaze.y * uTHaze.x;
-  hd = mix(hd, max(uFogFar * 0.55, 22.0), 1.0 - smoothstep(0.35, 0.8, uFogFar / max(uTHaze.y, 1.0)));
-  float hz = 1.0 - exp(-pow(d / hd, 1.6));
-  hz *= mix(1.0, 0.8, smoothstep(0.0, 1100.0, vTWorld.y));
+  hd = mix(hd, max(uFogFar * 0.55, 22.0), 1.0 - smoothstep(0.3, 0.75, uFogFar / max(uTHaze.w, 1.0)));
+  float hz = 1.0 - exp(-pow(d / hd, 1.7));
+  // thinner air: less haze along rays that stay high (camera and point altitude)
+  hz *= exp(-max(0.0, 0.5 * (cameraPosition.y + vTWorld.y)) / 2600.0);
   hz = max(hz, smoothstep(uTHaze.y * 0.82, uTHaze.y, d));
   vec3 hazeCol = uFogColor + uSunColor * pow(max(dot(V, uSunDir), 0.0), 6.0) * (1.0 - uNight) * 0.2;
   float mid = smoothstep(200.0, 1800.0, d) * (1.0 - uNight * 0.7);
-  col = mix(col, col * vec3(0.9, 0.95, 1.04) + hazeCol * 0.03, mid * 0.4);
+  col = mix(col, col * vec3(0.9, 0.95, 1.04) + hazeCol * 0.03, mid * 0.3);
   return mix(col, hazeCol, clamp(hz, 0.0, 1.0));
 }
 `;
@@ -277,10 +278,11 @@ export function createWaterMaterial(): THREE.MeshStandardMaterial {
 }
 
 /** Keep the haze/squash uniforms in sync with the camera + view distance (call once per frame). */
-export function updateTerrainUniforms(camera: THREE.PerspectiveCamera, viewDistance: number): void {
+export function updateTerrainUniforms(camera: THREE.PerspectiveCamera, viewDistance: number, baseViewDistance = viewDistance): void {
   const T = TERRAIN_UNIFORMS;
   T.uTHaze.value.x = CONFIG.terrain.hazeMul;
   T.uTHaze.value.y = viewDistance;
+  T.uTHaze.value.w = baseViewDistance;
   const far = camera.far;
   const start = far * 0.6;
   const limit = far * 0.86; // inside the env sky sphere (0.9 × far)

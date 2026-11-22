@@ -180,7 +180,7 @@ export class Terrain implements ITerrain {
     this.ring.update(camX, camZ, this.viewDist);
     this.tick('ring');
     this.features.update(dt, camX, camZ);
-    updateTerrainUniforms(cam, this.viewDist);
+    updateTerrainUniforms(cam, this.viewDist, q.terrainViewDistance ?? 2200);
     this.tick('features');
   }
 
@@ -326,7 +326,7 @@ export class Terrain implements ITerrain {
     };
     const hc = (d: ChunkData) => hash(d.heights, d.surf, d.biome);
     const ht = (d: TileMesh) => hash(d.positions, d.colors, d.index);
-    const hs = (d: ScatterData) => hash(d.counts, d.mats, d.cols);
+    const hs = (d: ScatterData) => hash(d.counts, d.mats, d.cols, d.ranks);
     const C = { cx: 15, cz: -24 };
     const Tl = { level: 1, tx: 14, tz: -20 };
     const S = { cx: 20, cz: -30 };

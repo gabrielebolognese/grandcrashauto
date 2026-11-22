@@ -27,7 +27,7 @@ export const KEY_CHUNK = 2 ** 46;
 export const KEY_SCATTER = 2 ** 47;
 export const KEY_RING = 2 ** 48;
 
-const MAX_IN_FLIGHT = 2;
+const MAX_IN_FLIGHT = 3;
 
 export class WorkerPool {
   private workers: { w: Worker; inFlight: number }[] = [];
@@ -58,7 +58,8 @@ export class WorkerPool {
     if (this.workers.length || this.fallback) return;
     const cfg = CONFIG.terrain.workers;
     const hc = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
-    const n = cfg > 0 ? cfg : Math.max(2, Math.min(4, hc - 2));
+    // leave cores for the main thread / audio / physics (smooth frames beat faster streaming)
+    const n = cfg > 0 ? cfg : Math.max(2, Math.min(3, Math.floor(hc / 2)));
     const config = JSON.parse(JSON.stringify({ world: CONFIG.world, terrain: CONFIG.terrain, highway: (CONFIG as Record<string, unknown>).highway ?? null }));
     try {
       for (let i = 0; i < n; i++) {
@@ -128,17 +129,20 @@ export class WorkerPool {
       }
       return;
     }
-    for (let wi = 0; wi < this.workers.length; wi++) {
-      const wk = this.workers[wi];
-      while (wk.inFlight < MAX_IN_FLIGHT && this.queue.size) {
-        const j = this.popBest();
-        if (!j) break;
-        const id = this.nextId++;
-        this.inFlight.set(id, { key: j.key, type: j.msg.type, worker: wi });
-        this.inFlightKeys.add(j.key);
-        wk.inFlight++;
-        wk.w.postMessage({ ...j.msg, id });
-      }
+    for (let wi = 0; wi < this.workers.length; wi++) this.refill(wi);
+  }
+
+  /** Keep a worker busy (also called right when it returns a result, independent of the frame rate). */
+  private refill(wi: number): void {
+    const wk = this.workers[wi];
+    while (wk.inFlight < MAX_IN_FLIGHT && this.queue.size) {
+      const j = this.popBest();
+      if (!j) break;
+      const id = this.nextId++;
+      this.inFlight.set(id, { key: j.key, type: j.msg.type, worker: wi });
+      this.inFlightKeys.add(j.key);
+      wk.inFlight++;
+      wk.w.postMessage({ ...j.msg, id });
     }
   }
 
@@ -186,6 +190,7 @@ export class WorkerPool {
       return;
     }
     if (!job) return;
+    this.refill(wi);
     this.stats.done++;
     this.stats.ms += m.ms ?? 0;
     try {

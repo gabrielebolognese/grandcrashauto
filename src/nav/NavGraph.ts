@@ -24,6 +24,8 @@ export interface BaseEdge {
   /** From the highway network (vs the city). */
   hw: boolean;
   dead: boolean;
+  /** Lateral offset (m) of the travel lanes to the right of the centreline (two-way roads), 0 for one-ways. */
+  lat: number;
 }
 
 export interface Snap {
@@ -50,6 +52,8 @@ export interface RawPath {
   pts: number[];
   node: number[];
   offroad: number[];
+  /** Lateral offset (m, to the right of travel) of the segment starting at each point. */
+  lat: number[];
   partial: boolean;
   uturnStart: boolean;
   cost: number;
@@ -156,7 +160,8 @@ export class NavGraph {
           if (flat.length < 6) continue;
         }
         const kmh = e.speedLimitKmh > 0 ? e.speedLimitKmh : (KIND_KMH[e.kind] ?? 40);
-        G.addBase(flat, a, b, !!e.oneWay, kmh / 3.6, e.kind ?? 'street2', src.hw);
+        const lat = e.oneWay || !(e.width > 0) ? 0 : Math.min(9, e.width / 4);
+        G.addBase(flat, a, b, !!e.oneWay, kmh / 3.6, e.kind ?? 'street2', src.hw, lat);
       }
     }
 
@@ -166,7 +171,7 @@ export class NavGraph {
     return G;
   }
 
-  private addBase(flat: number[], a: number, b: number, oneWay: boolean, speed: number, kind: string, hw: boolean): number {
+  private addBase(flat: number[], a: number, b: number, oneWay: boolean, speed: number, kind: string, hw: boolean, lat = 0): number {
     const n = flat.length / 3;
     const pts = new Float64Array(flat);
     const cum = new Float64Array(n);
@@ -176,7 +181,7 @@ export class NavGraph {
       const dz = pts[i * 3 + 2] - pts[i * 3 - 1];
       cum[i] = cum[i - 1] + Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
-    this.base.push({ pts, cum, len: Math.max(0.01, cum[n - 1]), a, b, oneWay, speed: Math.max(2, speed), kind, hw, dead: false });
+    this.base.push({ pts, cum, len: Math.max(0.01, cum[n - 1]), a, b, oneWay, speed: Math.max(2, speed), kind, hw, dead: false, lat });
     return this.base.length - 1;
   }
 
@@ -229,8 +234,8 @@ export class NavGraph {
     B.push(s.x, s.y, s.z);
     for (let i = s.seg + 1; i < n; i++) pushPoint(B, e.pts[i * 3], e.pts[i * 3 + 1], e.pts[i * 3 + 2]);
     e.dead = true;
-    const ea = A.length >= 6 ? this.addBase(A, e.a, id, e.oneWay, e.speed, e.kind, e.hw) : -1;
-    const eb = B.length >= 6 ? this.addBase(B, id, e.b, e.oneWay, e.speed, e.kind, e.hw) : -1;
+    const ea = A.length >= 6 ? this.addBase(A, e.a, id, e.oneWay, e.speed, e.kind, e.hw, e.lat) : -1;
+    const eb = B.length >= 6 ? this.addBase(B, id, e.b, e.oneWay, e.speed, e.kind, e.hw, e.lat) : -1;
     if (ea >= 0) this.indexEdge(ea);
     if (eb >= 0) this.indexEdge(eb);
     return id;
@@ -573,15 +578,17 @@ export class NavGraph {
     const pts: number[] = [];
     const node: number[] = [];
     const off: number[] = [];
-    const push = (from: number[], nodeId: number) => {
-      // append flat points, marking only the last one with nodeId
+    const lat: number[] = [];
+    const push = (from: number[], nodeId: number, latV = 0) => {
+      // append flat points (lateral offset latV for this leg), marking only the last one with nodeId
       for (let i = 0; i < from.length; i += 3) {
         const before = pts.length;
         pushPoint(pts, from[i], from[i + 1], from[i + 2]);
         if (pts.length > before) {
           node.push(-1);
           off.push(0);
-        }
+          lat.push(latV);
+        } else if (i === 0 && lat.length) lat[lat.length - 1] = latV; // the shared junction point starts this leg
       }
       if (nodeId >= 0 && node.length) node[node.length - 1] = nodeId;
     };
@@ -590,8 +597,8 @@ export class NavGraph {
       // nothing reachable beyond the start edge: just go along it in the heading's direction
       tmp.length = 0;
       this.appendRange(tmp, start.edge, start.s, fwdDot >= 0 || se.oneWay ? se.len : 0);
-      push(tmp, -1);
-      return { pts, node, offroad: off, partial: true, uturnStart: false, cost: 0, expansions: exp };
+      push(tmp, -1, se.lat);
+      return { pts, node, offroad: off, lat, partial: true, uturnStart: false, cost: 0, expansions: exp };
     }
     // chain of nodes back to S
     const chain: number[] = [];
@@ -602,8 +609,8 @@ export class NavGraph {
       if (pc === -4 || pc === -5) {
         tmp.length = 0;
         this.appendRange(tmp, start.edge, start.s, goal!.s);
-        push(tmp, -1);
-        return { pts, node, offroad: off, partial: false, uturnStart: pc === -5 ? penR > 0 : penF > 0, cost: g[T], expansions: exp };
+        push(tmp, -1, se.lat);
+        return { pts, node, offroad: off, lat, partial: false, uturnStart: pc === -5 ? penR > 0 : penF > 0, cost: g[T], expansions: exp };
       }
       v = goalVia;
     }
@@ -619,7 +626,7 @@ export class NavGraph {
     const firstCode = parent[chain[0]];
     tmp.length = 0;
     this.appendRange(tmp, start.edge, start.s, firstCode === -2 ? se.len : 0);
-    push(tmp, chain[0]);
+    push(tmp, chain[0], se.lat);
     const uturnStart = firstCode === -2 ? penF > 0 : penR > 0;
     for (let i = 1; i < chain.length; i++) {
       const d = parent[chain[i]];
@@ -628,15 +635,15 @@ export class NavGraph {
       tmp.length = 0;
       if (this.dRev[d]) this.appendRange(tmp, bi, e.len, 0);
       else this.appendRange(tmp, bi, 0, e.len);
-      push(tmp, chain[i]);
+      push(tmp, chain[i], e.lat);
     }
     if (endNode === T && ge && goal) {
       tmp.length = 0;
       if (goalDir === 0) this.appendRange(tmp, goal.edge, 0, goal.s);
       else this.appendRange(tmp, goal.edge, ge.len, goal.s);
-      push(tmp, -1);
+      push(tmp, -1, ge.lat);
     }
-    return { pts, node, offroad: off, partial: endNode !== T, uturnStart, cost: endNode === T ? g[T] : g[endNode], expansions: exp };
+    return { pts, node, offroad: off, lat, partial: endNode !== T, uturnStart, cost: endNode === T ? g[T] : g[endNode], expansions: exp };
   }
 
   /** Index of the directed edge of base edge `ei` in direction `rev` (0 = a→b, 1 = b→a), or -1. */

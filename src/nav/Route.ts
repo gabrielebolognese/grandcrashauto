@@ -23,6 +23,8 @@ export class Route {
   readonly cum: Float64Array;
   /** 1 = the segment starting at this point is off-road (straight connector). */
   readonly offroad: Uint8Array;
+  /** Lateral offset (m, right of travel) of the segment starting at each point (ribbon on the travel lanes). */
+  readonly lat: Float32Array;
   readonly length: number;
   readonly maneuvers: Maneuver[] = [];
   readonly partial: boolean;
@@ -51,7 +53,9 @@ export class Route {
     this.z = new Float64Array(n);
     this.cum = new Float64Array(n);
     this.offroad = new Uint8Array(n);
+    this.lat = new Float32Array(n);
     for (let i = 0; i < n; i++) {
+      this.lat[i] = raw.lat?.[i] ?? 0;
       this.x[i] = raw.pts[i * 3];
       this.y[i] = raw.pts[i * 3 + 1];
       this.z[i] = raw.pts[i * 3 + 2];
@@ -114,7 +118,7 @@ export class Route {
    * Ribbon track sample i (s = i · TRACK_STEP): x/z rounded through corners (box filter ±4.5 m, ends anchored),
    * y = route height, off = 1 on off-road legs.
    */
-  trackSample(i: number, out: { x: number; y: number; z: number; off: number }): void {
+  trackSample(i: number, out: { x: number; y: number; z: number; off: number; lat: number }): void {
     const n = this.trackN;
     i = Math.max(0, Math.min(n - 1, i));
     const s = Math.min(this.length, i * TRACK_STEP);
@@ -124,16 +128,20 @@ export class Route {
     const r = Math.min(3, i, n - 1 - i);
     let ax = this.tmpP.x;
     let az = this.tmpP.z;
+    let la = this.n > 1 ? this.lat[seg] : 0;
     for (let k = 1; k <= r; k++) {
-      this.pointAtSeg(s - k * TRACK_STEP, this.tmpP);
+      let sg = this.pointAtSeg(s - k * TRACK_STEP, this.tmpP);
       ax += this.tmpP.x;
       az += this.tmpP.z;
-      this.pointAtSeg(s + k * TRACK_STEP, this.tmpP);
+      la += this.lat[sg] ?? 0;
+      sg = this.pointAtSeg(s + k * TRACK_STEP, this.tmpP);
       ax += this.tmpP.x;
       az += this.tmpP.z;
+      la += this.lat[sg] ?? 0;
     }
     out.x = ax / (2 * r + 1);
     out.z = az / (2 * r + 1);
+    out.lat = la / (2 * r + 1);
   }
 
   get remaining(): number {

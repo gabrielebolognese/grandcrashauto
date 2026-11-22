@@ -7,6 +7,16 @@ export default async function (page, h) {
   const stepM = Number(process.env.PLATEAU_STEP_M || 190);
   const waitMs = Number(process.env.PLATEAU_WAIT_MS || 1400);
   await h.wait(1500);
+  if (!process.env.PLATEAU_NO_DET) {
+    // determinism across a page reload (main thread vs 2 workers, then again after reload)
+    const a = await h.game(`return window.__terrain.debugDeterminism();`);
+    await page.reload();
+    await page.waitForFunction(() => { const s = window.__game?.game?.state; return s && s !== 'boot'; }, null, { timeout: 120000 });
+    await h.wait(1500);
+    const b = await h.game(`return window.__terrain.debugDeterminism();`);
+    const same = JSON.stringify(a) === JSON.stringify(b) && [a.chunk, a.tile, a.scatter].every((l) => l.every((x) => x === l[0]));
+    console.error('[det]', JSON.stringify(a), 'reload:', JSON.stringify(b), 'identical:', same);
+  }
   const log = [];
   const t0 = Date.now();
   for (let k = 0; k <= steps; k++) {

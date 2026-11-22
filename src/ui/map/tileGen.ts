@@ -159,8 +159,9 @@ export function genTerrainTile(req: TileRequest): Uint8ClampedArray {
         if (hl >= lake || hr >= lake || hu >= lake || hd >= lake) mix(col, col, C_FOAM, 0.6);
       } else if (water) {
         const depth = wl - h;
-        if (depth < 6) mix(col, C_SHALLOW, C_SEA, smooth(0, 6, depth));
-        else mix(col, C_SEA, C_DEEP, smooth(6, 40, depth));
+        // shallow → sea → deep; uniform beyond ~18 m so the seabed's large-scale shapes don't band the open ocean
+        if (depth < 5) mix(col, C_SHALLOW, C_SEA, smooth(0, 5, depth));
+        else mix(col, C_SEA, C_DEEP, smooth(5, 18, depth));
         if (hl >= wl || hr >= wl || hu >= wl || hd >= wl) mix(col, col, C_FOAM, 0.75);
       } else {
         const dx = (hr - hl) / (2 * mpp);

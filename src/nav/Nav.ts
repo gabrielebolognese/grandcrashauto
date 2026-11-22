@@ -189,6 +189,10 @@ export class Nav implements INav {
       p.pose.position.x = p.ax - o.x;
       p.pose.position.z = p.az - o.z;
     }
+    // a city POI sharing its name with a generated one (the city 'Big Jump' vs the highway one) gets a suffix
+    const names = new Set<string>();
+    for (const p of this.poiMap.values()) if (p.source !== 'city' && seen.has(p.id)) names.add(p.name);
+    for (const p of this.poiMap.values()) if (p.source === 'city' && names.has(p.name)) p.name = `${p.name} (City)`;
     for (const [id, p] of this.poiMap) {
       if (!seen.has(id) && p !== this.destination) {
         this.poiMap.delete(id);
@@ -354,6 +358,7 @@ export class Nav implements INav {
             raw.pts.unshift(car.x, start.y, car.z);
             raw.node.unshift(-1);
             raw.offroad.unshift(1);
+            raw.lat.unshift(0);
           }
           const n = raw.pts.length / 3;
           const ex = raw.pts[n * 3 - 3];
@@ -364,15 +369,17 @@ export class Nav implements INav {
           } else if (endD > C.arriveRadius * 0.6) {
             // last bit off the network (POI away from the road, or network not generated toward it yet)
             raw.offroad[raw.offroad.length - 1] = 1;
+            raw.lat[raw.lat.length - 1] = 0;
             raw.pts.push(dest.ax, dest.ay, dest.az);
             raw.node.push(-1);
             raw.offroad.push(0);
+            raw.lat.push(0);
           }
         }
       }
     }
     if (!raw) {
-      raw = { pts: [car.x, car.y, car.z, dest.ax, dest.ay, dest.az], node: [-1, -1], offroad: [1, 0], partial: true, uturnStart: false, cost: 0, expansions: 0 };
+      raw = { pts: [car.x, car.y, car.z, dest.ax, dest.ay, dest.az], node: [-1, -1], offroad: [1, 0], lat: [0, 0], partial: true, uturnStart: false, cost: 0, expansions: 0 };
     }
     const route = new Route(raw, dest.ax, dest.az, g, C.turnAngleDeg);
     this.active = route;
@@ -495,7 +502,7 @@ export class Nav implements INav {
     const t = this.nextTurn;
     const onTail = r.partial && r.offroad[Math.min(r.n - 1, r.seg)] === 1;
     const sub = this.rerouteFlash > 0 ? 'Rerouting…' : `${this.destination.name} · ${formatDistance(r.remaining, units)}${onTail ? ' · off-road' : ''}`;
-    card.set(t.direction, formatDistance(t.distance, units), sub, t.distance < 60 && t.direction !== 'straight' && t.direction !== 'arrive', r.partial && t.direction !== 'arrive');
+    card.set(t.direction, t.distance < 8 && t.direction !== 'straight' ? 'Now' : formatDistance(t.distance, units), sub, t.distance < 60 && t.direction !== 'straight' && t.direction !== 'arrive', r.partial && t.direction !== 'arrive');
   }
 
   // ─────────────────────────────── teleport ───────────────────────────────

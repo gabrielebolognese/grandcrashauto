@@ -179,6 +179,6 @@ export function buildFarCar(): THREE.BufferGeometry {
     b.add(box(0.38, 0.1, 0.05), '#e2251f', { paint: 0.25 }, M(x * 0.62, spec.tlY, -2.14));
   }
   b.add(box(1.5, 0.5, 3.2), '#101214', {}, M(0, 0.4, 0));
-  for (const z of [spec.wf, spec.wr]) for (const x of [-0.79, 0.79]) b.add(cylX(spec.r, spec.tw, 7), '#1b1d20', {}, M(x, spec.r, z));
+  for (const z of [spec.wf, spec.wr]) for (const x of [-0.79, 0.79]) b.add(cylX(spec.r, spec.tw, 6), '#1b1d20', {}, M(x, spec.r, z));
   return b.build();
 }

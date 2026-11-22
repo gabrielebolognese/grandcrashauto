@@ -1123,7 +1123,7 @@ export const CONFIG = {
     // tuning targets: lift-off time ≈ takeoffS, distance to clear 35 ft ≈ takeoffRollM.
     prop: {
       mass: 1100, rotationKmh: 105, stallKmh: 85, topKmh: 280, takeoffRollM: 250, takeoffS: 8, engines: 1, fuelKg: 150, explosionRadius: 10, glideRatio: 9,
-      cruiseKmh: 210, wingArea: 18, span: 11, oswald: 0.75, cl0: 0.35, clAlpha: 5.0, stallDeg: 14.7, cd0: 0.045, cm0: -0.04,
+      cruiseKmh: 210, wingArea: 18, span: 11, oswald: 0.75, cl0: 0.35, clAlpha: 5.0, stallDeg: 14.7, cd0: 0.051, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.6, finVolume: 0.07, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.04, gearCD: 0, retractable: false, flapsUpKmh: 150, flapsLandKmh: 120,
       thrust: 5933, propV0: 195, thrustLapse: 0, waveDrag: 0, spoolS: 1, idle: 0.06,
@@ -1133,30 +1133,30 @@ export const CONFIG = {
     },
     bizjet: {
       mass: 16000, rotationKmh: 200, stallKmh: 170, topKmh: 850, takeoffRollM: 900, takeoffS: 16, engines: 2, fuelKg: 4000, explosionRadius: 25, glideRatio: 15,
-      cruiseKmh: 520, wingArea: 70, span: 16, oswald: 0.8, cl0: 0.25, clAlpha: 4.6, stallDeg: 15.2, cd0: 0.008, cm0: -0.04,
+      cruiseKmh: 520, wingArea: 70, span: 16, oswald: 0.8, cl0: 0.25, clAlpha: 4.6, stallDeg: 15.2, cd0: 0.0072, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 4, wingAcFrac: 0.08, tailVolume: 0.65, finVolume: 0.07, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 290, flapsLandKmh: 235,
-      thrust: 34900, propV0: 0, thrustLapse: 0.3, waveDrag: 0.11, spoolS: 2.5, idle: 0.06,
+      thrust: 34900, propV0: 0, thrustLapse: 0.3, waveDrag: 0.17, spoolS: 2.5, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.35, rollRateDeg: 65, yawAccel: 1.0, damping: [0.05, 0.02, 0.04],
       pitchRateDeg: 14, gammaK: 0.9, bankK: 1.8, pitchRateK: 5, rollRateK: 6,
       rotatePitchDeg: 9, rotateRateDeg: 5.5, brakeDecel: 4, steerDeg: 45, suspension: [0.42, 0.3, 1.1], turbulence: 0.6,
     },
     airliner: {
       mass: 70000, rotationKmh: 260, stallKmh: 215, topKmh: 880, takeoffRollM: 1500, takeoffS: 22, engines: 2, fuelKg: 18000, explosionRadius: 45, glideRatio: 15,
-      cruiseKmh: 520, wingArea: 180, span: 35, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 15.5, cd0: 0.0152, cm0: -0.04,
+      cruiseKmh: 520, wingArea: 180, span: 35, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 15.5, cd0: 0.0138, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.7, finVolume: 0.075, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 350, flapsLandKmh: 290,
-      thrust: 146000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.18, spoolS: 3.5, idle: 0.06,
+      thrust: 146000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.22, spoolS: 3.5, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.3, rollRateDeg: 32, yawAccel: 0.6, damping: [0.06, 0.03, 0.05],
       pitchRateDeg: 8, gammaK: 0.65, bankK: 1.1, pitchRateK: 3.5, rollRateK: 3.5,
       rotatePitchDeg: 8.5, rotateRateDeg: 4.5, brakeDecel: 3.5, steerDeg: 50, suspension: [0.55, 0.3, 1.1], turbulence: 0.35,
     },
     jumbo: {
       mass: 330000, rotationKmh: 295, stallKmh: 245, topKmh: 920, takeoffRollM: 1900, takeoffS: 30, engines: 4, fuelKg: 150000, explosionRadius: 70, glideRatio: 15,
-      cruiseKmh: 540, wingArea: 650, span: 64, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 15.9, cd0: 0.0133, cm0: -0.04,
+      cruiseKmh: 540, wingArea: 650, span: 64, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 15.9, cd0: 0.0125, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 6, wingAcFrac: 0.08, tailVolume: 0.75, finVolume: 0.08, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 390, flapsLandKmh: 320,
-      thrust: 292000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.19, spoolS: 4, idle: 0.06,
+      thrust: 292000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.25, spoolS: 4, idle: 0.06,
       inertiaScale: [1.15, 1.1, 1.35], pitchAuthority: 1.25, rollRateDeg: 17, yawAccel: 0.35, damping: [0.07, 0.04, 0.06],
       pitchRateDeg: 5, gammaK: 0.45, bankK: 0.7, pitchRateK: 2.5, rollRateK: 2.2,
       rotatePitchDeg: 8, rotateRateDeg: 3.5, brakeDecel: 3, steerDeg: 55, suspension: [0.7, 0.3, 1.1], turbulence: 0.25,
@@ -1290,7 +1290,7 @@ export const CONFIG = {
     cacheChunks: 260, // LRU of collider chunks
     cacheScatter: 520, // LRU of scatter chunks
     carveMaxLevel: 3, // highway corridors carved up to this render level (16 m cells)
-    hazeMul: 0.72, // atmospheric haze e-folding distance = view distance × this
+    hazeMul: 0.95, // atmospheric haze e-folding distance = view distance × this
     snowJitter: 45, // m of per-face jitter of the snow line
     scatter: {
       radius: { low: 600, medium: 850, high: 1300 }, // m: trees beyond this are not drawn

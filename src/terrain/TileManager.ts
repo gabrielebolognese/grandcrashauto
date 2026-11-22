@@ -41,6 +41,8 @@ export class TileManager {
   private slots: (TileRec | null)[] = [];
   private slotGeom: number[] = [];
   private slotInst: number[] = [];
+  private slotVis: number[] = [];
+  private visScratch: number[] = [];
   private uploadQueue: TileRec[] = [];
   private frame = 0;
   private drawList: TileRec[] = [];
@@ -87,6 +89,7 @@ export class TileManager {
     this.slots.push(null);
     this.slotGeom.push(g);
     this.slotInst.push(inst);
+    this.slotVis.push(0);
     return this.slots.length - 1;
   }
 
@@ -157,6 +160,12 @@ export class TileManager {
     if (rec && rec.slot >= 0) dy = Math.max(0, cy - rec.maxY);
     const d = Math.sqrt(d2 * d2 + dy * dy);
     if (level > 0 && d < lod0 * (1 << (level - 1))) {
+      // coarse internal nodes are coverage insurance: keep them (and get them) so a fast camera never sees holes
+      if (level >= 2) {
+        const ir = this.getRec(level, tx, tz);
+        ir.lastWanted = this.frame;
+        if (ir.slot < 0 && !ir.data) this.pool.wantJob(ir.key, d + 420 - level * 60, 'tile', level, tx, tz);
+      }
       const l = level - 1;
       this.visit(l, tx * 2, tz * 2, cx, cy, cz, dyCam, viewDist, lod0);
       this.visit(l, tx * 2 + 1, tz * 2, cx, cy, cz, dyCam, viewDist, lod0);
@@ -306,17 +315,9 @@ export class TileManager {
     _proj.elements[14] = (-2 * f * n) / (f - n);
     _pv.multiplyMatrices(_proj, camera.matrixWorldInverse);
     _frustum.setFromProjectionMatrix(_pv);
-    for (let i = 0; i < this.slots.length; i++) {
-      const r = this.slots[i];
-      if (!r) {
-        this.mesh.setVisibleAt(this.slotInst[i], false);
-        continue;
-      }
-      if (r.lastDrawn !== this.frame) {
-        this.mesh.setVisibleAt(this.slotInst[i], false);
-        continue;
-      }
-    }
+    const want = this.visScratch;
+    want.length = this.slots.length;
+    want.fill(0);
     let vis = 0;
     let tris = 0;
     const N = CONFIG.terrain.tileCells;
@@ -326,11 +327,17 @@ export class TileManager {
       const z0 = r.tz * size - offsetZ;
       _box.min.set(x0, r.minY, z0);
       _box.max.set(x0 + size, Math.max(r.maxY, r.minY + 1), z0 + size);
-      const v = _frustum.intersectsBox(_box);
-      this.mesh.setVisibleAt(this.slotInst[r.slot], v);
-      if (v) {
+      if (_frustum.intersectsBox(_box)) {
+        want[r.slot] = 1;
         vis++;
         tris += N * N * 2;
+      }
+    }
+    // only touch instances whose visibility changed
+    for (let i = 0; i < this.slots.length; i++) {
+      if (want[i] !== this.slotVis[i]) {
+        this.slotVis[i] = want[i];
+        this.mesh.setVisibleAt(this.slotInst[i], want[i] === 1);
       }
     }
     this.stats.visible = vis;
@@ -354,7 +361,7 @@ export class TileManager {
 
   /** Forget tile records far from the camera that hold no slot (bounded bookkeeping). */
   prune(): void {
-    if (this.recs.size < 4000) return;
+    if (this.recs.size < 1500 || this.frame % 60 !== 0) return;
     for (const [k, r] of this.recs) if (r.slot < 0 && !r.data && this.frame - r.lastWanted > 120) this.recs.delete(k);
   }
 

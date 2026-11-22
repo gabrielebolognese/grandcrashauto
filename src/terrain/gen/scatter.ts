@@ -3,7 +3,7 @@ import { climate, cropOf, CROP_FALLOW, CROP_PASTURE, CROP_WHEAT, farmMaskAt, FIE
 import { CorridorSet } from './carve';
 import { features, newInfo, sampleTerrain, SEA_WALL_Z, type TerrainInfo } from './height';
 import { hash2, noiseFor, sstep } from './noise';
-import { ST, ST_COL, ST_COUNT, ST_MAT, type ScatterData } from './scatterTypes';
+import { ST, ST_COUNT, ST_MAT, type ScatterData } from './scatterTypes';
 
 /**
  * Seeded scatter for one 128 m chunk (runs in a worker): trees, bushes, rocks, fences, farmsteads, suburb houses,
@@ -51,12 +51,28 @@ class Out {
       total += counts[t];
     }
     const mats = new Float32Array(total * ST_MAT);
-    const cols = new Float32Array(total * ST_COL);
+    const cols = new Float32Array(total * 3);
+    const ranks = new Float32Array(total);
     for (let t = 0; t < ST_COUNT; t++) {
-      mats.set(this.m[t], offsets[t] * ST_MAT);
-      cols.set(this.c[t], offsets[t] * ST_COL);
+      const n = counts[t];
+      if (!n) continue;
+      const M = this.m[t];
+      const Cc = this.c[t];
+      // sort by rank (ties on index → deterministic)
+      const order: number[] = [];
+      for (let i = 0; i < n; i++) order.push(i);
+      order.sort((a, b) => Cc[a * 4 + 3] - Cc[b * 4 + 3] || a - b);
+      for (let k = 0; k < n; k++) {
+        const i = order[k];
+        const dst = offsets[t] + k;
+        for (let e = 0; e < 16; e++) mats[dst * 16 + e] = M[i * 16 + e];
+        cols[dst * 3] = Cc[i * 4];
+        cols[dst * 3 + 1] = Cc[i * 4 + 1];
+        cols[dst * 3 + 2] = Cc[i * 4 + 2];
+        ranks[dst] = Cc[i * 4 + 3];
+      }
     }
-    return { cx, cz, counts, offsets, mats, cols };
+    return { cx, cz, counts, offsets, mats, cols, ranks };
   }
 }
 

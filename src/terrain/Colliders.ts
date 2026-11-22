@@ -26,6 +26,7 @@ export class ColliderChunks {
   private recs = new Map<number, ChunkRec>();
   private frame = 0;
   private colliderCount = 0;
+  private cand: ChunkRec[] = [];
   /** remote areas to prefetch (teleport targets), absolute, with expiry frame */
   private prefetch: { x: number; z: number; r: number; until: number }[] = [];
   // single-entry cache for hot queries
@@ -58,7 +59,8 @@ export class ColliderChunks {
     }
     // build colliders for wanted chunks that have data (nearest first)
     let built = 0;
-    const cand: ChunkRec[] = [];
+    const cand = this.cand;
+    cand.length = 0;
     for (const r of this.recs.values()) if (r.data && !r.collider && r.lastWanted === this.frame && !r.data.inside) cand.push(r);
     if (cand.length) {
       cand.sort((a, b) => dist2(a, focusX, focusZ) - dist2(b, focusX, focusZ));

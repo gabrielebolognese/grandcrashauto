@@ -53,6 +53,9 @@ export class MapRenderer {
   H = 1;
   dpr = 1;
   selected: NavPoi | null = null;
+  /** Player marker screen position from the last render (the screen positions a CSS pulse there). */
+  playerX = -1e4;
+  playerY = -1e4;
   /** Screen-space POI badge positions from the last render (for hit tests). */
   private hits: { p: NavPoi; x: number; y: number; r: number }[] = [];
   private g: CanvasRenderingContext2D;
@@ -488,10 +491,10 @@ export class MapRenderer {
     g.lineWidth = 4;
     g.stroke();
     g.setLineDash([]);
-    // flowing dots along the road route
+    // direction dots along the route (static: the map only redraws on change)
     const total = r.length;
     const step = Math.max(40, 70 / this.view.ppm);
-    const phase = (this.t * 0.06 * step) % step;
+    const phase = step * 0.5;
     g.fillStyle = '#ffffff';
     const tmp = { x: 0, y: 0, z: 0 };
     let count = 0;
@@ -514,6 +517,8 @@ export class MapRenderer {
     const list = this.nav.entries();
     const ppm = this.view.ppm;
     const showLabels = ppm > 0.05;
+    const far = ppm < 0.035; // zoomed out: small badges, undiscovered ones as dots
+    const labels: { p: NavPoi; x: number; y: number; sel: boolean; rk: number }[] = [];
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     // draw undiscovered first, the selected / destination last (on top)
@@ -524,7 +529,18 @@ export class MapRenderer {
       if (x < -40 || y < -40 || x > this.W + 40 || y > this.H + 40) continue;
       const sel = p === this.selected;
       const isDest = !!dest && p.id === dest.id;
-      const r = sel ? 19 : isDest ? 17 : 14;
+      const r = sel ? 19 : isDest ? 17 : far ? (p.discovered ? 10 : 6) : 14;
+      if (far && !p.discovered && !sel && !isDest) {
+        g.beginPath();
+        g.arc(x, y, r, 0, Math.PI * 2);
+        g.fillStyle = 'rgba(86, 96, 124, 0.85)';
+        g.fill();
+        g.lineWidth = 1.5;
+        g.strokeStyle = 'rgba(255,255,255,0.8)';
+        g.stroke();
+        this.hits.push({ p, x, y, r: r + 4 });
+        continue;
+      }
       // pin shadow + badge
       g.beginPath();
       g.arc(x, y + 2, r + 1, 0, Math.PI * 2);
@@ -551,11 +567,23 @@ export class MapRenderer {
         g.fillStyle = '#fff';
         g.fillText('?', x + r * 0.72, y - r * 0.72 + 0.5);
       }
-      if (showLabels || sel || isDest) {
-        g.font = `800 ${sel ? 13 : 11.5}px ${FONT}`;
-        label(g, p.name, x, y + r + 12, sel ? '#e2584c' : p.discovered ? '#22304d' : '#56607c', true);
-      }
+      if (showLabels || sel || isDest) labels.push({ p, x, y: y + r + 12, sel, rk: rank(p, this.selected, dest) });
       this.hits.push({ p, x, y, r });
+    }
+    // labels: most important first, skipped when they would overlap one already placed
+    labels.sort((a, b) => b.rk - a.rk);
+    const placed: number[] = [];
+    for (const L of labels) {
+      g.font = `800 ${L.sel ? 13 : 11.5}px ${FONT}`;
+      const w = g.measureText(L.p.name).width + 8;
+      const hh = L.sel ? 17 : 15;
+      const x0 = L.x - w / 2;
+      const y0 = L.y - hh / 2;
+      let clash = false;
+      for (let i = 0; i < placed.length && !clash; i += 4) clash = x0 < placed[i + 2] && x0 + w > placed[i] && y0 < placed[i + 3] && y0 + hh > placed[i + 1];
+      if (clash && L.rk < 2) continue;
+      placed.push(x0, y0, x0 + w, y0 + hh);
+      label(g, L.p.name, L.x, L.y, L.sel ? '#e2584c' : L.p.discovered ? '#22304d' : '#56607c', true);
     }
   }
 
@@ -567,11 +595,8 @@ export class MapRenderer {
     const y = this.sy(f.z);
     // screen direction of forward (sin yaw, cos yaw) in (x, z) → (x right, y down)
     const ang = Math.atan2(Math.cos(yaw), Math.sin(yaw));
-    const pulse = 0.5 + 0.5 * Math.sin(this.t * 0.004);
-    g.beginPath();
-    g.arc(x, y, 16 + pulse * 6, 0, Math.PI * 2);
-    g.fillStyle = `rgba(255, 122, 107, ${0.18 + 0.12 * (1 - pulse)})`;
-    g.fill();
+    this.playerX = x;
+    this.playerY = y;
     g.save();
     g.translate(x, y);
     g.rotate(ang);

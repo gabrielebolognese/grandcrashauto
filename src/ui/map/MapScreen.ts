@@ -29,6 +29,7 @@ export class MapScreen {
   private built = false;
   private root!: HTMLDivElement;
   private canvas!: HTMLCanvasElement;
+  private pulse!: HTMLDivElement;
   private renderer!: MapRenderer;
   private tiles: TileCache | null = null;
   private sub!: HTMLDivElement;
@@ -82,7 +83,9 @@ export class MapScreen {
     root.setAttribute('aria-hidden', 'true');
     this.root = root;
     this.canvas = el('canvas', 'nm-canvas');
-    root.append(this.canvas, el('div', 'nm-vignette'));
+    this.pulse = el('div', 'nm-pulse');
+    this.pulse.append(el('i'));
+    root.append(this.canvas, this.pulse, el('div', 'nm-vignette'));
 
     // top-left: back + title
     const top = el('div', 'nm-top');
@@ -338,9 +341,9 @@ export class MapScreen {
       this.zoomAt(Math.pow(2, zoom * dt * 2.2), this.renderer.W / 2, this.renderer.H / 2);
       this.anim = null;
     }
-    // the route dots / player pulse animate slowly: refresh at ~5 fps when idle
+    // render only on change (the player pulse is a CSS animation on a DOM element)
     if (this.renderer.resize()) this.dirty = true;
-    if (this.dirty || now - this.lastDraw > 200) this.draw(now);
+    if (this.dirty) this.draw(now);
   };
 
   private draw(now: number): void {
@@ -349,6 +352,9 @@ export class MapScreen {
     const v = this.renderer.view;
     v.ppm = Math.min(CONFIG.nav.mapMaxPpm, Math.max(CONFIG.nav.mapMinPpm, v.ppm));
     this.renderer.render(now);
+    const R = this.renderer;
+    const on = R.playerX > -30 && R.playerY > -30 && R.playerX < R.W + 30 && R.playerY < R.H + 30;
+    this.pulse.style.transform = on ? `translate(${R.playerX.toFixed(1)}px, ${R.playerY.toFixed(1)}px)` : 'translate(-9999px, 0)';
     this.updateChrome();
   }
 

@@ -57,7 +57,7 @@ scope.onmessage = (e) => {
       }
       case 'scatter': {
         const r = buildScatter(m.cx, m.cz, seed);
-        scope.postMessage({ type: 'scatter', id: m.id, ms: performance.now() - t0, data: r }, [r.counts.buffer, r.offsets.buffer, r.mats.buffer, r.cols.buffer]);
+        scope.postMessage({ type: 'scatter', id: m.id, ms: performance.now() - t0, data: r }, [r.counts.buffer, r.offsets.buffer, r.mats.buffer, r.cols.buffer, r.ranks.buffer]);
         return;
       }
       case 'ring': {

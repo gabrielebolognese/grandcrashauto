@@ -72,6 +72,7 @@ export class ScatterRenderer {
     this.group.name = 'terrain.scatter';
     this.group.userData.noOriginShift = true; // we shift / rebuild our instances ourselves
     const mk = (geo: THREE.BufferGeometry, mat: THREE.Material, cap: number, type: number, band: number, scale = 1, density = 1, name = '') => {
+      if (scale !== 1) geo.scale(scale, scale, scale); // far impostors: bigger, baked into the geometry
       const mesh = new THREE.InstancedMesh(geo, mat, cap);
       mesh.name = 'terrain.' + name;
       mesh.count = 0;
@@ -176,7 +177,7 @@ export class ScatterRenderer {
           this.chunks.set(ck(cx, cz), c);
         }
         c.lastWanted = this.frame;
-        if (!c.data) this.pool.wantJob(KEY_SCATTER + ck(cx, cz), 400 + d2 * 1.15 + dy, 'scatter', cx, cz);
+        if (!c.data) this.pool.wantJob(KEY_SCATTER + ck(cx, cz), 80 + d2 * 1.1 + dy, 'scatter', cx, cz);
       }
     }
     // re-evaluate bands when the camera moved enough
@@ -286,7 +287,6 @@ export class ScatterRenderer {
     const col = mesh.instanceColor!.array as Float32Array;
     const isTree = b.type === ST.pine || b.type === ST.round || b.type === ST.bush;
     const keep = isTree ? this.density * b.density : 2;
-    const s = b.scale;
     let n = 0;
     for (const c of this.chunks.values()) {
       if (!(c.mask & bit) || !c.data) continue;
@@ -294,32 +294,30 @@ export class ScatterRenderer {
       const cnt = D.counts[b.type];
       if (!cnt) continue;
       const off = D.offsets[b.type];
+      // ranks ascend within a type: keep a prefix (binary search)
+      let m = cnt;
+      if (keep < 1) {
+        let lo = 0;
+        let hi = cnt;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (D.ranks[off + mid] < keep) lo = mid + 1;
+          else hi = mid;
+        }
+        m = lo;
+      }
+      if (n + m > b.cap) m = b.cap - n;
+      if (m <= 0) continue;
+      mat.set(D.mats.subarray(off * ST_MAT, (off + m) * ST_MAT), n * 16);
+      col.set(D.cols.subarray(off * ST_COL, (off + m) * ST_COL), n * 3);
       const tx = c.cx * CH - offX;
       const tz = c.cz * CH - offZ;
-      for (let i = 0; i < cnt && n < b.cap; i++) {
-        const ii = off + i;
-        if (D.cols[ii * ST_COL + 3] >= keep) continue;
-        const src = ii * ST_MAT;
-        const dst = n * 16;
-        for (let k = 0; k < 16; k++) mat[dst + k] = D.mats[src + k];
-        if (s !== 1) {
-          mat[dst] *= s;
-          mat[dst + 1] *= s;
-          mat[dst + 2] *= s;
-          mat[dst + 4] *= s;
-          mat[dst + 5] *= s;
-          mat[dst + 6] *= s;
-          mat[dst + 8] *= s;
-          mat[dst + 9] *= s;
-          mat[dst + 10] *= s;
-        }
-        mat[dst + 12] += tx;
-        mat[dst + 14] += tz;
-        col[n * 3] = D.cols[ii * ST_COL];
-        col[n * 3 + 1] = D.cols[ii * ST_COL + 1];
-        col[n * 3 + 2] = D.cols[ii * ST_COL + 2];
-        n++;
+      for (let i = n * 16, e = (n + m) * 16; i < e; i += 16) {
+        mat[i + 12] += tx;
+        mat[i + 14] += tz;
       }
+      n += m;
+      if (n >= b.cap) break;
     }
     mesh.count = n;
     mesh.position.set(0, 0, 0);
