@@ -133,6 +133,10 @@ export class PlaneSystem implements IPlaneSystem {
   private engulf = 0;
   private engulfStage = 0;
   private engulfTrails: TrailHandle[] = [];
+  /** Fire points from re-pressing burning engines, parts carrying a spread fire spot, reusable HUD meter. */
+  private firePoints = 0;
+  private fireSpotParts = new Set<string>();
+  private fireMeterState = { points: 0, needed: 1 };
   /** Fire disintegration countdown (s), current wait, pieces broken so far, wreck hit the ground/water. */
   private breakNextT = Infinity;
   private breakInterval = 0;
@@ -472,6 +476,8 @@ export class PlaneSystem implements IPlaneSystem {
     this.assistPenalty = 0;
     this.engulf = 0;
     this.engulfStage = 0;
+    this.firePoints = 0;
+    this.fireSpotParts.clear();
     this.breakNextT = Infinity;
     this.breakInterval = 0;
     this.breakCount = 0;
@@ -577,6 +583,8 @@ export class PlaneSystem implements IPlaneSystem {
     this.engulfTrails = [];
     this.engulf = 0;
     this.engulfStage = 0;
+    this.firePoints = 0;
+    this.fireSpotParts.clear();
     this.breakNextT = Infinity;
     this.breakInterval = 0;
     this.breakCount = 0;
@@ -832,7 +840,13 @@ export class PlaneSystem implements IPlaneSystem {
     const visual = this.visual;
     if (!this.active || !body || !visual || this.split || (this.crashed && !failure)) return;
     const e = this.engines[index - 1];
-    if (!e || e.st.status !== 'ok') return;
+    if (!e) return;
+    // already burning: pressing again fans the fire (fire point) instead of a new explosion
+    if (e.st.status === 'fire') {
+      if (!failure) this.addFirePoint(index - 1);
+      return;
+    }
+    if (e.st.status !== 'ok') return;
     e.st.status = 'fire';
     e.st.spool = 0;
     e.st.thrust = 0;
@@ -1010,7 +1024,9 @@ export class PlaneSystem implements IPlaneSystem {
       if (ei >= 0) {
         const e = this.engines[ei];
         if (e.st.status === 'ok') this.visual.setEngineDamaged(ei + 1, true);
+        const wasBurning = e.st.status === 'fire';
         e.st.status = 'detached';
+        if (wasBurning) this.resetFireSpread();
         e.st.thrust = 0;
         e.st.spool = 0;
       }
@@ -1927,21 +1943,73 @@ export class PlaneSystem implements IPlaneSystem {
     this.updateDisintegration(dt);
   }
 
+  private firePointsNeeded(): number {
+    const E = CONFIG.planes.engulf;
+    return E.pointsBase + E.pointsPerEngine * this.engines.length;
+  }
+
+  get fireMeter(): { points: number; needed: number } | null {
+    if (!this.active || !this.body || this.firePoints <= 0 || this.engulfStage >= 1) return null;
+    this.fireMeterState.points = this.firePoints;
+    this.fireMeterState.needed = this.firePointsNeeded();
+    return this.fireMeterState;
+  }
+
+  /** Re-pressing a burning engine: the fire flares up and creeps one part further (wing root → fuselage → across). */
+  private addFirePoint(i: number): void {
+    const { ctx } = this;
+    const visual = this.visual;
+    const e = this.engines[i];
+    if (!visual || !this.body || !e || this.crashed) return;
+    const E = CONFIG.planes.engulf;
+    const pos = this.worldPoint(e.info.thrustPoint, new THREE.Vector3());
+    const out = _v2.set(Math.sign(e.info.thrustPoint.x) || 1, 0.6, 0).applyQuaternion(visual.root.quaternion).normalize();
+    ctx.fx.sparks(pos, out, 1.4);
+    ctx.events.emit('vibrate', { pattern: [25] });
+    if (this.engulfStage >= 1) return; // already engulfed: the disintegration runs on its own clock
+    this.firePoints++;
+    const need = this.firePointsNeeded();
+    const f = Math.min(1, this.firePoints / need);
+    this.engulf = Math.max(this.engulf, E.stage1 * f);
+    if (e.trail) e.trail.setIntensity(1, 1, e.trailSize * (1 + E.flameGrow * f));
+    if (this.firePoints === 1) ctx.events.emit('masterCaution', { text: 'FIRE SPREADING', level: 'warning' });
+    // a new fire spot creeps from this engine's wing toward the fuselage, then across
+    const S = e.info.thrustPoint.x >= 0 ? 'L' : 'R';
+    const O = S === 'L' ? 'R' : 'L';
+    const order = ['wing' + S + '1', 'fuselageCenter', 'wing' + S + '2', 'fuselageRear', 'fuselageFwd', 'wing' + O + '1'];
+    if (this.fireSpotParts.size < E.maxSpots && ctx.fx.attachTrail) {
+      const r = Math.max(1, visual.dims.span * 0.05);
+      for (const name of order) {
+        if (this.fireSpotParts.has(name) || this.lostParts.has(name)) continue;
+        const part = visual.partByName[name];
+        if (!part) continue;
+        this.fireSpotParts.add(name);
+        this.engulfTrails.push(ctx.fx.attachTrail(part.object, new THREE.Vector3(0, part.halfExtents.y * 0.6, 0), { fire: 0.8, smoke: 1, size: r * 0.6 }));
+        break;
+      }
+    }
+  }
+
+  /** A burning engine fell off before the airframe caught: the build-up starts over (the spread spots go out). */
+  private resetFireSpread(): void {
+    if (this.engulfStage >= 1 || this.firePoints <= 0) return;
+    this.firePoints = 0;
+    if (!this.tailLost) this.engulf = 0;
+    for (const t of this.engulfTrails) t.stop();
+    this.engulfTrails = [];
+    this.fireSpotParts.clear();
+    this.ctx.events.emit('toast', { text: '🔥 Burning engine fell off: fire reset', ms: 1400 });
+  }
+
   /** Returns true if the intact body is gone and the caller must stop this step. */
   private updateEngulf(dt: number): boolean {
     const { ctx } = this;
     const visual = this.visual;
     if (!visual || !this.tracked || this.split || this.crashed) return false;
     const E = CONFIG.planes.engulf;
-    let burning = 0;
-    let spread = 0;
-    for (const e of this.engines) {
-      // a torn-off engine leaves its mount burning: it still feeds the escalation
-      if (e.st.status !== 'fire' && e.st.status !== 'detached') continue;
-      burning++;
-      if (e.spread) spread++;
-    }
-    let drive = burning + spread * E.spreadBonus - 1; // one unspread engine fire alone never engulfs
+    // Engine fires never escalate on their own (user design): only fire points (re-pressing a burning engine) do —
+    // see addFirePoint, which raises this.engulf directly.
+    let drive = 0;
     // the fire spreading forward from a lost tail engulfs the airframe too
     if (this.tailLost && this.tailT >= E.tailDelay) drive = Math.max(drive, E.tailDrive);
     // Once the airframe itself is burning it keeps going even after the burning engines tore off.
@@ -1959,11 +2027,12 @@ export class PlaneSystem implements IPlaneSystem {
       this.engulfStage = 1;
       for (const name of this.tailLost ? ['wingL1', 'wingR1'] : ['fuselageCenter', 'wingL1', 'wingR1', 'fuselageRear']) {
         const part = visual.partByName[name];
-        if (!part || this.lostParts.has(name) || !ctx.fx.attachTrail) continue;
+        if (!part || this.lostParts.has(name) || this.fireSpotParts.has(name) || !ctx.fx.attachTrail) continue;
+        this.fireSpotParts.add(name);
         this.engulfTrails.push(ctx.fx.attachTrail(part.object, new THREE.Vector3(0, part.halfExtents.y * 0.6, 0), { fire: 0.8, smoke: 1, size: r * 0.7 }));
       }
       this.assistPenalty += 0.2;
-      ctx.events.emit('masterCaution', { text: 'FIRE SPREADING', level: 'warning' });
+      ctx.events.emit('masterCaution', { text: 'AIRFRAME ON FIRE', level: 'warning' });
       // the airframe is burning: start the one-piece-at-a-time disintegration countdown
       this.breakInterval = E.disintegrate.firstS;
       this.breakNextT = E.disintegrate.firstS;
@@ -2015,7 +2084,10 @@ export class PlaneSystem implements IPlaneSystem {
       if (f.length) out.push(f);
     };
     const bm = visual.breakModes;
-    add([...bm.tailRequired, ...bm.tailOptional]);
+    // the whole tail section as ONE piece (tail cone + fin + tailplanes), not three at once
+    const tailJ = visual.joints.find((j) => (j.a === 'fuselageRear' && j.b === 'tailCone') || (j.a === 'tailCone' && j.b === 'fuselageRear'));
+    if (tailJ) add([tailJ.id]);
+    else add([...bm.tailRequired, ...bm.tailOptional]);
     add(bm.middle);
     const wing = (side: string) =>
       visual.joints.filter((j) => /^wing[LR][0-9]$/.test(j.b) && j.b[4] === side).sort((a, b) => Number(b.b.slice(5)) - Number(a.b.slice(5)));

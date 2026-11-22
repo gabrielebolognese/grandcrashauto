@@ -467,6 +467,8 @@ export interface IPlaneSystem extends GameSystem {
   cycleTarget?(): void;
   /** True when there are at least two big pieces to switch between. */
   readonly canCycleTarget?: boolean;
+  /** Fire build-up from re-pressing a burning engine's button (null when nothing to show). */
+  readonly fireMeter?: { points: number; needed: number } | null;
 }
 
 // --------------------------- breakup & crash physics (src/plane/breakup) ---------------------------

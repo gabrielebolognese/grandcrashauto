@@ -69,6 +69,8 @@ export class FlightHud {
   private brakeChip: HTMLSpanElement;
   private stall: HTMLDivElement;
   private engines: HTMLDivElement;
+  private fireMeter: HTMLDivElement;
+  private fireMeterKey = '';
   private engineBtns: HTMLButtonElement[] = [];
   private engineState: string[] = [];
   private crash: HTMLDivElement;
@@ -96,6 +98,7 @@ export class FlightHud {
     this.oomBanner = h('div', { class: 'oom-banner' }, icon('plane'), this.oomText, this.oomCount);
     this.caution = h('div', { class: 'fl-caution' });
     this.engines = h('div', { class: 'fl-engines', role: 'group', 'aria-label': 'Engines' });
+    this.fireMeter = h('div', { class: 'fire-meter' });
 
     const choice = (name: IconName, label: string, sub: string, cls: string, fn: () => void) => {
       const b = h('button', { class: `crash-btn ${cls}`, type: 'button' }, icon(name), h('span', { class: 'cb-label' }, label, h('small', { text: sub })));
@@ -217,6 +220,7 @@ export class FlightHud {
       this.engineState.push('');
       this.engines.append(b);
     }
+    this.engines.append(this.fireMeter);
   }
 
   update(dt: number): void {
@@ -235,6 +239,13 @@ export class FlightHud {
     setVisible(this.nudgePad, !crashed && !seq && typeof planes.nudge === 'function');
     setVisible(this.airborne, !crashed && !!ps.onGround && ps.airspeedKmh < 10 && typeof planes.takeOff === 'function');
     setVisible(this.switchPart, !!planes.canCycleTarget);
+    const fm = planes.fireMeter ?? null;
+    const fmKey = fm ? fm.points + '/' + fm.needed : '';
+    if (fmKey !== this.fireMeterKey) {
+      this.fireMeterKey = fmKey;
+      setVisible(this.fireMeter, !!fm);
+      if (fm) setText(this.fireMeter, '🔥 ' + '●'.repeat(Math.min(fm.points, fm.needed)) + '○'.repeat(Math.max(0, fm.needed - fm.points)));
+    }
     this.drawSpeed(ps.airspeedKmh * k, ps.rotationSpeedKmh * k, ps.stallSpeedKmh * k, !!ps.stallWarning, mph ? 'MPH' : 'KM/H');
     this.drawAlt(ps.altitude, ps.altitude - ps.altitudeAgl, ps.verticalSpeed);
     this.drawHeading(ps.heading);
