@@ -238,7 +238,7 @@ function bizjetDesign(): Design {
   };
   const b0 = curve([[-8.2, 0.6], [-6.5, 0.35], [-4, -0.12], [-1, -0.44], [4, -0.55], [8.8, -0.55]]);
   const rects: FusRect[] = [
-    { z0: 6.3, z1: 7.6, t0: 0.035, t1: 0.56, kind: 'glass' },
+    { z0: 6.3, z1: 7.6, t0: 0.02, t1: 0.56, kind: 'glass' },
     { z0: 5.78, z1: 6.75, t0: 0.64, t1: 1.03, kind: 'glass' },
     { z0: 5.28, z1: 5.72, t0: 0.68, t1: 0.99, kind: 'glass' },
     { z0: 0.9, z1: 3.55, t0: 0.69, t1: 1.03, kind: 'uv', uv: uv('bizjet', 'title') },
@@ -321,7 +321,7 @@ function airlinerDesign(): Design {
   };
   const b0 = curve([[-19, 0.86], [-15, 0.55], [-11, 0.12], [-6, -0.3], [2, -0.42], [19, -0.44]]);
   const rects: FusRect[] = [
-    { z0: 14.98, z1: 16.3, t0: 0.035, t1: 0.5, kind: 'glass' },
+    { z0: 14.98, z1: 16.3, t0: 0.02, t1: 0.5, kind: 'glass' },
     { z0: 14.5, z1: 15.75, t0: 0.57, t1: 0.99, kind: 'glass' },
     { z0: 13.8, z1: 14.42, t0: 0.6, t1: 0.95, kind: 'glass' },
     { z0: 0.6, z1: 7.6, t0: 0.72, t1: 1.08, kind: 'uv', uv: uv('airliner', 'title') },
@@ -378,8 +378,8 @@ function airlinerDesign(): Design {
     ],
     gear: [
       { name: 'gearNose', mount: 'cockpit', top: v3(0, -1.55, 14.4), wheel: v3(0, -3.6, 14.4), wheelR: 0.38, wheelW: 0.24, layout: 'twin', track: 0.5, strutR: 0.1, steerable: true, retractAxis: v3(-1, 0, 0), retractAngle: 1.62, door: C.aqua },
-      { name: 'gearL', mount: 'fuselageCenter', top: v3(3.8, -1.0, -1.3), wheel: v3(3.8, -3.42, -1.3), wheelR: 0.58, wheelW: 0.36, layout: 'twin', track: 0.88, strutR: 0.15, steerable: false, retractAxis: v3(0, 0, -1), retractAngle: 1.57, door: C.aqua },
-      { name: 'gearR', mount: 'fuselageCenter', top: v3(-3.8, -1.0, -1.3), wheel: v3(-3.8, -3.42, -1.3), wheelR: 0.58, wheelW: 0.36, layout: 'twin', track: 0.88, strutR: 0.15, steerable: false, retractAxis: v3(0, 0, 1), retractAngle: 1.57, door: C.aqua },
+      { name: 'gearL', mount: 'fuselageCenter', top: v3(3.8, -1.0, -1.3), wheel: v3(3.8, -3.42, -1.3), wheelR: 0.58, wheelW: 0.36, layout: 'twin', track: 0.88, strutR: 0.15, steerable: false, retractAxis: v3(0, 0, -1), retractAngle: 1.72, door: C.aqua },
+      { name: 'gearR', mount: 'fuselageCenter', top: v3(-3.8, -1.0, -1.3), wheel: v3(-3.8, -3.42, -1.3), wheelR: 0.58, wheelW: 0.36, layout: 'twin', track: 0.88, strutR: 0.15, steerable: false, retractAxis: v3(0, 0, 1), retractAngle: 1.72, door: C.aqua },
     ],
     colors: {
       wingTop: C.wingGrey, wingBottom: rgb(0xb9c0c8), wingLE: rgb(0xe2e5e8), flap: rgb(0xbfc6ce), tail: C.white, nacelle: C.aqua, nacelleLip: rgb(0xd5d9de),
@@ -415,7 +415,7 @@ function jumboDesign(): Design {
   };
   const b0 = curve([[-35, 0.85], [-28, 0.62], [-21, 0.22], [-15, 0.11], [3, 0.11], [11, 0.08], [28, 0.08], [33, 0.02], [35, -0.1]]);
   const rects: FusRect[] = [
-    { z0: 30.25, z1: 31.25, t0: 0.035, t1: 0.42, kind: 'glass' },
+    { z0: 30.25, z1: 31.25, t0: 0.018, t1: 0.42, kind: 'glass' },
     { z0: 29.55, z1: 30.75, t0: 0.49, t1: 0.82, kind: 'glass' },
     { z0: 28.9, z1: 29.5, t0: 0.52, t1: 0.78, kind: 'glass' },
     { z0: 14.2, z1: 24.4, t0: 0.97, t1: 1.27, kind: 'uv', uv: uv('jumbo', 'title') },

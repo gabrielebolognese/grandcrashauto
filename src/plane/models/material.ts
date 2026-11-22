@@ -76,6 +76,7 @@ varying vec2 vWin;
 varying vec2 vRM;
 varying float vChar;
 varying vec3 vPPos;
+varying float vInt;
 uniform vec4 uSurfA[${NSURF}];
 uniform vec4 uSurfP[${NSURF}];
 uniform vec4 uPartOff[${NPART}];
@@ -114,7 +115,7 @@ vec3 planeDeform(vec3 p, inout vec3 n) {
     rp += h * k * 0.35;
     n = normalize(n + h * min(k * 1.5, 1.2));
   }
-  if (aFx.z > 0.0) {
+  if (aFx.z > 0.01) {
     float t = uFlags.z;
     rp.x += sin(t * 1.9 + rp.z * 1.3 + aFx.w) * 0.06 * aFx.z;
     rp.z += cos(t * 1.4 + rp.x * 1.1) * 0.05 * aFx.z;
@@ -138,6 +139,7 @@ varying vec2 vWin;
 varying vec2 vRM;
 varying float vChar;
 varying vec3 vPPos;
+varying float vInt;
 uniform vec4 uWin;
 uniform vec4 uRowA;
 uniform vec4 uRowB;
@@ -204,9 +206,11 @@ if (vWin.y < 50.0) {
   diffuseColor.rgb = mix(diffuseColor.rgb, uWinCol, plWinM);
 }
 if (vChar > 0.002) {
-  float nz = plNoise(vPPos * 1.25) * 0.65 + plNoise(vPPos * 4.3) * 0.35;
-  plCharM = smoothstep(0.0, 0.22, vChar * 1.45 + 0.15 - nz);
-  vec3 soot = mix(vec3(0.016, 0.014, 0.012), vec3(0.10, 0.075, 0.06), plNoise(vPPos * 9.0));
+  float nz = plNoise(vPPos * 0.9) * 0.6 + plNoise(vPPos * 3.7) * 0.4;
+  // smoky darkening everywhere, then patchy soot that spreads with the amount
+  diffuseColor.rgb *= mix(1.0, 0.5 + 0.25 * nz, clamp(vChar * 1.8, 0.0, 1.0));
+  plCharM = smoothstep(0.05, 0.55, vChar * 1.35 + 0.2 - nz * 0.85);
+  vec3 soot = mix(vec3(0.018, 0.016, 0.014), vec3(0.085, 0.065, 0.05), plNoise(vPPos * 7.0));
   diffuseColor.rgb = mix(diffuseColor.rgb, soot, plCharM);
 }
 `;
@@ -220,12 +224,20 @@ const FRAG_EMISSIVE = /* glsl */ `
 totalEmissiveRadiance += plWinM * vec3(1.0, 0.76, 0.42) * uNight * 0.85;
 `;
 
+/** Interior surfaces (cockpit shell, cabins): lit by ambient/sky only — no sun through the hull, no shadow acne. */
+const FRAG_INTERIOR = /* glsl */ `
+if (vInt > 0.5) {
+  reflectedLight.directDiffuse *= 0.1;
+  reflectedLight.directSpecular *= 0.0;
+}
+`;
+
 function patchVertexMain(src: string): string {
   return src
     .replace('#include <common>', '#include <common>\n' + VERT_PARS)
     .replace(
       '#include <beginnormal_vertex>',
-      '#include <beginnormal_vertex>\nvec3 plDef = planeDeform(position, objectNormal);\nvWin = aWin;\nvRM = aRM;\n{ int pc = int(aFx.w + 0.5); vChar = uCharV[pc >> 2][pc & 3]; }',
+      '#include <beginnormal_vertex>\nvec3 plDef = planeDeform(position, objectNormal);\nvWin = aWin;\nvRM = aRM;\nvInt = aFx.z < -0.5 ? 1.0 : 0.0;\n{ int pc = int(aFx.w + 0.5); vChar = uCharV[pc >> 2][pc & 3]; }',
     )
     .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = plDef;');
 }
@@ -250,7 +262,8 @@ function makeStandard(atlas: THREE.Texture, U: PlaneUniforms, flags: { value: TH
       .replace('#include <color_fragment>', '#include <color_fragment>\n' + FRAG_COLOR)
       .replace('#include <roughnessmap_fragment>', FRAG_RM)
       .replace('#include <metalnessmap_fragment>', '')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + FRAG_EMISSIVE);
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + FRAG_EMISSIVE)
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n' + FRAG_INTERIOR);
   };
   m.customProgramCacheKey = () => 'coastline-plane-v1';
   return m;

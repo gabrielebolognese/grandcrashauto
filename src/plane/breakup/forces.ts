@@ -215,7 +215,7 @@ export class ForceModel {
    */
   waterForces(s: Structure, asm: Assembly, broken: Uint8Array, flood: Float32Array, waterY: number, dt: number): WaterResult {
     const cfg = CONFIG.breakup.water;
-    const g = Math.abs(CONFIG.physics.gravity);
+    const g = Math.abs(CONFIG.physics.gravity) * asm.gScale;
     const rho = cfg.density;
     const res = this.water;
     res.wet = false;

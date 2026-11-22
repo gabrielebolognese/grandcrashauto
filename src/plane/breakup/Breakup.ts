@@ -146,6 +146,7 @@ export class Breakup implements IBreakup {
   private budgetSparks = 0;
   private budgetDust = 0;
   private budgetGouge = 0;
+  private stepN = 0;
   private budgetBubbles = 0;
   private budgetSpray = 0;
   private mfFound = false;
@@ -312,6 +313,7 @@ export class Breakup implements IBreakup {
       }
     }
     computeMassProps(s, parts, asm.mp);
+    asm.gScale = body.gravityScale();
     // Rapier's centre of mass is the velocity reference of linvel.
     const lc = body.localCom();
     asm.mp.com.set(lc.x, lc.y, lc.z);
@@ -500,6 +502,7 @@ export class Breakup implements IBreakup {
   // ═══════════════════════════════════ simulation ═══════════════════════════════════
 
   fixedUpdate(dt: number): void {
+    this.stepN++;
     this.harness?.fixed?.(dt);
     this.budgetSpray = 3;
     for (const rt of this.planes) {
@@ -528,6 +531,7 @@ export class Breakup implements IBreakup {
           if (a.ghostT <= 0) this.setGhost(a, false);
         }
         if (!a.tracked && a.body.isSleeping()) continue;
+        if (!a.tracked) this.updateCcd(a);
         this.sumF.set(0, 0, 0);
         this.sumT.set(0, 0, 0);
         // water
@@ -535,12 +539,15 @@ export class Breakup implements IBreakup {
         if (wy !== null && a.comW.y - a.radius < wy) this.waterStep(rt, a, wy, dt);
         else a.wet = 0;
         // air (free pieces only)
-        if (!a.tracked && (a.speed > 1.5 || a.angvel.lengthSq() > 1)) {
-          this.forces.air(rt.s, a, rt.broken, rt.liftK, dt);
-          this.sumF.add(this.forces.F);
-          this.sumT.add(this.forces.T);
-          if (a.spinSign !== 0) this.autorotate(rt, a, dt);
-          if (a.trimTorque > 0) this.trimStep(a, dt);
+        // minor pieces (light, no cockpit) get their air loads at half rate with a doubled step (perf)
+        const minor = !a.tracked && a.mp.mass < 0.15 * rt.s.mass && !a.piece?.hasCockpit;
+        const k = minor ? 2 : 1;
+        if (!a.tracked && (a.speed > 1.5 || a.angvel.lengthSq() > 1) && (!minor || ((this.stepN + a.id) & 1) === 0)) {
+          this.forces.air(rt.s, a, rt.broken, rt.liftK, dt * k);
+          this.sumF.addScaledVector(this.forces.F, k);
+          this.sumT.addScaledVector(this.forces.T, k);
+          if (a.spinSign !== 0) this.autorotate(rt, a, dt, k);
+          if (a.trimTorque > 0) this.trimStep(a, dt * k, k);
         }
         // ploughing drag on soft ground while sliding
         if (a.sliding && a.speed > 2) this.plough(rt, a);
@@ -566,6 +573,11 @@ export class Breakup implements IBreakup {
         if (a.removed) continue;
         if (!this.ctx.physics.world.bodies.contains(a.body.handle)) {
           a.removed = true;
+          continue;
+        }
+        if (!a.tracked && a.body.isSleeping()) {
+          a.cFrames = 0;
+          a.sliding = false;
           continue;
         }
         a.read();
@@ -827,6 +839,7 @@ export class Breakup implements IBreakup {
       const mp = computeMassProps(s, kc, this.mpTmp);
       compVel(kc, mp, newV, newW, true);
       A.body.setAdditionalMassProperties(mp.mass, mp.com, mp.principal, mp.frame, true);
+      A.body.recomputeMassPropertiesFromColliders(); // apply now, not at the next step (onPartsLost reads them)
       A.body.setLinvel(newV, true);
       A.body.setAngvel(newW, true);
       A.mp.mass = mp.mass;
@@ -899,6 +912,7 @@ export class Breakup implements IBreakup {
         w: mp.frame.w,
       })
       .setCcdEnabled(true)
+      .setGravityScale(parent.gScale)
       .setLinearDamping(0)
       .setAngularDamping(cfg.angularDamping);
     const body = physics.world.createRigidBody(desc);
@@ -907,13 +921,14 @@ export class Breakup implements IBreakup {
     group.name = `wreck-${rt.type}`;
     engine.scene.add(group);
     const asm = new Assembly(nextId++, body, false, s.parts.length, parts, group);
+    asm.gScale = parent.gScale;
     asm.mp.mass = mp.mass;
     asm.mp.com.copy(mp.com);
     asm.mp.I.set(mp.I);
     asm.mp.principal.copy(mp.principal);
     asm.mp.frame.copy(mp.frame);
     asm.mp.Imin = mp.Imin;
-    const threshold = Math.max(200, mp.mass * Math.abs(CONFIG.physics.gravity) * 0.25);
+    const threshold = Math.max(200, mp.mass * Math.abs(CONFIG.physics.gravity) * parent.gScale * 0.25);
     for (const p of parts) {
       const pd = s.parts[p];
       const cd = RAPIER.ColliderDesc.cuboid(pd.ch.x, pd.ch.y, pd.ch.z)
@@ -1075,9 +1090,12 @@ export class Breakup implements IBreakup {
         this.kickAsm(front, ax, (sep * mr) / mt);
         for (const r of rears) this.kickAsm(r, ax, (-sep * front.mp.mass) / mt);
         const spin = CONFIG.breakup.blast.middleSpin;
+        const pk = CONFIG.breakup.blast.middlePitch;
         for (const c of created) {
           const w = c.body.angvel();
-          c.body.setAngvel({ x: w.x + rnd(-spin, spin), y: w.y + rnd(-spin, spin), z: w.z + rnd(-spin, spin) * 0.6 }, true);
+          // the blast at the cut levers the halves apart: front nose-down (+X body), rear nose-up
+          const pitchAx = this.v4.set(c === front ? pk : -pk * 0.7, 0, 0).applyQuaternion(c.quat);
+          c.body.setAngvel({ x: w.x + pitchAx.x + rnd(-spin, spin), y: w.y + pitchAx.y + rnd(-spin, spin), z: w.z + pitchAx.z + rnd(-spin, spin) * 0.6 }, true);
         }
         // rear engines may keep running for a few seconds → corkscrew
         // (one of them usually chokes on debris right away → asymmetric thrust)
@@ -1111,7 +1129,8 @@ export class Breakup implements IBreakup {
         if (blast.kind === 'middle' || (blast.kind === 'tail' && keeperSide) || fuselageBreak) {
           rt.torn.push({ part, local: j.pos.clone(), normal: nrm, t: 0, dur: CONFIG.breakup.fire.tornEdgeTime * rnd(0.8, 1.3), fxT: 0, mist: fuselageBreak ? 0.6 : 0 });
           if (blast.kind === 'middle' || (fuselageBreak && blast.kind !== 'tail')) {
-            this.addFire(rt, part, j.pos, 0.55, 0.5, r * 0.7, CONFIG.breakup.fire.tornEdgeTime, rnd(6, 12), true);
+            const mid = blast.kind === 'middle';
+            this.addFire(rt, part, j.pos, mid ? 0.7 : 0.55, mid ? 0.85 : 0.5, r * (mid ? 0.9 : 0.7), CONFIG.breakup.fire.tornEdgeTime, mid ? rnd(15, 25) : rnd(6, 12), true);
           }
         }
       }
@@ -1121,9 +1140,9 @@ export class Breakup implements IBreakup {
         const nW = this.v5.copy(j.normal).applyQuaternion(a.quat);
         const v = this.v1.copy(a.vel).addScaledVector(nW, -12);
         fx.mist?.(pos, v, r * 2.5);
-        fx.debrisBurst?.({ position: pos, velocity: v, count: 26, size: 0.35, kind: 'paper' });
-        fx.debrisBurst?.({ position: pos, velocity: v, count: 8, size: 0.55, kind: 'cushion' });
-        fx.debrisBurst?.({ position: pos, velocity: this.v1.copy(a.vel), count: 12, size: r * 0.35, kind: 'panel' });
+        fx.debrisBurst?.({ position: pos, velocity: v, count: 40, size: 0.35, kind: 'paper' });
+        fx.debrisBurst?.({ position: pos, velocity: v, count: 12, size: 0.55, kind: 'cushion' });
+        fx.debrisBurst?.({ position: pos, velocity: this.v1.copy(a.vel), count: 18, size: r * 0.35, kind: 'panel' });
         this.ctx.fx.sparks(pos, nW, 1.2);
       }
     }
@@ -1244,7 +1263,7 @@ export class Breakup implements IBreakup {
     const { surface, material } = this.surfaceOf(a.cTag);
     a.cSurface = surface;
     a.cMaterial = material;
-    const g = Math.abs(CONFIG.physics.gravity);
+    const g = Math.abs(CONFIG.physics.gravity) * a.gScale;
     const fresh = a.cGap > 2 || a.cForce > 3 * a.mp.mass * g;
     if (fresh && this.queryContact(a)) {
       // velocity of the contact point before the step
@@ -1609,7 +1628,7 @@ export class Breakup implements IBreakup {
   // ═══════════════════════════════════ per-piece behaviour ═══════════════════════════════════
 
   /** Severed wings autorotate like sycamore seeds: spin about the wing normal toward a tip-speed ratio of the descent. */
-  private autorotate(rt: PlaneRT, a: Assembly, dt: number): void {
+  private autorotate(rt: PlaneRT, a: Assembly, dt: number, scale = 1): void {
     const cfg = CONFIG.breakup.air;
     if (cfg.wingAutorotate <= 0) return;
     let wing = -1;
@@ -1634,7 +1653,7 @@ export class Breakup implements IBreakup {
     const cur = a.angvel.dot(n);
     const In = a.mp.I[nAx * 4];
     const k = Math.min(1, cfg.wingAutorotate * dt * 2.5);
-    this.sumT.addScaledVector(n, (In * (target - cur) * k) / dt);
+    this.sumT.addScaledVector(n, ((In * (target - cur) * k) / dt) * scale);
   }
 
   /**
@@ -1652,7 +1671,7 @@ export class Breakup implements IBreakup {
       if (pd.kind === 'tail' && pd.liftN === 1) tail = true;
     }
     if (!wing || !tail) return;
-    const g = Math.abs(CONFIG.physics.gravity);
+    const g = Math.abs(CONFIG.physics.gravity) * piece.gScale;
     let m = 0;
     for (const p of parent.parts) {
       if (piece.has[p] || rt.gone[p]) continue;
@@ -1665,7 +1684,7 @@ export class Breakup implements IBreakup {
     piece.trimT = 0;
   }
 
-  private trimStep(a: Assembly, dt: number): void {
+  private trimStep(a: Assembly, dt: number, scale = 1): void {
     a.trimT += dt;
     if (a.trimT > 8) {
       a.trimTorque = 0;
@@ -1677,7 +1696,7 @@ export class Breakup implements IBreakup {
     const q = 0.5 * (CONFIG.planes.airDensity ?? 1.225) * a.speed * a.speed;
     const tau = a.trimTorque * Math.min(1.5, q / a.trimQ0) * fly;
     if (tau <= 0) return;
-    this.sumT.add(this.v2.set(-tau, 0, 0).applyQuaternion(a.quat));
+    this.sumT.add(this.v2.set(-tau * scale, 0, 0).applyQuaternion(a.quat));
   }
 
   private wingSpin(rt: PlaneRT, a: Assembly): number {
@@ -1699,7 +1718,7 @@ export class Breakup implements IBreakup {
   private plough(rt: PlaneRT, a: Assembly): void {
     const soft = SOFT[a.cMaterial as SurfaceMaterial] ?? 0;
     if (soft <= 0 || a.slidePart < 0 || !a.has[a.slidePart]) return;
-    const g = Math.abs(CONFIG.physics.gravity);
+    const g = Math.abs(CONFIG.physics.gravity) * a.gScale;
     const vh = this.v1.set(a.vel.x, 0, a.vel.z);
     const sp = vh.length();
     if (sp < 1) return;
@@ -1779,6 +1798,15 @@ export class Breakup implements IBreakup {
     }
   }
 
+  /** Continuous collision detection only while a piece is fast (CCD on 20+ bodies is expensive). */
+  private updateCcd(a: Assembly): void {
+    const fast = a.speed > 18 || a.angvel.lengthSq() > 50;
+    if (fast !== a.ccd) {
+      a.ccd = fast;
+      a.body.enableCcd(fast);
+    }
+  }
+
   private postPiece(rt: PlaneRT, a: Assembly, dt: number): void {
     if (a.tracked) return;
     const cfg = CONFIG.breakup.water;
@@ -1795,6 +1823,9 @@ export class Breakup implements IBreakup {
     if (a.comW.y < (CONFIG.world.killY ?? -30) - 170) a.removed = true;
     if (a.speed < 0.3 && a.angvel.lengthSq() < 0.05) a.restT += dt;
     else a.restT = 0;
+    // "settled" for the camera: slow (incl. bobbing / slowly sinking) for a moment
+    if (a.speed < 2 && a.angvel.lengthSq() < 0.5) a.slowT += dt;
+    else a.slowT = 0;
   }
 
   private removeAsm(rt: PlaneRT, a: Assembly, fade: boolean): void {
@@ -1846,29 +1877,50 @@ export class Breakup implements IBreakup {
     for (const rt of this.planes) for (const a of rt.asms) if (!a.removed && a.piece) out.push(a.piece);
     this.pieces = out;
     if (this.focusPiece && !out.includes(this.focusPiece)) this.focusPiece = null;
+    if (!this.focusPiece && out.length) this.updateFocus(true);
   }
 
+  /**
+   * Camera focus — never null while pieces exist (the camera keeps watching the debris):
+   *  1. the largest still-MOVING piece (burning ones weigh more), kept until it settles (hysteresis),
+   *  2. once everything has settled: the biggest burning piece, else the biggest piece.
+   * Tiny fragments never take the focus while a bigger piece is around.
+   */
   private updateFocus(force: boolean): void {
-    this.focusT = force ? 0.5 : 0.35;
-    let best: Assembly | null = null;
-    let bs = -1;
+    this.focusT = 0.2;
+    let moving: Assembly | null = null;
+    let ms = -1;
+    let burning: Assembly | null = null;
+    let bm = -1;
+    let biggest: Assembly | null = null;
+    let gm = -1;
+    let maxMass = 0;
+    for (const rt of this.planes) for (const a of rt.asms) if (!a.removed && a.piece) maxMass = Math.max(maxMass, a.mp.mass);
+    const minMass = maxMass * CONFIG.breakup.focusMinMassFrac;
     for (const rt of this.planes) {
       for (const a of rt.asms) {
         if (a.removed || !a.piece) continue;
-        const score = a.mp.mass * (a.burning > 0.05 ? 1 + a.burning * 2 : 0.4);
-        if (score > bs) {
-          bs = score;
-          best = a;
-        }
+        if (a.mp.mass > gm) (gm = a.mp.mass), (biggest = a);
+        if (a.burning > 0.05 && a.mp.mass > bm) (bm = a.mp.mass), (burning = a);
+        if (a.mp.mass < minMass || !this.isMoving(a)) continue;
+        const score = a.mp.mass * (1 + 2 * a.burning);
+        if (score > ms) (ms = score), (moving = a);
       }
     }
-    const cur = this.focusPiece as PieceImpl | null;
-    // hysteresis: keep the current focus unless the new one is clearly better
-    if (!force && cur && best && cur !== best.piece) {
-      const ca = this.findAsmOfPiece(cur);
-      if (ca && !ca.removed && ca.mp.mass * (ca.burning > 0.05 ? 1 + ca.burning * 2 : 0.4) > bs * 0.7) return;
+    const cur = this.focusPiece ? this.findAsmOfPiece(this.focusPiece as PieceImpl) : null;
+    if (!force && cur && !cur.removed && cur.mp.mass >= minMass && this.isMoving(cur)) {
+      // keep following it while it still moves, unless a much more important piece is flying around
+      const cs = cur.mp.mass * (1 + 2 * cur.burning);
+      if (!moving || moving === cur || cs * 3 > ms) return;
     }
-    this.focusPiece = best?.piece ?? null;
+    const target = moving ?? burning ?? biggest;
+    this.focusPiece = target?.piece ?? null;
+  }
+
+  /** Still falling / sliding / tumbling (settled = slow for a moment). */
+  private isMoving(a: Assembly): boolean {
+    if (a.body.isSleeping()) return false;
+    return a.slowT < 0.8;
   }
 
   private findAsmOfPiece(p: PieceImpl): Assembly | null {

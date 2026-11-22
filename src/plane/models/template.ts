@@ -47,6 +47,7 @@ export interface PartTpl {
   cpOffset: THREE.Vector3;
   liftArea?: number;
   interior?: THREE.BufferGeometry;
+  interiorAlways?: boolean; // shown even when intact (prop cabin)
   glow?: THREE.BufferGeometry; // part-local light glows
 }
 
@@ -72,6 +73,8 @@ export interface PlaneTemplate {
   engines: { index: number; part: string; thrustPoint: THREE.Vector3; exhaustPoint: THREE.Vector3; radius: number; propeller: boolean }[];
   gear: { name: string; wheel: THREE.Vector3; radius: number; steerable: boolean }[];
   breakModes: PlaneBreakModes;
+  /** Joints whose break opens the cockpit bulkhead (look back into the torn cabin). */
+  bulkheadJoints: string[];
   mass: number;
   inertia: THREE.Vector3;
   dims: { length: number; span: number; height: number };
@@ -131,7 +134,7 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
   };
   const propPlane = D.engines[0].kind === 'prop';
   for (let l = 0; l < 3; l++) {
-    const lines = fuselageLines(P, L, D.ring[l], l < 2);
+    const lines = fuselageLines(P, L, D.ring[l], l < 2, true);
     for (const name of FUS) {
       const pb = part(name, name === 'cockpit' ? 'cockpit' : 'fuselage');
       const [za, zb] = zr[name];
@@ -261,9 +264,9 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
               const i = h.surf - 1000;
               const role = hingeRole[i];
               const axis = h.p0.clone().sub(h.p1).normalize(); // inboard: TE-down positive
-              const max = role === 'flap' ? (D.type === 'prop' ? 0.6 : 0.62) : role === 'aileron' ? 0.36 : 0.4;
-              const slide = role === 'flap' ? h.chord * (D.type === 'prop' ? 0.04 : 0.14) : 0;
-              const pivot = role === 'flap' ? h.p0.clone().lerp(h.p1, 0).add(v3(0, -W.thick(Math.abs(h.p0.x)) * h.chord * 0.9, 0)) : h.p0;
+              const max = role === 'flap' ? (D.type === 'prop' ? 0.55 : 0.5) : role === 'aileron' ? 0.36 : 0.4;
+              const slide = role === 'flap' ? h.chord * (D.type === 'prop' ? 0.03 : 0.08) : 0;
+              const pivot = role === 'flap' ? h.p0.clone().add(v3(0, -W.thick(Math.abs(h.p0.x)) * h.chord * 0.45, 0)) : h.p0;
               const sid = allocSurf(role, sx, pivot, axis, max, slide);
               // the pivot of the flap hinge line passes through both ends (shifted down)
               return { tmp: h.surf, id: sid };
@@ -273,6 +276,27 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
           } else if (l === 1) {
             const ids = (pb as PB & { _ids?: { tmp: number; id: number }[] })._ids ?? [];
             for (const q of ids) pb.lod[1].remapSurf(q.tmp, q.id);
+          }
+        }
+        // flap-track fairings ("canoes") under the jet wings
+        if (prefix === 'wing' && (D.type === 'airliner' || D.type === 'jumbo')) {
+          for (const f of W.flaps) {
+            if (f.x0 < xa - 1e-6 || f.x1 > xb + 1e-6) continue;
+            for (const t of [0.18, 0.82]) {
+              const x = f.x0 + (f.x1 - f.x0) * t;
+              const c = W.chord(x);
+              const za = W.le(x) - 0.48 * c;
+              const len = 0.72 * c;
+              const r = 0.045 * c;
+              const ylow = W.y(x) - W.thick(x) * c * 0.33;
+              for (let l = 0; l < 2; l++) {
+                const g = pb.lod[l];
+                g.set({ color: D.colors.wingBottom, mat: PAINT });
+                g.push(new THREE.Matrix4().makeTranslation(sx * x, ylow - r * 0.35, za).multiply(new THREE.Matrix4().makeRotationY(Math.PI)));
+                g.lathe([[0.005, 0], [r * 0.55, len * 0.08], [r, len * 0.32], [r * 0.9, len * 0.66], [r * 0.45, len * 0.92], [0.005, len]], l === 0 ? 10 : 5);
+                g.pop();
+              }
+            }
           }
         }
         // planform for the collision box / lift area
@@ -427,8 +451,39 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
     }
   }
 
+  // ------------------------------------------------------------------------------------------- antennas (LOD 0)
+  if (!propPlane) {
+    const k = R / 2;
+    const blade = (partName: string, z: number, top: boolean, size: number) => {
+      const pa = profileAt(P, z);
+      const y = top ? pa.mid + pa.top - 0.01 : pa.mid - pa.bot + 0.01;
+      const s = top ? 1 : -1;
+      const h = 0.28 * k * size;
+      const L0 = 0.36 * k * size;
+      const pts = [v3(0, y, z + L0 / 2), v3(0, y, z - L0 / 2), v3(0, y + s * h, z - L0 * 0.75), v3(0, y + s * h, z - L0 * 0.35)];
+      const b = part(partName, 'fuselage').lod[0];
+      b.set({ color: rgb(0xe8e9eb), mat: PAINT });
+      b.fquadF(pts[0], pts[1], pts[2], pts[3], v3(1, 0, 0));
+      b.fquadF(pts[0], pts[1], pts[2], pts[3], v3(-1, 0, 0));
+    };
+    blade('fuselageFwd', D.cuts[1] - (D.cuts[1] - D.cuts[2]) * 0.3, true, 1);
+    blade('fuselageCenter', (D.cuts[2] + D.cuts[3]) / 2 - (D.cuts[2] - D.cuts[3]) * 0.25, true, 0.8);
+    blade('fuselageFwd', D.cuts[1] - (D.cuts[1] - D.cuts[2]) * 0.55, false, 0.9);
+    blade('fuselageRear', (D.cuts[3] + D.cuts[4]) / 2, true, 0.7);
+  }
+
   // ------------------------------------------------------------------------------------------- cockpit interior
-  const instr = buildCockpit(part('cockpit', 'cockpit').lod[0], D);
+  const instr = buildCockpit(part('cockpit', 'cockpit').lod[0], D, { bulkhead: !D.openCabin });
+  if (D.openCabin) {
+    // bulkhead behind the rear seats (baggage wall), facing the cockpit
+    const b = part('fuselageCenter', 'fuselage').lod[0];
+    b.variant = VAR.bulkhead;
+    b.sway = -1;
+    b.set({ color: D.colors.interior.wall, mat: MATTE });
+    fan(b, P, D.cuts[3] + 0.01, 1, Math.max(0.02, R * 0.04));
+    b.variant = 0;
+    b.sway = 0;
+  }
 
   // ------------------------------------------------------------------------------------------- lights
   const ls = D.lightSize;
@@ -547,6 +602,7 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
     partList.push({
       name: n, kind, index, geo, offset, mass, com: offset.clone(), boxCenter: center, halfExtents: half, fuelKg: fuel,
       cdA: 2 * (half.x * half.y + half.y * half.z + half.z * half.x), cpOffset: cp, liftArea: pb.planform?.area, interior,
+      interiorAlways: !!D.openCabin && (n === 'fuselageFwd' || n === 'fuselageCenter'),
     });
   });
   const partIdx = new Map(partList.map((p) => [p.name, p]));
@@ -756,6 +812,7 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
   const mergedGeo = merged.build();
   return {
     type, design: D, parts: partList, joints, merged: mergedGeo, glowAll, surfaces, engines, gear: gearInfo, breakModes,
+    bulkheadJoints: D.openCabin ? ['fuselageCenter|fuselageRear'] : ['fuselageFwd|fuselageCenter', 'cockpit|fuselageFwd'],
     mass: totalMass, inertia, dims: { length: D.length, span: D.span, height: D.height }, boardPoint: board, cockpitEye: eye, wingCam,
     win: D.win, instrument, propDisc, tris, buildMs: performance.now() - t0,
   };

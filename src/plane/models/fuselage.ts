@@ -140,14 +140,16 @@ export interface LoftOptions {
 }
 
 /** θ-lines of the whole fuselage (shared by every part so neighbouring rings match exactly). */
-export function fuselageLines(P: FusProfile, L: FusLivery, ringSeg: number, exact: boolean): { lines: Line[]; segs: number[] } {
+export function fuselageLines(P: FusProfile, L: FusLivery, ringSeg: number, exact: boolean, bands = exact): { lines: Line[]; segs: number[] } {
   const lines: Line[] = [{ f: () => 0 }, { f: () => Math.PI }, { f: () => Math.PI * 2 }];
-  if (exact) {
+  if (bands) {
     const nAt = (z: number) => (P.n ? P.n(z) : 2);
     for (const b of L.bounds) {
       lines.push({ f: (z) => thetaOfH(b(z), nAt(z)) });
       lines.push({ f: (z) => Math.PI * 2 - thetaOfH(b(z), nAt(z)) });
     }
+  }
+  if (exact) {
     for (const r of L.rects) {
       for (const t of [r.t0, r.t1]) {
         if (t > 0.005 && t < Math.PI - 0.005) {
@@ -301,6 +303,7 @@ export function loftFuselage(b: GeoBuilder, P: FusProfile, L: FusLivery, za: num
       const reg = regionAt(L, zc, tc, nAt(zc));
       if (reg.rect && reg.rect.kind === 'glass') return null;
       const h = hOfTheta(tc, nAt(zc));
+      if (reg.rect) return { key: 900 + reg.key, color: reg.rect.color ?? [0.08, 0.085, 0.09], mat: MATTE };
       return { key: Math.round(h * 20) + 40, color: inner.color(h, zc), mat: MATTE };
     }, { flip: true, offset: -inner.offset });
     return;

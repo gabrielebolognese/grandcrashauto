@@ -75,7 +75,10 @@ export interface Features {
   lightsB: boolean;
 }
 
-const KMAX_SPEED = 95; // m/s ≈ 342 km/h — turbo top speed with upgrades (landing-zone check)
+/** Rejection counters (debug / tuning). */
+export const featureStats = { cand: 0, busy: 0, lateral: 0, structure: 0, climb: 0, placed: 0 };
+
+const KMAX_SPEED = 92; // m/s ≈ 330 km/h — turbo top speed (+ margin) for the landing-zone check
 
 function sampleAt(r: EdgeRoute, s: number): number {
   return Math.max(0, Math.min(r.n, Math.round(s / r.ds)));
@@ -103,6 +106,25 @@ function straightness(r: EdgeRoute, s: number, back: number, ahead: number, side
   return worst;
 }
 
+/**
+ * Signed lateral range [min, max] of the road centreline relative to the straight flight line through station s
+ * (along the travel tangent); + = to the right of the travel direction.
+ */
+function lateralRange(r: EdgeRoute, s: number, back: number, ahead: number, side: number): [number, number] {
+  const i = sampleAt(r, s);
+  const px = r.x[i], pz = r.z[i];
+  const dx = r.tx[i] * side, dz = r.tz[i] * side;
+  const rx = -dz, rz = dx; // right of travel
+  let lo = 0, hi = 0;
+  const i0 = sampleAt(r, s - back * side), i1 = sampleAt(r, s + ahead * side);
+  for (let k = Math.min(i0, i1); k <= Math.max(i0, i1); k += 2) {
+    const lat = (r.x[k] - px) * rx + (r.z[k] - pz) * rz;
+    if (lat < lo) lo = lat;
+    if (lat > hi) hi = lat;
+  }
+  return [lo, hi];
+}
+
 function kindRange(r: EdgeRoute, s0: number, s1: number): { tunnel: boolean; mixed: boolean; first: number } {
   const a = sampleAt(r, Math.min(s0, s1)), b = sampleAt(r, Math.max(s0, s1));
   const first = r.kind[a];
@@ -115,7 +137,7 @@ function kindRange(r: EdgeRoute, s0: number, s1: number): { tunnel: boolean; mix
   return { tunnel, mixed, first };
 }
 
-export function placeFeatures(r: EdgeRoute, rng: Rng): Features {
+export function* placeFeaturesGen(r: EdgeRoute, rng: Rng): Generator<void, Features> {
   const C = cfg();
   const f: Features = { rest: [], kickers: [], megas: [], gantries: [], lightsA: false, lightsB: false };
   const d = r.desc;
@@ -133,102 +155,138 @@ export function placeFeatures(r: EdgeRoute, rng: Rng): Features {
   const occupy = (s0: number, s1: number) => busy.push([Math.min(s0, s1), Math.max(s0, s1)]);
   const grade = (s: number) => (yAt(r, s + 6) - yAt(r, s - 6)) / 12;
 
-  // ── rest stops ──
-  if (L > 2200 && d.ref.cls !== 'link' && rng.chance(C.restStopChance)) {
-    for (let tries = 0; tries < 24; tries++) {
-      const sc = rng.range(0.15, 0.85) * L;
-      const s0 = sc - 130, s1 = sc + 130;
-      if (!free(s0, s1, 60)) continue;
-      const kr = kindRange(r, s0 - 40, s1 + 40);
-      if (kr.mixed || kr.first !== K_ROAD) continue;
-      let ok = true;
-      for (let s = s0; s <= s1; s += 30) if (Math.abs(grade(s)) > 0.05) ok = false;
-      if (!ok || straightness(r, sc, 150, 150, 1) > 40) continue;
-      const side: 1 | -1 = rng.chance(0.5) ? 1 : -1;
-      const near = side === 1 ? d.b : d.a;
-      f.rest.push({ id: `rest:${r.key}`, s0, s1, side, lOff: a2 + 0.4, w: 40, name: near.name });
-      occupy(s0 - 80, s1 + 80);
-      break;
-    }
-  }
-
   // ── mega jumps ──
   const g = Math.abs(CONFIG.physics.gravity);
   const forcedMega = r.key === '0,1>0,2';
-  const megaP = forcedMega ? 1 : Math.min(0.85, L / C.megaEvery);
+  const megaP = forcedMega ? 1 : Math.min(0.95, (1.6 * L) / C.megaEvery);
   if (L > 2000 && d.ref.cls !== 'link' && rng.chance(megaP)) {
     const laneW = 8;
     const laneL0 = a2 + 1.6 + laneW / 2;
-    for (let tries = 0; tries < 24; tries++) {
-      const side: 1 | -1 = tries % 2 === 0 ? 1 : -1;
-      const sLip0 = rng.range(0.25, 0.75) * L;
-      const lipDeg = rng.range(19, 24);
-      const kickLen = 42;
-      const kickH = (kickLen * Math.tan((lipDeg * Math.PI) / 180)) / 2;
-      const gap = rng.range(70, 110);
-      const landLen = 46;
-      const runout = 520;
-      const appr = 280;
-      const sKick = sLip0 - kickLen * side, sLip = sLip0;
-      const sA = sKick - appr * side;
-      const sLand0 = sLip + gap * side, sLand1 = sLand0 + landLen * side;
-      const sEnd = sLand1 + runout * side;
-      if (!free(sA, sEnd, 120)) continue;
-      if (straightness(r, sLip, appr + kickLen + 40, gap + landLen + runout, side) > 2.6) continue;
-      const kr = kindRange(r, sA - 60 * side, sEnd);
-      if (kr.tunnel) continue;
-      // landing zone flat or downhill, no climbs beyond 1.5 m above the lip
-      let ok = true;
-      const yLip = yAt(r, sLip);
-      for (let k = 30; k <= gap + landLen + runout; k += 18) if (yAt(r, sLip + k * side) > yLip + 1.5) ok = false;
-      if (!ok) continue;
-      // canyon (road on a bridge under the gap) or a carved pit
-      const gk = kindRange(r, sLip, sLand0);
-      const canyon = gk.first === K_BRIDGE && !gk.mixed;
-      const landH = Math.max(3, kickH * 0.62);
-      f.megas.push({ side, sA, sKick, sLip, sLand0, sLand1, sEnd, laneL: side * laneL0, laneW, kickH, landH, lipDeg, canyon, pitDepth: 5.5 });
-      occupy(sA - 150 * side, sEnd + 150 * side);
-      break;
+    const lipDeg = rng.range(19, 24);
+    const kickLen = 42;
+    const kickH = (kickLen * Math.tan((lipDeg * Math.PI) / 180)) / 2;
+    const gap = rng.range(70, 110);
+    const landLen = 46;
+    const runout = 520;
+    const appr = 280;
+    const target = rng.range(0.3, 0.7) * L;
+    const side0: 1 | -1 = rng.chance(0.5) ? 1 : -1;
+    // systematic scan (both carriageways); the valid spot nearest a seeded target wins
+    let best: MegaJump | null = null, bestD = Infinity;
+    for (let sLip = zoneA + 400; sLip < L - zoneB - 400; sLip += 60) {
+      if (Math.abs(sLip - target) >= bestD) continue;
+      for (const side of [side0, -side0 as 1 | -1]) {
+        const sKick = sLip - kickLen * side;
+        const sA = sKick - appr * side;
+        const sLand0 = sLip + gap * side, sLand1 = sLand0 + landLen * side;
+        const sEnd = sLand1 + runout * side;
+        if (!free(sA, sEnd, 120)) continue;
+        // drift toward the carriageway is acceptable (barrier / lanes), drift off the outer edge is not
+        const [mLo, mHi] = lateralRange(r, sLip, appr + kickLen + 40, gap + landLen + runout, side);
+        if (mLo < -2.6 || mHi > 12) continue;
+        if (kindRange(r, sA - 60 * side, sEnd).tunnel) continue;
+        // landing zone flat or downhill (≤ 1.5 m above the lip)
+        let ok = true;
+        const yLip = yAt(r, sLip);
+        for (let k = 30; k <= gap + landLen + runout && ok; k += 18) if (yAt(r, sLip + k * side) > yLip + 1.5) ok = false;
+        if (!ok) continue;
+        // canyon (road on a bridge under the gap) or a carved pit
+        const gk = kindRange(r, sLip, sLand0);
+        const canyon = gk.first === K_BRIDGE && !gk.mixed;
+        const landH = Math.max(3, kickH * 0.62);
+        best = { side, sA, sKick, sLip, sLand0, sLand1, sEnd, laneL: side * laneL0, laneW, kickH, landH, lipDeg, canyon, pitDepth: 5.5 };
+        bestD = Math.abs(sLip - target);
+        break;
+      }
+    }
+    if (best) {
+      f.megas.push(best);
+      occupy(best.sA - 150 * best.side, best.sEnd + 150 * best.side);
     }
   }
 
+  yield;
+  // ── rest stops ──
+  if (L > 2200 && d.ref.cls !== 'link' && rng.chance(C.restStopChance)) {
+    // systematic scan; the valid spot nearest a seeded target wins (deterministic)
+    const target = rng.range(0.3, 0.7) * L;
+    const side: 1 | -1 = rng.chance(0.5) ? 1 : -1;
+    let best = -1, bestD = Infinity;
+    for (let sc = zoneA + 220; sc < L - zoneB - 220; sc += 45) {
+      const s0 = sc - 130, s1 = sc + 130;
+      if (Math.abs(sc - target) >= bestD || !free(s0, s1, 60)) continue;
+      const kr = kindRange(r, s0 - 40, s1 + 40);
+      if (kr.mixed || kr.first !== K_ROAD) continue;
+      let ok = true;
+      for (let q = s0; q <= s1 && ok; q += 30) if (Math.abs(grade(q)) > 0.05) ok = false;
+      if (!ok || straightness(r, sc, 150, 150, 1) > 40) continue;
+      best = sc;
+      bestD = Math.abs(sc - target);
+    }
+    if (best >= 0) {
+      const s0 = best - 130, s1 = best + 130;
+      const near = side === 1 ? d.b : d.a;
+      f.rest.push({ id: `rest:${r.key}`, s0, s1, side, lOff: a2 + 0.4, w: 40, name: near.name });
+      occupy(s0 - 80, s1 + 80);
+    }
+  }
+
+  yield;
   // ── highway kickers: scan for safe straight zones, then pick with seeded spacing ──
   {
     const [gMin, gMax] = C.kickerGap as number[];
     let s = zoneA + rng.range(150, 900);
     for (let slot = 0; slot < 8 && s < L - zoneB; slot++) {
       const variant = rng.int(0, 3);
-      const [lenLo, lenHi, degLo, degHi] = variant === 0 ? [18, 24, 12, 16] : variant === 1 ? [14, 20, 13, 18] : variant === 2 ? [12, 16, 15, 21] : [16, 22, 12, 17];
+      const [lenLo, lenHi, degLo, degHi] = variant === 0 ? [18, 24, 12, 14] : variant === 1 ? [14, 20, 12, 15] : variant === 2 ? [12, 16, 13, 17] : [16, 22, 12, 14];
       const len = rng.range(lenLo, lenHi);
       const lipDeg = rng.range(degLo, degHi);
       const th = (lipDeg * Math.PI) / 180;
       const h = (len * Math.tan(th)) / 2;
       const vy = KMAX_SPEED * Math.sin(th);
       const tFly = (vy + Math.sqrt(vy * vy + 2 * g * h)) / g;
-      const range = KMAX_SPEED * Math.cos(th) * tFly * 1.1 + 40;
+      const range = KMAX_SPEED * Math.cos(th) * tFly * 1.08 + 30;
       const side0: 1 | -1 = rng.chance(0.5) ? 1 : -1;
       let found = false;
       const sMax = Math.min(L - zoneB, s + (gMax - gMin) + 700);
       for (let toe = s; toe < sMax && !found; toe += 30) {
         for (const side of [side0, -side0 as 1 | -1]) {
           const lip = toe + len * side;
-          if (!free(toe - 220 * side, lip + range * side, 40)) continue;
+          featureStats.cand++;
+          if (!free(toe - 120 * side, lip + range * side, 30)) {
+            featureStats.busy++;
+            continue;
+          }
           // SAFETY: straight landing zone at turbo range, flat or downhill, no tunnel portals / galleries
-          if (straightness(r, lip, len + 120, range, side) > 3.0) continue;
-          if (kindRange(r, toe - 200 * side, lip + range * side).tunnel) continue;
+          // the car flies straight from the outer lane: the road may bend toward the inner lanes (≈10 m of room to the
+          // median) but only a little toward the shoulder / guardrail
+          const [latLo, latHi] = lateralRange(r, lip, len + 120, range, side);
+          if (latLo < -2.4 || latHi > 7.5) {
+            featureStats.lateral++;
+            continue;
+          }
+          if (kindRange(r, toe - 60 * side, lip + range * side).tunnel) {
+            featureStats.structure++;
+            continue;
+          }
           let ok = true;
           const yl = yAt(r, lip);
-          for (let k = 20; k <= range && ok; k += 15) if (yAt(r, lip + k * side) > yl + 1.0) ok = false;
-          if (!ok) continue;
+          for (let k = 20; k <= range && ok; k += 15) if (yAt(r, lip + k * side) > yl + 1.0 + 0.01 * k) ok = false; // flat / downhill (≤ 1 % rise)
+          if (!ok) {
+            featureStats.climb++;
+            continue;
+          }
+          featureStats.placed++;
           const l = side * (laneStart() + (r.lanes - 0.5) * C.laneW);
           f.kickers.push({ s: toe, side, l, len, h, w: 4.2, lipDeg, variant, range });
-          occupy(toe - 220 * side, lip + range * side);
+          occupy(toe - 120 * side, lip + range * side);
           s = toe + rng.range(gMin, gMax);
           found = true;
           break;
         }
       }
       if (!found) s = sMax;
+      yield;
     }
   }
 

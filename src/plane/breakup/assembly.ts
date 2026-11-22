@@ -121,6 +121,8 @@ export class Assembly {
   slidePart = -1;
   slideT = 0;
   restT = 0;
+  /** Seconds slow (< 2 m/s) — camera focus treats the piece as settled after a moment. */
+  slowT = 0;
 
   // fire & engines
   burning = 0;
@@ -135,6 +137,10 @@ export class Assembly {
   ghostT = 0;
   age = 0;
   removed = false;
+  /** CCD currently enabled on the body. */
+  ccd = true;
+  /** Rapier gravity scale of the body (plane bodies fly with real g in the arcade -14 world). */
+  gScale = 1;
   /** Decaying max of recent speeds (energy guard). */
   recentSpeed = 0;
   readonly recentVel = new THREE.Vector3();
@@ -164,14 +170,11 @@ export class Assembly {
   /** Read the body state (translation, rotation, velocities, world com). */
   read(): void {
     const b = this.body;
-    const t = b.translation();
-    const r = b.rotation();
-    const v = b.linvel();
-    const w = b.angvel();
-    this.pos.set(t.x, t.y, t.z);
-    this.quat.set(r.x, r.y, r.z, r.w);
-    this.vel.set(v.x, v.y, v.z);
-    this.angvel.set(w.x, w.y, w.z);
+    // targets are filled in place (no allocation)
+    b.translation(this.pos);
+    b.rotation(this.quat);
+    b.linvel(this.vel);
+    b.angvel(this.angvel);
     this.comW.copy(this.mp.com).applyQuaternion(this.quat).add(this.pos);
     this.speed = this.vel.length();
   }

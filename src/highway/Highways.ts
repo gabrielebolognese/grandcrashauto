@@ -9,6 +9,7 @@ import { K_GALLERY, K_TUNNEL, laneStart, lanesAt, peekRoute, routeGen, storeRout
 import { ChunkBuilder, type ChunkOut, type ColliderSpec } from './build/chunkBuild';
 import { createHighwayMaterials, type HighwayMaterials } from './build/materials';
 import { GeoBuf, rgb } from './build/GeoBuf';
+import { Traffic } from './Traffic';
 
 /**
  * Endless highway network (SPEC-PART3 §4, §8). Generation is PURE and ABSOLUTE (src/highway/net — also used by the
@@ -78,6 +79,7 @@ export class Highways implements IHighways {
   pois: { id: string; name: string; icon: string; pose: Pose }[] = [];
 
   private mats!: HighwayMaterials;
+  private traffic: Traffic | null = null;
   private routes = new Map<string, RouteRec>();
   private routeJobs = new Map<string, Job>();
   private jobs: Job[] = [];
@@ -97,6 +99,8 @@ export class Highways implements IHighways {
   private ready = false;
   private exitWarned = false;
   private tmpV = new THREE.Vector3();
+  private prevFocus = new THREE.Vector3();
+  private jobMax: Record<string, number> = {};
   private stats = { routes: 0, chunks: 0, bodies: 0, jobsMs: 0, routeMs: 0, built: 0, maxJobMs: 0 };
 
   constructor(private ctx: GameContext) {}
@@ -125,6 +129,15 @@ export class Highways implements IHighways {
     engine.scene.add(this.warmGroup);
 
     events.on('originShift', ({ delta }) => this.onOriginShift(delta.x, delta.z));
+    // optional traffic (settings.traffic, off by default)
+    try {
+      this.traffic = new Traffic(this.ctx, () => this.routeList());
+      this.traffic.setEnabled(!!this.ctx.settings?.values?.traffic);
+      events.on('settingsChanged', ({ settings }) => this.traffic?.setEnabled(!!settings.traffic));
+    } catch (err) {
+      console.error('[highways] traffic init failed', err);
+      this.traffic = null;
+    }
     events.on('qualityChanged', () => {
       this.farSig = '';
       this.lastRefreshPos.set(1e9, 0, 1e9);
@@ -136,10 +149,9 @@ export class Highways implements IHighways {
     this.focusAbs.set(o.x, 0, o.z - 300);
     const near = edgesNearRect(-6500, -9500, 9000, 1500, 0);
     near.sort((a, b) => this.edgeDist(a.a, a.b) - this.edgeDist(b.a, b.b));
-    for (const e of near) {
-      if (performance.now() - t0 > 900) break;
-      this.routeNow(e.key);
-    }
+    // fixed set (no time cap) so the Big Jump choice below is deterministic
+    for (const e of near) this.routeNow(e.key);
+    this.pickBigJump();
     this.stats.routeMs = performance.now() - t0;
     this.ready = true;
     if (this.ctx.debug) {
@@ -168,15 +180,32 @@ export class Highways implements IHighways {
     this.focusAbs.set(pos.x + o.x, pos.y, pos.z + o.z);
   }
 
-  update(_dt: number, _alpha: number): void {
+  fixedUpdate(dt: number): void {
+    if (this.ready) this.traffic?.fixedUpdate(dt, this.focusAbs);
+  }
+
+  private *routeListGen(): Generator<EdgeRoute> {
+    for (const rec of this.routes.values()) yield rec.r;
+  }
+
+  private routeList(): Iterable<EdgeRoute> {
+    return { [Symbol.iterator]: () => this.routeListGen() };
+  }
+
+  update(_dt: number, alpha: number): void {
     if (!this.ready) return;
+    this.traffic?.update(alpha);
     const realDt = this.ctx.engine.realDt;
     this.time += realDt;
     this.refreshT -= realDt;
     this.farT -= realDt;
     const moved = Math.hypot(this.focusAbs.x - this.lastRefreshPos.x, this.focusAbs.z - this.lastRefreshPos.z);
     if (this.refreshT <= 0 || moved > 60) this.refresh(false);
-    this.runJobs(CONFIG.highway.buildBudgetMs);
+    // teleport (map / reset far away): stream the surroundings at once, behind the fade, so the car never lands on
+    // a missing deck; normal driving stays within the per-frame budget
+    const jump = Math.hypot(this.focusAbs.x - this.prevFocus.x, this.focusAbs.z - this.prevFocus.z) > 300;
+    this.prevFocus.copy(this.focusAbs);
+    this.runJobs(jump ? 120 : CONFIG.highway.buildBudgetMs);
     // materials: lamps follow the night factor, warning arrows blink
     const night = GLOBAL_UNIFORMS.uNight.value;
     const lv = 0.55 + night * 1.25;
@@ -291,6 +320,8 @@ export class Highways implements IHighways {
       }
       const dtj = performance.now() - tj;
       if (dtj > this.stats.maxJobMs) this.stats.maxJobMs = dtj;
+      const kind = job.key.slice(0, job.key.indexOf(':') + 1 || job.key.length);
+      if (dtj > (this.jobMax[kind] ?? 0)) this.jobMax[kind] = dtj;
       if (done) this.jobs.shift();
       if (performance.now() - t0 > budgetMs) break;
     }
@@ -795,10 +826,7 @@ export class Highways implements IHighways {
   private addPois(r: EdgeRoute): void {
     const lane = (side: number) => side * (laneStart() + 1.5 * CONFIG.highway.laneW);
     if (r.desc.b.key === 'bCB') this.addPoi('hw-coastal-bridge', 'Coastal Bridge', '🌉', r, r.L - 30, lane(1), 1);
-    for (const m of r.features.megas) {
-      const big = r.key === '0,1>0,2';
-      this.addPoi(big ? 'hw-big-jump' : `hw-jump-${r.key}`, big ? 'Big Jump' : 'Mega Jump', '🚀', r, m.sA + m.side * 10, m.laneL, m.side);
-    }
+    for (const m of r.features.megas) this.addPoi(`hw-jump-${r.key}`, 'Mega Jump', '🚀', r, m.sA + m.side * 10, m.laneL, m.side);
     for (const rs of r.features.rest) {
       this.addPoi(`hw-rest-${r.key}`, `Rest Stop ${rs.name}`, '⛽', r, (rs.s0 + rs.s1) / 2, rs.side * (rs.lOff + 7), rs.side);
     }
@@ -808,6 +836,27 @@ export class Highways implements IHighways {
       let best = { r: a, i: 0, y: -Infinity };
       for (const rr of [a, b]) for (let i = 0; i <= rr.n; i++) if (rr.y[i] > best.y && rr.kind[i] !== K_TUNNEL) best = { r: rr, i, y: rr.y[i] };
       this.addPoi('hw-mountain-pass', 'Mountain Pass', '⛰️', best.r, best.i * best.r.ds, lane(1), 1);
+    }
+  }
+
+  /** The mega jump nearest the city (among the fixed init set) becomes the 'Big Jump' POI (deterministic). */
+  private pickBigJump(): void {
+    let best: { id: string; d: number } | null = null;
+    for (const rec of this.routes.values()) {
+      const r = rec.r;
+      for (const m of r.features.megas) {
+        const i = Math.max(0, Math.min(r.n, Math.round(m.sA / r.ds)));
+        const d = Math.hypot(r.x[i], r.z[i]);
+        if (!best || d < best.d) best = { id: `hw-jump-${r.key}`, d };
+      }
+    }
+    const id = best?.id;
+    const p = id ? this.pois.find((q) => q.id === id) : undefined;
+    if (p) {
+      this.poiIds.delete(p.id);
+      p.id = 'hw-big-jump';
+      p.name = 'Big Jump';
+      this.poiIds.add(p.id);
     }
   }
 
@@ -824,6 +873,7 @@ export class Highways implements IHighways {
     for (const n of this.graph.nodes) sh(n.p);
     for (const e of this.graph.edges) for (const p of e.points) sh(p);
     for (const p of this.pois) sh(p.pose.position);
+    this.traffic?.shift(dx, dz);
     void EXITS;
     // meshes (top-level) and bodies are shifted by core; absolute caches need nothing
   }
@@ -839,7 +889,8 @@ export class Highways implements IHighways {
           tris += (m.geometry.getAttribute('position')?.count ?? 0) / 3;
         }
     if (this.farMesh) tris += (this.farMesh.geometry.getAttribute('position')?.count ?? 0) / 3;
-    return { ...this.stats, meshes, tris: Math.round(tris), jobs: this.jobs.length, gridCells: this.grid.size, graphNodes: this.graph.nodes.length, graphEdges: this.graph.edges.length, pois: this.pois.length };
+    for (const [k, v] of Object.entries(this.jobMax)) (this.stats as Record<string, number>)['max_' + k] = Math.round(v * 10) / 10;
+    return { ...this.stats, traffic: this.traffic?.activeCount ?? 0, meshes, tris: Math.round(tris), jobs: this.jobs.length, gridCells: this.grid.size, graphNodes: this.graph.nodes.length, graphEdges: this.graph.edges.length, pois: this.pois.length };
   }
 
   /** Debug: route/sample info for smoke scripts (absolute coords). */
@@ -851,8 +902,9 @@ export class Highways implements IHighways {
   }
 
   /** Debug / test scripts: refresh around the current focus and run streaming jobs synchronously for up to ms. */
-  debugFlush(ms = 2000): number {
+  debugFlush(ms = 2000, x?: number, z?: number): number {
     const t0 = performance.now();
+    if (x !== undefined && z !== undefined) this.setFocus(this.tmpV.set(x, this.focusAbs.y, z));
     this.refresh(true);
     while (this.jobs.length && performance.now() - t0 < ms) {
       this.runJobs(40);

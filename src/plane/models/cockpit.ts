@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GeoBuilder, MATTE, METAL, PAINT, DARK, VAR, type RGB, rgb, v3, mix } from './builder';
-import { loftFuselage, fusRing, fusPoint, profileAt, fuselageLines } from './fuselage';
+import { loftFuselage, fusRing, fusPoint, profileAt, fuselageLines, type FusRect, type FusLivery } from './fuselage';
 
 const RAD = 180 / Math.PI;
 import type { Design } from './designs';
@@ -25,6 +25,7 @@ const SHELL_LOW: RGB = rgb(0x3d4047);
 const PANEL: RGB = rgb(0x2a2d33);
 const GLARE: RGB = rgb(0x17181b);
 const SEAT: RGB = rgb(0x34373e);
+const FRAME: RGB = rgb(0x1e2125);
 
 export function buildCockpit(b: GeoBuilder, D: Design, opts: { bulkhead: boolean } = { bulkhead: true }): InstrumentPlacement {
   const P = D.profile;
@@ -44,9 +45,14 @@ export function buildCockpit(b: GeoBuilder, D: Design, opts: { bulkhead: boolean
   const paneDeg = Math.atan2(eye.y - pBot.y, zW - eye.z) * RAD;
   const lipDeg = Math.max(9, paneDeg + 1.5);
   const zFront = Math.max(zW + 0.03, K.zFront);
-  // inward shell: openings exactly at the glass rects
-  const lines = fuselageLines(P, L, 48, true);
-  loftFuselage(b, P, L, zRear, Math.max(zNoseCut, zFront + 0.01), {
+  b.sway = -1; // interior lighting flag for everything built here
+  // inward shell: openings exactly at the glass rects, dark frames around them
+  const glassR = L.rects.filter((r) => r.kind === 'glass');
+  const fw = Math.max(0.025, R * 0.022);
+  const frames: FusRect[] = glassR.map((r) => ({ z0: r.z0 - fw, z1: r.z1 + fw, t0: Math.max(0, r.t0 - fw / R), t1: r.t1 + fw / R, kind: 'paint', color: FRAME }));
+  const Lc: FusLivery = { bounds: [], colors: [[1, 1, 1]], rects: [...glassR, ...frames] };
+  const lines = fuselageLines(P, Lc, 48, true);
+  loftFuselage(b, P, Lc, zRear, Math.max(zNoseCut, zFront + 0.01), {
     ringSeg: 48, step: R * 0.12, exact: true, win: false, extraZ: [zFront],
     inner: {
       offset: inset,
@@ -194,6 +200,7 @@ export function buildCockpit(b: GeoBuilder, D: Design, opts: { bulkhead: boolean
     }
   }
   b.set({ color: [1, 1, 1], mat: DARK });
+  b.sway = 0;
   return { position: v3(0, faceCy, faceCz).addScaledVector(fNrm, 0.003), quaternion: q, width: panelW, height: panelH };
 }
 

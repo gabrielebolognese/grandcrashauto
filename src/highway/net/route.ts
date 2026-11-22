@@ -1,7 +1,7 @@
 import { Rng, hashString } from '../../core/rng';
 import { cfg, edgeDesc, type EdgeDesc } from './lattice';
 import { H, checkSeed, onSeedChange, sampleStats } from './terrainSample';
-import { placeFeatures, type Features } from './features';
+import { placeFeaturesGen, type Features } from './features';
 import { planGen, type PlanOut } from './plan';
 
 /**
@@ -306,7 +306,7 @@ export function* routeGen(key: string): Generator<void, EdgeRoute | null> {
   };
   yield;
   // ── features ──
-  route.features = placeFeatures(route, rng);
+  route.features = yield* placeFeaturesGen(route, rng);
   // ── corridor segments + bbox ──
   buildSegments(route);
   route.stats.samples = sampleStats.calls - calls0;

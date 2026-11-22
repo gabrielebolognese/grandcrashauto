@@ -5,13 +5,39 @@ import * as THREE from 'three';
  * Positions are given in ABSOLUTE coordinates and stored relative to `anchor` (float precision), so the mesh is
  * placed at (anchor − origin offset).
  */
+/** Growable Float32 buffer (avoids number[] garbage while building chunks). */
+class FBuf {
+  a = new Float32Array(4096);
+  length = 0;
+  push9(v0: number, v1: number, v2: number, v3: number, v4: number, v5: number, v6: number, v7: number, v8: number): void {
+    if (this.length + 9 > this.a.length) this.grow();
+    const a = this.a, n = this.length;
+    a[n] = v0; a[n + 1] = v1; a[n + 2] = v2; a[n + 3] = v3; a[n + 4] = v4; a[n + 5] = v5; a[n + 6] = v6; a[n + 7] = v7; a[n + 8] = v8;
+    this.length = n + 9;
+  }
+  push6(v0: number, v1: number, v2: number, v3: number, v4: number, v5: number): void {
+    if (this.length + 6 > this.a.length) this.grow();
+    const a = this.a, n = this.length;
+    a[n] = v0; a[n + 1] = v1; a[n + 2] = v2; a[n + 3] = v3; a[n + 4] = v4; a[n + 5] = v5;
+    this.length = n + 6;
+  }
+  private grow(): void {
+    const b = new Float32Array(this.a.length * 2);
+    b.set(this.a);
+    this.a = b;
+  }
+  slice(): Float32Array {
+    return this.a.slice(0, this.length);
+  }
+}
+
 export class GeoBuf {
-  pos: number[] = [];
-  nor: number[] = [];
-  col: number[] = [];
-  uv: number[] | null;
+  pos = new FBuf();
+  nor = new FBuf();
+  col = new FBuf();
+  uv: FBuf | null;
   constructor(readonly ax: number, readonly ay: number, readonly az: number, withUv = false) {
-    this.uv = withUv ? [] : null;
+    this.uv = withUv ? new FBuf() : null;
   }
 
   get triCount(): number {
@@ -28,10 +54,9 @@ export class GeoBuf {
     nx /= l;
     ny /= l;
     nz /= l;
-    const P = this.pos, N = this.nor, C = this.col;
-    P.push(x0 - this.ax, y0 - this.ay, z0 - this.az, x1 - this.ax, y1 - this.ay, z1 - this.az, x2 - this.ax, y2 - this.ay, z2 - this.az);
-    N.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
-    C.push(r, g, b, r, g, b, r, g, b);
+    this.pos.push9(x0 - this.ax, y0 - this.ay, z0 - this.az, x1 - this.ax, y1 - this.ay, z1 - this.az, x2 - this.ax, y2 - this.ay, z2 - this.az);
+    this.nor.push9(nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    this.col.push9(r, g, b, r, g, b, r, g, b);
   }
 
   /** Quad p0..p3 CCW seen from the front (two triangles 012, 023). `p` = flat [x0,y0,z0, …, x3,y3,z3]. */
@@ -46,7 +71,9 @@ export class GeoBuf {
     this.quad(p, [1, 1, 1]);
     if (!this.uv || this.pos.length === before) return;
     const [u0, v0, u1, v1] = [uvr[0], uvr[1], uvr[2], uvr[3]];
-    this.uv.push(u0, v0, u1, v0, u1, v1, u0, v0, u1, v1, u0, v1);
+    const tris = (this.pos.length - before) / 9;
+    this.uv.push6(u0, v0, u1, v0, u1, v1);
+    if (tris > 1) this.uv.push6(u0, v0, u1, v1, u0, v1);
   }
 
   /**
@@ -85,10 +112,10 @@ export class GeoBuf {
   toGeometry(): THREE.BufferGeometry | null {
     if (this.pos.length === 0) return null;
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.pos), 3));
-    g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(this.nor), 3));
-    if (this.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(this.uv), 2));
-    else g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.col), 3));
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos.slice(), 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(this.nor.slice(), 3));
+    if (this.uv) g.setAttribute('uv', new THREE.BufferAttribute(this.uv.slice(), 2));
+    else g.setAttribute('color', new THREE.BufferAttribute(this.col.slice(), 3));
     g.computeBoundingSphere();
     g.computeBoundingBox();
     return g;

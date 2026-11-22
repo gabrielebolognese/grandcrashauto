@@ -33,6 +33,12 @@ interface Sample {
   pieces: { id: number; parts: number; mass: number; p: number[]; v: number[]; w: number[]; pitch: number; burning: number }[];
 }
 
+/** Plane bodies fly with real gravity in the arcade world (same rule as the flight module). */
+function planeGravityScale(): number {
+  const g = (CONFIG.planes as { gravity?: number }).gravity;
+  return g ? g / Math.abs(CONFIG.physics.gravity) : 1;
+}
+
 export function installHarness(bk: Breakup, ctx: GameContext): void {
   const { physics, engine } = ctx;
   let visual: PlaneVisual | null = null;
@@ -40,6 +46,7 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
   let gearDown = true;
   let liftK = 0;
   let liftUntil = 0;
+  let liftScaled = 0;
   let t = 0;
   let action: (() => void) | null = null;
   let actionAt = -1;
@@ -56,6 +63,12 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
   let splitInfo: { pieces: number; cockpit: number | null } | null = null;
   const lost: string[] = [];
   let camMode: string | null = null;
+  /** Site of the last scenario (camera offsets are expressed in its heading frame: x = left, z = forward). */
+  const lastSite = { o: new THREE.Vector3(), yaw: 0 };
+  const rotYaw = (v: THREE.Vector3, out: THREE.Vector3) => {
+    const c = Math.cos(lastSite.yaw), sn = Math.sin(lastSite.yaw);
+    return out.set(v.x * c + v.z * sn, v.y, -v.x * sn + v.z * c);
+  };
   let camFixed = new THREE.Vector3();
   let camOff = new THREE.Vector3(30, 12, -60);
   const camPos = new THREE.Vector3();
@@ -77,6 +90,7 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
 
   function cleanup(): void {
     bk.clear();
+    ctx.fx.clearAll(); // fuel patches / slicks are fire-and-forget fx (the plane respawn flow clears them in game)
     if (plane) {
       bk.untrack(plane);
       if (plane.body) physics.removeBody(plane.body);
@@ -94,6 +108,7 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
     action = null;
     hardWatch = null;
     liftK = 0;
+    liftScaled = 0;
     samples = [];
     log = [];
     crashes.length = 0;
@@ -115,7 +130,8 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
       .setRotation({ x: quat.x, y: quat.y, z: quat.z, w: quat.w })
       .setLinvel(vel.x, vel.y, vel.z)
       .setAdditionalMassProperties(v.mass, { x: 0, y: 0, z: 0 }, { x: v.inertia.x, y: v.inertia.y, z: v.inertia.z }, { x: 0, y: 0, z: 0, w: 1 })
-      .setCcdEnabled(true);
+      .setCcdEnabled(true)
+      .setGravityScale(planeGravityScale());
     const body = physics.world.createRigidBody(desc);
     for (const p of v.parts) {
       if (p.kind === 'gear' && !withGear) continue;
@@ -163,16 +179,54 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
     camPrimed = false;
   }
 
-  function pose(o: Opts, defaults: Required<Pick<Opts, 'kmh' | 'alt' | 'x' | 'z' | 'yawDeg' | 'gammaDeg' | 'bankDeg'>> & { pitchDeg?: number }) {
-    const kmh = o.kmh ?? defaults.kmh;
-    const yaw = THREE.MathUtils.degToRad(o.yawDeg ?? defaults.yawDeg);
-    const gamma = THREE.MathUtils.degToRad(o.gammaDeg ?? defaults.gammaDeg);
-    const pitch = THREE.MathUtils.degToRad(o.pitchDeg ?? defaults.pitchDeg ?? (o.gammaDeg ?? defaults.gammaDeg) + 2);
-    const bank = THREE.MathUtils.degToRad(o.bankDeg ?? defaults.bankDeg);
+  /** Base frame of a scenario: origin on the surface + heading. 'air' = over the city, 'runway' = airport main runway
+   *  (falls back to open ground), 'sea' = first open water found south of the city. */
+  function site(kind: 'air' | 'runway' | 'sea' | 'ground'): { o: THREE.Vector3; yaw: number } {
+    if (kind === 'runway') {
+      const rw = ctx.world.data?.airport?.runways?.[0];
+      if (rw) {
+        const a = new THREE.Vector3(rw.a.x, rw.a.y, rw.a.z);
+        const b = new THREE.Vector3(rw.b.x, rw.b.y, rw.b.z);
+        const dir = b.clone().sub(a).setY(0).normalize();
+        return { o: a.addScaledVector(dir, 600), yaw: Math.atan2(dir.x, dir.z) };
+      }
+      kind = 'ground';
+    }
+    if (kind === 'sea') {
+      for (let z = 450; z < 4000; z += 100) {
+        const w = waterY(0, z);
+        if (w !== null && ctx.world.groundHeightAt(0, z) < w - 8 && waterY(0, z + 600) !== null) return { o: new THREE.Vector3(0, w, z), yaw: 0 };
+      }
+      return { o: new THREE.Vector3(0, CONFIG.world.waterLevel, 900), yaw: 0 };
+    }
+    if (kind === 'ground') return { o: new THREE.Vector3(-150, ctx.world.groundHeightAt(-150, -150), -150), yaw: 0 };
+    return { o: new THREE.Vector3(0, 0, -400), yaw: 0 };
+  }
+  function waterY(x: number, z: number): number | null {
+    try {
+      return ctx.terrain?.waterAt?.(x, z) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Pose relative to a site: `back` m before the origin along the heading, `alt` m above it. */
+  function pose(o: Opts, st: { o: THREE.Vector3; yaw: number }, d: { kmh: number; alt: number; back: number; side?: number; yawOff?: number; gammaDeg: number; bankDeg: number; pitchDeg?: number }) {
+    const kmh = o.kmh ?? d.kmh;
+    const yaw = st.yaw + THREE.MathUtils.degToRad(o.yawDeg ?? d.yawOff ?? 0);
+    const gammaDeg = o.gammaDeg ?? d.gammaDeg;
+    const gamma = THREE.MathUtils.degToRad(gammaDeg);
+    const pitch = THREE.MathUtils.degToRad(o.pitchDeg ?? d.pitchDeg ?? gammaDeg + 2);
+    const bank = THREE.MathUtils.degToRad(o.bankDeg ?? d.bankDeg);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-pitch, yaw, bank, 'YXZ'));
     const sp = kmh / 3.6;
+    const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     const vel = new THREE.Vector3(Math.sin(yaw) * Math.cos(gamma), Math.sin(gamma), Math.cos(yaw) * Math.cos(gamma)).multiplyScalar(sp);
-    const pos = new THREE.Vector3(o.x ?? defaults.x, o.alt ?? defaults.alt, o.z ?? defaults.z);
+    const pos = st.o.clone().addScaledVector(fwd, -(o.x ?? d.back));
+    pos.x += d.side ?? 0;
+    pos.y += o.alt ?? d.alt;
+    lastSite.o.copy(st.o);
+    lastSite.yaw = st.yaw;
     return { pos, q, vel, sp };
   }
 
@@ -197,85 +251,102 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
     const stall = CONFIG.planes[type].stallKmh;
     let withGear = true;
     let p;
+    action = null;
+    hardWatch = null;
+    liftK = 0;
+    liftUntil = 1e9;
+    const air = site('air');
     switch (scenario) {
       case 'total':
-        p = pose(o, { kmh: 700, alt: 300, x: 0, z: -250, yawDeg: 0, gammaDeg: 0, bankDeg: 0 });
+        p = pose(o, air, { kmh: 700, alt: 300, back: 0, gammaDeg: 0, bankDeg: 0 });
         liftK = o.lift ?? 1;
         liftUntil = delay;
         action = () => plane && bk.explodeTotal(plane);
         break;
       case 'middle':
-        p = pose(o, { kmh: 450, alt: 600, x: 0, z: -250, yawDeg: 0, gammaDeg: 0, bankDeg: 0 });
+        p = pose(o, air, { kmh: 450, alt: 600, back: 0, gammaDeg: 0, bankDeg: 0 });
         liftK = o.lift ?? 1;
         liftUntil = delay;
         action = () => {
           if (!plane || !visual) return;
           const ids = visual.breakModes.middle;
-          bk.breakJoints(plane, ids, blastAt(ids, 'middle', 0.25));
+          bk.breakJoints(plane, ids, blastAt(ids, 'middle', 0.35));
         };
         break;
       case 'tail':
-        p = pose(o, { kmh: 420, alt: 500, x: 0, z: -250, yawDeg: 0, gammaDeg: 0, bankDeg: 0 });
-        liftK = o.lift ?? 1;
-        liftUntil = 1e9; // the intact remainder keeps (crippled) lift; the flight module does this in game
+        p = pose(o, air, { kmh: 420, alt: 500, back: 0, gammaDeg: 0, bankDeg: 0 });
+        liftK = o.lift ?? 1; // the intact remainder keeps (crippled) lift; the flight module does this in game
         action = () => {
           if (!plane || !visual) return;
           const ids = [...visual.breakModes.tailRequired, ...visual.breakModes.tailOptional];
-          bk.breakJoints(plane, ids, blastAt(ids, 'tail', 0.08));
+          bk.breakJoints(plane, ids, blastAt(ids, 'tail', 0.25));
         };
         break;
-      case 'nose':
-        p = pose(o, { kmh: 300, alt: 60, x: 0, z: -300, yawDeg: 0, gammaDeg: -40, bankDeg: 0, pitchDeg: -42 });
+      case 'nose': {
+        // 40° dive at 300 km/h hitting the runway ~ at the site origin
+        p = pose(o, site('runway'), { kmh: 300, alt: 60, back: 72, gammaDeg: -40, bankDeg: 0, pitchDeg: -42 });
         break;
-      case 'wingtip':
-        p = pose(o, { kmh: 260, alt: 20, x: -150, z: -250, yawDeg: 0, gammaDeg: -9, bankDeg: 55, pitchDeg: -4 });
+      }
+      case 'wingtip': {
+        p = pose(o, site('runway'), { kmh: 260, alt: 20, back: 120, gammaDeg: -9, bankDeg: 55, pitchDeg: -4 });
         break;
-      case 'belly':
+      }
+      case 'belly': {
         withGear = false;
-        p = pose(o, { kmh: 300, alt: 4, x: -150, z: -350, yawDeg: 0, gammaDeg: -1.2, bankDeg: 0, pitchDeg: 1.5 });
+        p = pose(o, site('runway'), { kmh: 300, alt: 4, back: 60, gammaDeg: -1.2, bankDeg: 0, pitchDeg: 1.5 });
         liftK = o.lift ?? 0.92;
-        liftUntil = 1e9;
         break;
-      case 'hard':
-        p = pose(o, { kmh: 250, alt: 8, x: -150, z: -350, yawDeg: 0, gammaDeg: -1.1, bankDeg: 0, pitchDeg: 3 });
+      }
+      case 'hard': {
+        p = pose(o, site('runway'), { kmh: 250, alt: 8, back: 160, gammaDeg: -1.1, bankDeg: 0, pitchDeg: 3 });
         liftK = o.lift ?? 0.97;
-        liftUntil = 1e9;
         hardWatch = { vs: 0 };
         break;
-      case 'water':
-        p = pose(o, { kmh: 400, alt: 120, x: 0, z: 650, yawDeg: 0, gammaDeg: -35, bankDeg: 0, pitchDeg: -37 });
+      }
+      case 'water': {
+        p = pose(o, site('sea'), { kmh: 400, alt: 120, back: 170, gammaDeg: -35, bankDeg: 0, pitchDeg: -37 });
         break;
-      case 'watercart':
-        p = pose(o, { kmh: 300, alt: 22, x: 0, z: 650, yawDeg: 0, gammaDeg: -7, bankDeg: 70, pitchDeg: -3 });
+      }
+      case 'watercart': {
+        p = pose(o, site('sea'), { kmh: 300, alt: 22, back: 140, gammaDeg: -7, bankDeg: 70, pitchDeg: -3 });
         liftK = o.lift ?? 0.5;
-        liftUntil = 1e9;
         break;
-      case 'ditch':
-        p = pose(o, { kmh: stall * 1.2, alt: 6, x: 0, z: 600, yawDeg: 0, gammaDeg: -1.3, bankDeg: 0, pitchDeg: 6 });
+      }
+      case 'ditch': {
+        // gear up, 1.2× stall, wings level, nose ~6° up; lift keeps acting (∝ v²) after touchdown, as in the flight model
+        withGear = false;
+        p = pose(o, site('sea'), { kmh: stall * 1.2, alt: 6, back: 220, gammaDeg: -1.3, bankDeg: 0, pitchDeg: 6 });
         liftK = o.lift ?? 0.97;
-        liftUntil = 1e9;
         break;
+      }
       case 'building': {
-        const tgt = o.target ?? [134, 12, 68];
-        p = pose(o, { kmh: 250, alt: tgt[1], x: tgt[0] - 260, z: tgt[2], yawDeg: 90, gammaDeg: 0, bankDeg: 0 });
+        // aim at a real tall building on the city's west side (approach from the west, heading +X)
+        let tgt = o.target;
+        if (!tgt) {
+          const bs = ctx.world.data?.buildings ?? [];
+          let best: (typeof bs)[number] | null = null;
+          for (const b of bs) if (b.h > 22 && b.x < 0 && (!best || b.x < best.x)) best = b;
+          tgt = best ? [best.x - best.w / 2, best.y + Math.min(best.h * 0.5, 18), best.z] : [134, 12, 68];
+        }
+        p = pose(o, { o: new THREE.Vector3(tgt[0], 0, tgt[2]), yaw: Math.PI / 2 }, { kmh: 250, alt: tgt[1], back: 260, gammaDeg: 0, bankDeg: 0 });
         liftK = o.lift ?? 1;
-        liftUntil = 1e9;
         break;
       }
       default:
-        p = pose(o, { kmh: 300, alt: 300, x: 0, z: -250, yawDeg: 0, gammaDeg: 0, bankDeg: 0 });
+        p = pose(o, air, { kmh: 300, alt: 300, back: 0, gammaDeg: 0, bankDeg: 0 });
         liftK = o.lift ?? 1;
-        liftUntil = 1e9;
     }
     const keepAction = action;
     const keepLift = liftK;
     const keepUntil = liftUntil;
     const keepHard = hardWatch;
+    const keepScaled = scenario === 'ditch' ? p.sp : 0;
     spawn(type, p.pos, p.q, p.vel, withGear);
     action = keepAction;
     liftK = keepLift;
     liftUntil = keepUntil;
     hardWatch = keepHard;
+    liftScaled = keepScaled;
     actionAt = action ? delay : -1;
     ev(`test ${type} ${scenario} v=${p.sp.toFixed(0)}m/s`);
     return `ok ${type} ${scenario}`;
@@ -293,17 +364,17 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
         a();
       }
       const b = plane.body;
-      if (b && liftK > 0 && t < liftUntil && !crashes.length) {
-        // crude stand-in for the flight model: lift along body up, scaled by (v / v0)²
+      if (b && liftK > 0 && t < liftUntil && (!crashes.length || liftScaled > 0)) {
+        // crude stand-in for the flight model: lift along body up (∝ (v/v0)² when scaled)
         const v = b.linvel();
-        const sp = Math.hypot(v.x, v.y, v.z);
+        const sp2 = v.x * v.x + v.y * v.y + v.z * v.z;
         const m = b.mass();
         const r = b.rotation();
         const up = tmp.set(0, 1, 0).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
-        const g = Math.abs(CONFIG.physics.gravity);
-        const k = liftK * Math.min(1.2, (sp * sp) / Math.max(1, sp * sp));
+        const g = Math.abs(CONFIG.physics.gravity) * b.gravityScale();
+        const k = liftK * (liftScaled > 0 ? Math.min(1, sp2 / (liftScaled * liftScaled)) : 1);
         b.applyImpulse({ x: up.x * m * g * k * dt, y: up.y * m * g * k * dt, z: up.z * m * g * k * dt }, true);
-        b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        if (liftScaled <= 0) b.setAngvel({ x: 0, y: 0, z: 0 }, true);
       }
       if (b && hardWatch && visual) {
         // gear touch → hard landing call (what the plane system does on a 3–6 m/s touchdown)
@@ -385,6 +456,7 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
     currP.sub(e.delta);
     camPos.sub(e.delta);
     camFixed.sub(e.delta);
+    lastSite.o.sub(e.delta);
   });
 
   // ─── camera ───
@@ -403,6 +475,7 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
     camMode = mode;
     camPrimed = false;
     if (a) (mode === 'fixed' ? camFixed : camOff).set(a[0], a[1], a[2]);
+    if (a && mode === 'site') camFixed.copy(lastSite.o).add(rotYaw(new THREE.Vector3(a[0], a[1], a[2]), new THREE.Vector3()));
     if (b) camLook.set(b[0], b[1], b[2]);
     if (!mode) {
       if (origUpdate) ctx.cameraRig.update = origUpdate;
@@ -411,14 +484,14 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
     ctx.cameraRig.update = (dt: number) => {
       const c = engine.camera;
       if (!focusPoint(tmp)) return;
-      if (camMode === 'fixed') {
+      if (camMode === 'fixed' || camMode === 'site') {
         c.position.copy(camFixed);
         c.lookAt(tmp);
       } else if (camMode === 'look') {
         c.position.copy(camFixed);
         c.lookAt(camLook);
       } else {
-        const target = tmp.clone().add(camOff);
+        const target = tmp.clone().add(rotYaw(camOff, new THREE.Vector3()));
         if (!camPrimed) {
           camPos.copy(target);
           camLook.copy(tmp);
@@ -444,6 +517,7 @@ export function installHarness(bk: Breakup, ctx: GameContext): void {
       bodies: physics.world.bodies.len(),
       colliders: physics.world.colliders.len(),
       lastSplit: ls,
+      site: { o: [lastSite.o.x, lastSite.o.y, lastSite.o.z].map((x) => +x.toFixed(1)), yaw: +lastSite.yaw.toFixed(3) },
       crashes: crashes.map((c) => ({ outcome: c.outcome, part: c.info.part, vn: +c.info.normalSpeed.toFixed(1), vt: +c.info.tangentSpeed.toFixed(1), angle: +c.info.angleDeg.toFixed(0) })),
       split: splitInfo,
       lost,

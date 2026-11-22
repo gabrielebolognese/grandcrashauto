@@ -115,7 +115,7 @@ export class PlaneVisualImpl implements PlaneVisual {
       if (p.interior) {
         interior = new THREE.Mesh(p.interior, this.mats.main);
         interior.name = `${p.name}-interior`;
-        interior.visible = false;
+        interior.visible = !!p.interiorAlways;
         obj.add(interior);
       }
       this.root.add(obj);
@@ -258,7 +258,7 @@ export class PlaneVisualImpl implements PlaneVisual {
         }
       }
     }
-    if (jointId === 'fuselageFwd|fuselageCenter' || jointId === 'cockpit|fuselageFwd') this.mats.uniforms.uFlags.value.y = 1;
+    if (this.tpl.bulkheadJoints.includes(jointId)) this.mats.uniforms.uFlags.value.y = 1;
     this.broken = true;
     this.applyLod();
   }
@@ -305,7 +305,7 @@ export class PlaneVisualImpl implements PlaneVisual {
       o.scale.copy(orig.scale);
       o.visible = true;
       r.capsShown = 0;
-      if (r.interior) r.interior.visible = false;
+      if (r.interior) r.interior.visible = !!r.tpl.interiorAlways;
     }
     for (const j of this.joints) {
       if (j.capA) j.capA.visible = false;

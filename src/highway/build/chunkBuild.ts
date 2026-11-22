@@ -226,7 +226,7 @@ export class ChunkBuilder {
 
   /** Time-sliced build: yields between phases (the caller checks its frame budget). */
   *buildGen(): Generator<void, ChunkOut> {
-    this.pavement();
+    yield* this.pavement();
     yield;
     this.median();
     this.guardrails();
@@ -255,7 +255,7 @@ export class ChunkBuilder {
   }
 
   // ───────────────────────────── pavement & markings ─────────────────────────────
-  private pavement(): void {
+  private *pavement(): Generator<void, void> {
     const r = this.r, C = CONFIG.highway, P = this.P, g = this.out.main;
     const K = r.lanes;
     const w = C.laneW;
@@ -281,6 +281,7 @@ export class ChunkBuilder {
       const jit = fork ? 1 : this.jitter(i, 0);
       const dashOn = ((s % 18) + 18) % 18 < 6;
       const nLanes = lanesAt(r, s);
+      if ((i - this.i0) % 16 === 15) yield;
       // median strip
       this.pt(i, -mh, 0, P, 0);
       this.pt(i, mh, 0, P, 3);

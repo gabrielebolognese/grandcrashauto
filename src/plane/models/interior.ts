@@ -15,8 +15,10 @@ export function buildInterior(b: GeoBuilder, D: Design, za: number, zb: number, 
   const I = D.colors.interior;
   const floorY = D.floorY;
   const ceilH = 0.62;
-  loftFuselage(b, P, { bounds: [], colors: [[1, 1, 1]], rects: [] }, za, zb, {
-    ringSeg: cabin ? 28 : 16, step: R * 0.6, exact: false, win: false,
+  b.sway = -1;
+  const glass = D.liv.rects.filter((r) => r.kind === 'glass' && r.z1 > za && r.z0 < zb);
+  loftFuselage(b, P, { bounds: [], colors: [[1, 1, 1]], rects: glass }, za, zb, {
+    ringSeg: cabin ? 28 : 16, step: R * (glass.length ? 0.15 : 0.6), exact: glass.length > 0, win: false,
     inner: {
       offset: Math.max(0.03, R * 0.04),
       zFront: zb + 1,
@@ -29,7 +31,10 @@ export function buildInterior(b: GeoBuilder, D: Design, za: number, zb: number, 
       },
     },
   });
-  if (!cabin) return;
+  if (!cabin) {
+    b.sway = 0;
+    return;
+  }
   // floor
   const segs = Math.max(1, Math.ceil((zb - za) / (R * 1.5)));
   for (let s = 0; s < segs; s++) {
@@ -106,6 +111,7 @@ export function buildInterior(b: GeoBuilder, D: Design, za: number, zb: number, 
     const cy = pa.mid + pa.top * 0.86;
     b.fquadF(v3(R * 0.05, cy, za + 0.05), v3(-R * 0.05, cy, za + 0.05), v3(-R * 0.05, cy, zb - 0.05), v3(R * 0.05, cy, zb - 0.05), v3(0, -1, 0));
   }
+  b.sway = 0;
 }
 
 function seatColumns(D: Design, R: number): number[] {
