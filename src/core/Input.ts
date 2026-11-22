@@ -20,7 +20,7 @@ import { approach, clamp } from './math';
 export type TriggerAction =
   | 'explode' | 'reset' | 'camera' | 'pause' | 'flip' | 'fullscreen'
   | 'interact' | 'map' | 'gear' | 'engine1' | 'engine2' | 'engine3' | 'engine4' | 'explodeMiddle' | 'explodeTail' | 'skip'
-  | 'barrelLeft' | 'barrelRight' | 'lights';
+  | 'barrelLeft' | 'barrelRight' | 'lights' | 'switchTarget';
 export type InputDevice = 'keyboard' | 'touch' | 'gamepad';
 export type InputMode = 'car' | 'plane';
 
@@ -118,6 +118,7 @@ export class Input {
         case 'KeyQ': if (!plane) this.press('barrelLeft'); break;
         case 'KeyE': if (!plane) this.press('barrelRight'); break;
         case 'KeyL': if (!plane) this.press('lights'); break;
+        case 'KeyV': if (plane) this.press('switchTarget'); break;
       }
     }
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'PageUp', 'PageDown'].includes(e.code)) e.preventDefault();

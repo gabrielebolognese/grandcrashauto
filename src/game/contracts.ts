@@ -463,6 +463,10 @@ export interface IPlaneSystem extends GameSystem {
   /** "AIRBORNE" button: from standstill on the ground, put the plane in flight right here (~300 m up, cruise speed,
    * gear up, engines spooled), facing its current heading. */
   takeOff?(): void;
+  /** After a split: cycle the camera between the big wreck pieces (front half, rear half, wings…). V / Switch button. */
+  cycleTarget?(): void;
+  /** True when there are at least two big pieces to switch between. */
+  readonly canCycleTarget?: boolean;
 }
 
 // --------------------------- breakup & crash physics (src/plane/breakup) ---------------------------

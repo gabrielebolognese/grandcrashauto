@@ -74,6 +74,7 @@ export class FlightHud {
   private crash: HTMLDivElement;
   private nudgePad: HTMLDivElement;
   private airborne: HTMLButtonElement;
+  private switchPart: HTMLButtonElement;
   private skip: HTMLButtonElement;
   private oomBanner: HTMLDivElement;
   private oomText: HTMLSpanElement;
@@ -150,11 +151,19 @@ export class FlightHud {
       this.host.vibrate(20);
     });
 
+    this.switchPart = h('button', { class: 'airborne-btn switch-part-btn touch-ctl', type: 'button', 'aria-label': 'Switch camera part' }, icon('camera'), h('span', { text: '⇄ SWITCH PART' }), h('kbd', { class: 'pb-key', text: 'V' }));
+    this.switchPart.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      uiSound('click');
+      ctx.planes.cycleTarget?.();
+    });
+
     this.el = h(
       'div',
       { class: 'flight-hud', 'aria-hidden': 'true' },
       this.nudgePad,
       this.airborne,
+      this.switchPart,
       // User request: keep the plane visible — no instrument tapes / heading / status chips, only alerts.
       h('div', { class: 'fl-top' }, h('div', { class: 'fl-alerts' }, this.oomBanner, this.caution, this.stall)),
       this.engines,
@@ -225,6 +234,7 @@ export class FlightHud {
     this.el.classList.toggle('stalling', !!ps.stallWarning);
     setVisible(this.nudgePad, !crashed && !seq && typeof planes.nudge === 'function');
     setVisible(this.airborne, !crashed && !!ps.onGround && ps.airspeedKmh < 10 && typeof planes.takeOff === 'function');
+    setVisible(this.switchPart, !!planes.canCycleTarget);
     this.drawSpeed(ps.airspeedKmh * k, ps.rotationSpeedKmh * k, ps.stallSpeedKmh * k, !!ps.stallWarning, mph ? 'MPH' : 'KM/H');
     this.drawAlt(ps.altitude, ps.altitude - ps.altitudeAgl, ps.verticalSpeed);
     this.drawHeading(ps.heading);

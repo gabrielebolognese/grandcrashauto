@@ -1098,6 +1098,10 @@ export const CONFIG = {
   // Spec table targets (SPEC-PART2 §5). The flight module adds the aero/thrust/gear numbers per plane.
   planes: {
     airDensity: 1.225,
+    // Fire escalation (user idea): with 2+ burning engines (or a spread fire) the airframe engulfs, then comes apart.
+    engulf: { secondsToFull: 26, spreadBonus: 0.6, stage1: 0.3, stage2: 0.62, flameGrow: 1.6, selfSustain: 0.8 },
+    // Crippled fall (user feedback): doomed planes lose lift and gravity ramps up so they accelerate into the ground.
+    fall: { startSinkMs: 4, rampS: 6, liftLoss: 0.85, maxGravityScale: 1.7 },
     // Plane bodies fly with real gravity (gravityScale = gravity / |physics.gravity|) even though the arcade world uses -14.
     gravity: 9.81,
     ceiling: 3000, // m: soft ceiling, thrust and lift fade above it

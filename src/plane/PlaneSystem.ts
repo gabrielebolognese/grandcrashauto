@@ -129,6 +129,15 @@ export class PlaneSystem implements IPlaneSystem {
   private tailT = 0;
   private tailExplodeAt = Infinity;
   private tailTrails: TrailHandle[] = [];
+  /** Fire escalation (user idea): 0..1 engulf level from several burning engines; stages 1 engulf, 2 dismantle, 3 structural failure. */
+  private engulf = 0;
+  private engulfStage = 0;
+  private engulfTrails: TrailHandle[] = [];
+  /** Crippled-fall ramp: seconds falling while doomed, and the gravity scale currently applied. */
+  private fallT = 0;
+  /** Piece the player chose to follow with the Switch-part button (overrides the automatic wreck camera). */
+  private manualPiece: WreckPiece | null = null;
+  private fallG = 0;
   private tailStage = 0;
   private damageDrag = 0;
   private assistPenalty = 0;
@@ -456,6 +465,10 @@ export class PlaneSystem implements IPlaneSystem {
     this.tailStage = 0;
     this.damageDrag = 0;
     this.assistPenalty = 0;
+    this.engulf = 0;
+    this.engulfStage = 0;
+    this.fallT = 0;
+    this.fallG = 0;
     this.sideDrag = [];
     this.cockpitPiece = null;
     this.camPiece = null;
@@ -551,6 +564,12 @@ export class PlaneSystem implements IPlaneSystem {
     for (const e of this.engines) e.trail?.stop();
     for (const tr of this.tailTrails) tr.stop();
     this.tailTrails = [];
+    for (const tr of this.engulfTrails) tr.stop();
+    this.engulfTrails = [];
+    this.engulf = 0;
+    this.engulfStage = 0;
+    this.fallT = 0;
+    this.fallG = 0;
     this.engines = [];
     if (this.tracked) {
       try {
@@ -608,6 +627,7 @@ export class PlaneSystem implements IPlaneSystem {
     this.cfg = null;
     this.visual = null;
     this.cameraTarget = null;
+    this.manualPiece = null;
     this.crashed = false;
     this.crashTime = 0;
     this.inCockpitSequence = false;
@@ -1166,6 +1186,9 @@ export class PlaneSystem implements IPlaneSystem {
       }
     }
 
+    // Fire escalation: several engine fires engulf the airframe, then it comes apart (no explosion at the end).
+    if (this.updateEngulf(dt)) return;
+
     // Gear: automatic in both modes (there is no GEAR button; G stays as an override for 8 s).
     // Up after lift-off (Assisted > autoGearUpAgl, Realistic > autoGearUpAglRealistic, climbing); down on approach
     // (descending below autoGearDownAgl under autoGearDownSpeed × Vs) or whenever close to the ground and slow.
@@ -1293,6 +1316,23 @@ export class PlaneSystem implements IPlaneSystem {
       if (vyPre > vsReq + 4) this.oom.liftScale = Math.max(0.15, this.oom.liftScale - 0.12 * dt);
       else this.oom.liftScale = Math.min(1, this.oom.liftScale + 0.06 * dt);
       liftScale *= this.oom.liftScale;
+    }
+
+    // Crippled fall (user feedback): a doomed plane (tail gone, airframe engulfed) must not glide down gracefully —
+    // the longer it falls, the more lift it loses and the harder gravity pulls, so it accelerates and smashes in.
+    {
+      const F = CONFIG.planes.fall;
+      const crippled = (this.tailLost || this.engulfStage >= 2) && !this.onGround && !this.crashed;
+      if (crippled && vyPre < -F.startSinkMs) this.fallT += dt;
+      else if (!crippled) this.fallT = Math.max(0, this.fallT - 2 * dt);
+      const f = smoothstep(0, F.rampS, this.fallT);
+      liftScale *= 1 - F.liftLoss * f;
+      const baseG = CONFIG.planes.gravity / Math.abs(CONFIG.physics.gravity);
+      const gs = baseG + (F.maxGravityScale - baseG) * f;
+      if (Math.abs(gs - this.fallG) > 0.01) {
+        this.fallG = gs;
+        body.setGravityScale(gs, true);
+      }
     }
 
     // Tail lost: timer, fire spreading forward, final explosion if still airborne.
@@ -1794,7 +1834,9 @@ export class PlaneSystem implements IPlaneSystem {
     } else {
       // Wreck camera — never frozen: follow the largest still-moving piece (switch when it comes to rest while
       // others still fall); once everything has settled, the biggest burning piece (the rig orbits it).
-      const focus = this.pickWreckPiece(realDt);
+      const manual = this.manualPiece && this.bigPieces().includes(this.manualPiece) ? this.manualPiece : null;
+      if (!manual) this.manualPiece = null;
+      const focus = manual ?? this.pickWreckPiece(realDt);
       if (focus) {
         tg.object = focus.object;
         let size = Math.max(5, visual.dims.length * Math.cbrt(focus.mass / Math.max(1, visual.mass)));
@@ -1818,6 +1860,33 @@ export class PlaneSystem implements IPlaneSystem {
     this.cameraTarget = tg;
   }
 
+  /** Big wreck pieces worth following (front section first, then by mass). */
+  private bigPieces(): WreckPiece[] {
+    const visual = this.visual;
+    if (!visual) return [];
+    const min = visual.mass * 0.04;
+    const world = this.ctx.physics.world;
+    return this.ctx.breakup.pieces
+      .filter((p) => p.mass >= min && world.bodies.contains(p.body.handle))
+      .sort((a, b) => Number(b.hasCockpit) - Number(a.hasCockpit) || b.mass - a.mass);
+  }
+
+  get canCycleTarget(): boolean {
+    return this.active && !this.body && this.bigPieces().length >= 2;
+  }
+
+  cycleTarget(): void {
+    const list = this.bigPieces();
+    if (list.length < 2) return;
+    const cur = this.manualPiece ?? (this.cameraTarget ? list.find((p) => p.object === this.cameraTarget!.object) ?? null : null);
+    const next = list[(cur ? list.indexOf(cur) + 1 : 1) % list.length];
+    this.manualPiece = next;
+    const parts = next.parts.join(' ');
+    const label = next.hasCockpit ? 'Front section' : /fin|tail/.test(parts) && /fuselage/.test(parts) ? 'Rear section' : /wing/.test(parts) ? 'Wing' : /engine/.test(parts) ? 'Engine' : /fuselage/.test(parts) ? 'Fuselage section' : 'Wreckage';
+    this.ctx.events.emit('toast', { text: '🎥 ' + label, ms: 900 });
+    this.updateCameraTarget();
+  }
+
   private pieceVelocity(p: WreckPiece, out: THREE.Vector3): void {
     try {
       if (this.ctx.physics.world.bodies.contains(p.body.handle)) {
@@ -1829,6 +1898,95 @@ export class PlaneSystem implements IPlaneSystem {
       /* body gone */
     }
     out.set(0, 0, 0);
+  }
+
+  /** Returns true if the intact body is gone (structural failure) and the caller must stop this step. */
+  private updateEngulf(dt: number): boolean {
+    const { ctx } = this;
+    const visual = this.visual;
+    if (!visual || !this.tracked || this.split || this.crashed) return false;
+    const E = CONFIG.planes.engulf;
+    let burning = 0;
+    let spread = 0;
+    for (const e of this.engines) {
+      // a torn-off engine leaves its mount burning: it still feeds the escalation
+      if (e.st.status !== 'fire' && e.st.status !== 'detached') continue;
+      burning++;
+      if (e.spread) spread++;
+    }
+    let drive = burning + spread * E.spreadBonus - 1; // one unspread engine fire alone never engulfs
+    // Once the airframe itself is burning it keeps going even after the burning engines tore off.
+    if (this.engulfStage >= 1) drive = Math.max(drive, this.engulfStage >= 2 ? E.selfSustain * 2 : E.selfSustain);
+    if (drive > 0) this.engulf = Math.min(1.05, this.engulf + (drive * dt) / E.secondsToFull);
+    if (this.engulf <= 0) return false;
+    const g = this.engulf;
+    // Flames grow with the engulf level.
+    for (const e of this.engines) if (e.trail && e.st.status === 'fire') e.trail.setIntensity(1, 1, e.trailSize * (1 + E.flameGrow * g));
+    const r = Math.max(1, visual.dims.span * 0.05);
+    for (const t of this.engulfTrails) t.setIntensity(0.7 + 0.3 * g, 1, r * (0.7 + 1.3 * g));
+
+    // Stage 1: flames engulf wings + fuselage.
+    if (this.engulfStage < 1 && g >= E.stage1) {
+      this.engulfStage = 1;
+      for (const name of ['fuselageCenter', 'wingL1', 'wingR1', 'fuselageRear']) {
+        const part = visual.partByName[name];
+        if (!part || this.lostParts.has(name) || !ctx.fx.attachTrail) continue;
+        this.engulfTrails.push(ctx.fx.attachTrail(part.object, new THREE.Vector3(0, part.halfExtents.y * 0.6, 0), { fire: 0.8, smoke: 1, size: r * 0.7 }));
+      }
+      this.assistPenalty += 0.2;
+      ctx.events.emit('masterCaution', { text: 'FIRE SPREADING', level: 'warning' });
+    }
+    // Stage 2: dismantling — burning engines tear off, outer wing sections drop, small pops.
+    if (this.engulfStage < 2 && g >= E.stage2) {
+      this.engulfStage = 2;
+      const ids: string[] = [];
+      this.engines.forEach((e, i) => {
+        if (e.st.status !== 'fire') return;
+        const mount = visual.breakModes.engineMount[i + 1];
+        if (mount && !this.tracked!.brokenJoints.has(mount)) ids.push(mount);
+        if (ctx.fx.explosionEx) {
+          const c = this.worldPoint(e.info.thrustPoint, new THREE.Vector3());
+          ctx.fx.explosionEx({ position: c, velocity: this.state.velocity, radius: Math.max(3, e.info.radius * 4), kind: 'secondary', light: false });
+        }
+      });
+      // outermost wing joint per side
+      for (const side of ['L', 'R']) {
+        let best: string | null = null;
+        let bestN = -1;
+        for (const j of visual.joints) {
+          const m = /^wing([LR])([0-9])$/.exec(j.b);
+          if (!m || m[1] !== side || !/^wing[LR][0-9]$/.test(j.a)) continue;
+          const n = Number(m[2]);
+          if (n > bestN && !this.tracked!.brokenJoints.has(j.id)) {
+            bestN = n;
+            best = j.id;
+          }
+        }
+        if (best && bestN >= 3) ids.push(best);
+      }
+      if (ids.length) {
+        try {
+          ctx.breakup.breakJoints(this.tracked, ids, { center: this.state.position.clone(), energy: this.blastEnergy(0.02), kind: 'engine' });
+        } catch (err) {
+          reportError('[planes] engulf dismantle failed', err);
+        }
+      }
+      ctx.events.emit('masterCaution', { text: 'AIRFRAME FAILING', level: 'warning' });
+      if (!this.body) return true;
+    }
+    // Stage 3: structural failure — the plane simply comes apart (no blast, no kick), pieces keep burning.
+    if (this.engulfStage < 3 && g >= 1) {
+      this.engulfStage = 3;
+      const ids = visual.joints.map((j) => j.id).filter((id) => !this.tracked!.brokenJoints.has(id) && !/gear/i.test(id));
+      ctx.events.emit('masterCaution', { text: 'STRUCTURAL FAILURE', level: 'warning' });
+      try {
+        ctx.breakup.breakJoints(this.tracked, ids);
+      } catch (err) {
+        reportError('[planes] structural failure failed', err);
+      }
+      if (!this.body) return true;
+    }
+    return false;
   }
 
   private updateBoardCandidate(): void {

@@ -651,3 +651,6 @@
 .airborne-btn .ic { width: 16px; height: 16px; }
 @keyframes airborne-pulse { 50% { transform: translateX(-50%) scale(1.06); } }
 .fl-nudge:not(.visible), .airborne-btn:not(.visible) { display: none !important; }
+.switch-part-btn { animation: none; background: linear-gradient(180deg, #ff9784, #ff7a6b); box-shadow: 0 3px 0 #c24a3e, 0 6px 16px rgba(194, 74, 62, .35); }
+.switch-part-btn:not(.visible) { display: none !important; }
+.switch-part-btn .pb-key { margin-left: 4px; opacity: .8; font-size: 10px; }

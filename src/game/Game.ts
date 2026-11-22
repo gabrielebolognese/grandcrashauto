@@ -319,6 +319,7 @@ export class Game implements GameActions {
         if (input.consume('explodeTail')) planes.explodeTail();
         for (let i = 1; i <= 4; i++) if (input.consume(`engine${i}` as 'engine1')) planes.explodeEngine(i);
         if (input.consume('skip')) planes.skipSequence();
+        if (input.consume('switchTarget')) planes.cycleTarget?.();
         // 'gear' is consumed by the plane system itself.
         input.consume('flip');
       } else {
@@ -329,7 +330,7 @@ export class Game implements GameActions {
           if (planes.boardCandidate) planes.board();
           else if (vehicle.state.upsideDown) vehicle.flip();
         }
-        for (const a of ['gear', 'engine1', 'engine2', 'engine3', 'engine4', 'explodeMiddle', 'explodeTail', 'skip'] as const) input.consume(a);
+        for (const a of ['gear', 'engine1', 'engine2', 'engine3', 'engine4', 'explodeMiddle', 'explodeTail', 'skip', 'switchTarget'] as const) input.consume(a);
         const horn = input.state.horn && vehicle.active;
         if (horn !== this.hornWasOn) {
           this.hornWasOn = horn;
