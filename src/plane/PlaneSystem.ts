@@ -133,6 +133,11 @@ export class PlaneSystem implements IPlaneSystem {
   private engulf = 0;
   private engulfStage = 0;
   private engulfTrails: TrailHandle[] = [];
+  /** Fire disintegration countdown (s), current wait, pieces broken so far, wreck hit the ground/water. */
+  private breakNextT = Infinity;
+  private breakInterval = 0;
+  private breakCount = 0;
+  private wreckImpact = false;
   /** Crippled-fall ramp: seconds falling while doomed, and the gravity scale currently applied. */
   private fallT = 0;
   /** Piece the player chose to follow with the Switch-part button (overrides the automatic wreck camera). */
@@ -467,6 +472,10 @@ export class PlaneSystem implements IPlaneSystem {
     this.assistPenalty = 0;
     this.engulf = 0;
     this.engulfStage = 0;
+    this.breakNextT = Infinity;
+    this.breakInterval = 0;
+    this.breakCount = 0;
+    this.wreckImpact = false;
     this.fallT = 0;
     this.fallG = 0;
     this.sideDrag = [];
@@ -568,6 +577,10 @@ export class PlaneSystem implements IPlaneSystem {
     this.engulfTrails = [];
     this.engulf = 0;
     this.engulfStage = 0;
+    this.breakNextT = Infinity;
+    this.breakInterval = 0;
+    this.breakCount = 0;
+    this.wreckImpact = false;
     this.fallT = 0;
     this.fallG = 0;
     this.engines = [];
@@ -1035,6 +1048,7 @@ export class PlaneSystem implements IPlaneSystem {
   private onCrash(t: TrackedPlane, outcome: CrashOutcome, info: ImpactInfo): void {
     if (t !== this.tracked || outcome === 'landing') return;
     void info;
+    this.wreckImpact = true; // the fire disintegration stops once the wreck has hit something
     this.markCrashed();
   }
 
@@ -1901,27 +1915,19 @@ export class PlaneSystem implements IPlaneSystem {
     out.set(0, 0, 0);
   }
 
-  /** Returns true if the intact body is gone (structural failure) and the caller must stop this step. */
-  /** After the airframe cracked (stage 2), the burning halves keep coming apart in the air — still no explosion. */
+  /** After the airframe cracked, the burning halves keep coming apart piece by piece — still no explosion. */
   private updateEngulfAfterSplit(dt: number): void {
     const visual = this.visual;
-    const tracked = this.tracked;
-    if (!visual || !tracked || this.engulfStage < 1 || this.engulfStage >= 3) return;
+    if (!visual || !this.tracked || this.engulfStage < 1 || this.engulfStage >= 3) return;
     const E = CONFIG.planes.engulf;
-    this.engulf = Math.min(1.05, this.engulf + (E.selfSustain * 2 * dt) / E.secondsToFull);
+    this.engulf = Math.min(1.05, this.engulf + (E.selfSustain * dt) / E.secondsToFull);
     const g = this.engulf;
     const r = Math.max(1, visual.dims.span * 0.05);
     for (const t of this.engulfTrails) t.setIntensity(0.7 + 0.3 * g, 1, r * (0.7 + 1.3 * g));
-    if (g < 1) return;
-    this.engulfStage = 3;
-    const ids = visual.joints.map((j) => j.id).filter((id) => !tracked.brokenJoints.has(id) && !/gear/i.test(id));
-    try {
-      this.ctx.breakup.breakJoints(tracked, ids);
-    } catch (err) {
-      reportError('[planes] structural failure failed', err);
-    }
+    this.updateDisintegration(dt);
   }
 
+  /** Returns true if the intact body is gone and the caller must stop this step. */
   private updateEngulf(dt: number): boolean {
     const { ctx } = this;
     const visual = this.visual;
@@ -1939,7 +1945,7 @@ export class PlaneSystem implements IPlaneSystem {
     // the fire spreading forward from a lost tail engulfs the airframe too
     if (this.tailLost && this.tailT >= E.tailDelay) drive = Math.max(drive, E.tailDrive);
     // Once the airframe itself is burning it keeps going even after the burning engines tore off.
-    if (this.engulfStage >= 1) drive = Math.max(drive, this.engulfStage >= 2 ? E.selfSustain * 2 : E.selfSustain);
+    if (this.engulfStage >= 1) drive = Math.max(drive, E.selfSustain);
     if (drive > 0) this.engulf = Math.min(1.05, this.engulf + (drive * dt) / E.secondsToFull);
     if (this.engulf <= 0) return false;
     const g = this.engulf;
@@ -1958,62 +1964,70 @@ export class PlaneSystem implements IPlaneSystem {
       }
       this.assistPenalty += 0.2;
       ctx.events.emit('masterCaution', { text: 'FIRE SPREADING', level: 'warning' });
+      // the airframe is burning: start the one-piece-at-a-time disintegration countdown
+      this.breakInterval = E.disintegrate.firstS;
+      this.breakNextT = E.disintegrate.firstS;
     }
-    // Stage 2: dismantling — burning engines tear off, outer wing sections drop, small pops.
-    if (this.engulfStage < 2 && g >= E.stage2) {
-      this.engulfStage = 2;
-      const ids: string[] = [];
-      this.engines.forEach((e, i) => {
-        if (e.st.status !== 'fire') return;
-        const mount = visual.breakModes.engineMount[i + 1];
-        if (mount && !this.tracked!.brokenJoints.has(mount)) ids.push(mount);
-        if (ctx.fx.explosionEx) {
-          const c = this.worldPoint(e.info.thrustPoint, new THREE.Vector3());
-          ctx.fx.explosionEx({ position: c, velocity: this.state.velocity, radius: Math.max(3, e.info.radius * 4), kind: 'secondary', light: false });
-        }
-      });
-      // outermost wing joint per side
-      for (const side of ['L', 'R']) {
-        let best: string | null = null;
-        let bestN = -1;
-        for (const j of visual.joints) {
-          const m = /^wing([LR])([0-9])$/.exec(j.b);
-          if (!m || m[1] !== side || !/^wing[LR][0-9]$/.test(j.a)) continue;
-          const n = Number(m[2]);
-          if (n > bestN && !this.tracked!.brokenJoints.has(j.id)) {
-            bestN = n;
-            best = j.id;
-          }
-        }
-        if (best && bestN >= 3) ids.push(best);
-      }
-      // tail fire: the burnt-through fuselage cracks in two
-      if (this.tailLost) for (const id of visual.breakModes.middle) if (!this.tracked!.brokenJoints.has(id)) ids.push(id);
-      const pops = this.engines.some((e) => e.st.status === 'fire');
-      if (ids.length) {
-        try {
-          if (pops) ctx.breakup.breakJoints(this.tracked, ids, { center: this.state.position.clone(), energy: this.blastEnergy(0.02), kind: 'engine' });
-          else ctx.breakup.breakJoints(this.tracked, ids); // no blast, no kick: it just comes apart
-        } catch (err) {
-          reportError('[planes] engulf dismantle failed', err);
-        }
-      }
-      ctx.events.emit('masterCaution', { text: 'AIRFRAME FAILING', level: 'warning' });
-      if (!this.body) return true;
-    }
-    // Stage 3: structural failure — the plane simply comes apart (no blast, no kick), pieces keep burning.
-    if (this.engulfStage < 3 && g >= 1) {
-      this.engulfStage = 3;
-      const ids = visual.joints.map((j) => j.id).filter((id) => !this.tracked!.brokenJoints.has(id) && !/gear/i.test(id));
-      ctx.events.emit('masterCaution', { text: 'STRUCTURAL FAILURE', level: 'warning' });
+    return this.updateDisintegration(dt);
+  }
+
+  /**
+   * Fire disintegration (user design): once the airframe burns, pieces come off ONE AT A TIME — tail, then the
+   * middle, then wings outer→inner, engines, the rest. The first takes firstS, each next one waits factor (2/3) × the
+   * previous wait (never below minS). No blasts, no kicks. Returns true if the intact body is gone.
+   */
+  private updateDisintegration(dt: number): boolean {
+    const visual = this.visual;
+    const tracked = this.tracked;
+    if (!visual || !tracked || this.engulfStage < 1 || this.engulfStage >= 3 || this.wreckImpact) return false;
+    this.breakNextT -= dt;
+    if (this.breakNextT > 0) return false;
+    const D = CONFIG.planes.engulf.disintegrate;
+    this.breakInterval = Math.max(D.minS, this.breakInterval * D.factor);
+    this.breakNextT = this.breakInterval;
+    const groups = this.disintegrationGroups(visual, tracked);
+    const bk = this.ctx.breakup;
+    for (const ids of groups) {
+      const before = bk.pieces.length;
       try {
-        ctx.breakup.breakJoints(this.tracked, ids);
+        bk.breakJoints(tracked, ids); // no blast: it just comes apart
       } catch (err) {
-        reportError('[planes] structural failure failed', err);
+        reportError('[planes] disintegration failed', err);
       }
-      if (!this.body) return true;
+      if (bk.pieces.length > before || !this.body) break; // something visibly came off → wait for the next one
     }
-    return false;
+    this.breakCount++;
+    if (this.breakCount === 1) this.ctx.events.emit('masterCaution', { text: 'AIRFRAME FAILING', level: 'warning' });
+    else if (this.breakCount === 3) this.ctx.events.emit('masterCaution', { text: 'STRUCTURAL FAILURE', level: 'warning' });
+    if (this.engulfStage < 2) this.engulfStage = 2; // crippled: the fall ramps up
+    if (!this.disintegrationGroups(visual, tracked).length) this.engulfStage = 3;
+    return !this.body;
+  }
+
+  /** Remaining break steps in order (each = the joints that free one piece). */
+  private disintegrationGroups(visual: PlaneVisual, tracked: TrackedPlane): string[][] {
+    const broken = tracked.brokenJoints;
+    const used = new Set<string>();
+    const out: string[][] = [];
+    const add = (ids: string[]): void => {
+      const f = ids.filter((id) => !broken.has(id) && !used.has(id) && !/gear/i.test(id));
+      for (const id of f) used.add(id);
+      if (f.length) out.push(f);
+    };
+    const bm = visual.breakModes;
+    add([...bm.tailRequired, ...bm.tailOptional]);
+    add(bm.middle);
+    const wing = (side: string) =>
+      visual.joints.filter((j) => /^wing[LR][0-9]$/.test(j.b) && j.b[4] === side).sort((a, b) => Number(b.b.slice(5)) - Number(a.b.slice(5)));
+    const L = wing('L');
+    const R = wing('R');
+    for (let i = 0; i < Math.max(L.length, R.length); i++) {
+      if (L[i]) add([L[i].id]);
+      if (R[i]) add([R[i].id]);
+    }
+    for (const k of Object.keys(bm.engineMount)) add([bm.engineMount[Number(k)]]);
+    for (const j of visual.joints) add([j.id]);
+    return out;
   }
 
   private updateBoardCandidate(): void {
