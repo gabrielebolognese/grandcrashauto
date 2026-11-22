@@ -33,6 +33,7 @@ export class BootScreen {
     const h1 = el.querySelector('h1');
     if (h1) {
       h1.textContent = CONFIG.game.title.toUpperCase();
+      h1.style.setProperty('--c1', String(CONFIG.game.title.length));
       h1.classList.add('boot-word');
     }
     el.prepend(

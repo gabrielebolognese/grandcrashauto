@@ -270,6 +270,20 @@ export class NpcSystem implements INpcSystem {
     );
   }
 
+  /** Pre-compile the hero shadow-depth program (regular materials are compiled by the lead's scene warm-up). */
+  warmup(): void {
+    const depth = this.lods[0]?.mesh.customDepthMaterial;
+    if (!depth) return;
+    const tmp = new THREE.InstancedMesh(this.lods[0].mesh.geometry, depth, 1);
+    tmp.count = 0;
+    try {
+      this.ctx.engine.renderer.compile(tmp, this.ctx.engine.camera, this.ctx.engine.scene);
+    } catch {
+      /* optional */
+    }
+    tmp.dispose();
+  }
+
   private applyQuality(): void {
     const q = this.ctx.quality;
     const high = q.level === 'high';
@@ -330,6 +344,11 @@ export class NpcSystem implements INpcSystem {
       benches: [],
       active: true,
     };
+    // big spots get a static mini crowd (pure instances) + a couple of roaming locals
+    if (spot.count >= 8) {
+      this.crowd.addSite(s.x, s.y, s.z, 'cluster', Math.min(30, Math.round(spot.count) - 2), 0, (CONFIG.game.seed * 31 + id * 7919) | 0, id);
+      s.count = 2;
+    }
     for (const b of spot.benches ?? []) {
       const bg = this.ground(b.p.x, b.p.z);
       const seatH = CONFIG.props.benchSeatHeight;
@@ -357,6 +376,7 @@ export class NpcSystem implements INpcSystem {
       n.spot = -1;
     }
     this.spots.splice(i, 1);
+    for (const cs of [...this.crowd.sites]) if (cs.ambientId === id) this.crowd.removeSite(cs);
   }
 
   // ═══════════════════════════════════════ floating origin ═══════════════════════════════════════

@@ -141,6 +141,9 @@ export class Breakup implements IBreakup {
   private forces = new ForceModel();
   private focusT = 0;
   private offs: (() => void)[] = [];
+  private budgetSparks = 0;
+  private budgetDust = 0;
+  private budgetGouge = 0;
   private mfFound = false;
   private mfNormal = new THREE.Vector3();
   private mfPoint = new THREE.Vector3();
@@ -538,6 +541,10 @@ export class Breakup implements IBreakup {
 
   postStep(dt: number): void {
     this.inPost = true;
+    const cfx = CONFIG.breakup.fx;
+    this.budgetSparks = cfx.maxSparksPerStep;
+    this.budgetDust = cfx.maxDustPerStep;
+    this.budgetGouge = cfx.maxGougePerStep;
     for (const rt of this.planes) {
       for (let i = 0; i < rt.asms.length; i++) {
         const a = rt.asms[i];
@@ -1527,6 +1534,7 @@ export class Breakup implements IBreakup {
     const sev = vn * hard + vh * hard * cfg.damage.waterTangent;
     this.accumulateDamage(rt, a, point, sev, true);
     if (this.asmHasFire(rt, a)) fx.steam?.(pos, Math.min(10, 2 + a.radius));
+    if (rt.ignited && speed > 35 && this.asmFuel(rt, a) > 20 && rt.t - rt.lastSecT > 0.3 && rt.secCount < 7) this.secondary(rt, a);
     const big = a.tracked || a.piece?.hasCockpit || a.mp.mass > 0.15 * rt.s.mass;
     if (!big) return;
     const energy = 0.5 * a.mp.mass * speed * speed;
@@ -1680,13 +1688,13 @@ export class Breakup implements IBreakup {
       a.fxT = THREE.MathUtils.clamp(cfg.fx.sparkInterval * (30 / Math.max(5, vh)), 0.03, 0.2) / Math.max(0.4, this.ctx.quality?.current?.particleScale ?? 1);
       const back = this.v4.copy(a.vel).multiplyScalar(-1 / Math.max(0.1, a.speed));
       back.y = 0.45;
-      if (hard >= 0.9 || surface === 'building') fx.sparks(p, back, THREE.MathUtils.clamp(vh / 35, 0.25, 1.3));
-      if (hard < 0.9 || Math.random() < 0.35) fx.dust(p, THREE.MathUtils.clamp(vh / 25, 0.3, 1.6) * Math.min(2, 0.5 + a.radius * 0.08), material === 'sand' ? 0xe6d3a8 : material === 'grass' ? 0x8f8060 : 0xb5ada0);
+      if ((hard >= 0.9 || surface === 'building') && this.budgetSparks-- > 0) fx.sparks(p, back, THREE.MathUtils.clamp(vh / 35, 0.25, 1.3));
+      if ((hard < 0.9 || Math.random() < 0.35) && this.budgetDust-- > 0) fx.dust(p, THREE.MathUtils.clamp(vh / 25, 0.3, 1.6) * Math.min(2, 0.5 + a.radius * 0.08), material === 'sand' ? 0xe6d3a8 : material === 'grass' ? 0x8f8060 : 0xb5ada0);
     }
     if (a.gougeValid) {
       const d = a.lastGouge.distanceTo(p);
       if (d > 10) a.lastGouge.copy(p);
-      else if (d > cfg.fx.gougeStep) {
+      else if (d > cfg.fx.gougeStep && a.mp.mass > 0.015 * rt.s.mass && this.budgetGouge-- > 0) {
         const pd = rt.s.parts[a.cPart];
         const w = THREE.MathUtils.clamp(Math.min(pd.bh.x, pd.bh.z) * 1.4, 0.4, 4);
         fx.gouge?.(a.lastGouge, p, w);
@@ -1950,9 +1958,11 @@ export class Breakup implements IBreakup {
       t += rnd(cfgF.secInterval[0], cfgF.secInterval[1]);
       rt.secondaries.push(t);
     }
-    for (let i = 0; i < rt.fuel.length; i++) rt.fuel[i] *= 0.75;
+    // only wreckage in/near the fireball catches fire now; far pieces ignite at their own impact (secondary)
+    const reach = radius * 1.5;
     for (const a of rt.asms) {
-      if (a.removed) continue;
+      if (a.removed || a.comW.distanceTo(point) > reach + a.radius) continue;
+      for (const p of a.parts) rt.fuel[p] *= 0.75;
       const f = this.asmFuel(rt, a);
       if (f > 2) this.igniteAsm(rt, a, a.tracked ? 1 : 0.8, rnd(cfgF.coolMin, cfgF.coolMax));
     }
@@ -1983,6 +1993,7 @@ export class Breakup implements IBreakup {
     this.evVel.copy(a.vel);
     this.ctx.events.emit('planeExplosion', { position: this.evPos, velocity: this.evVel, radius, kind: 'secondary' });
     for (const p of a.parts) rt.fuel[p] *= 0.6;
+    if (!this.asmHasFire(rt, a) && this.asmFuel(rt, a) > 2) this.igniteAsm(rt, a, 0.8, rnd(CONFIG.breakup.fire.coolMin, CONFIG.breakup.fire.coolMax));
     if (!a.tracked) {
       const k = Math.min(4, 25000 / a.mp.mass + 0.8);
       a.body.applyImpulse({ x: rnd(-0.5, 0.5) * k * a.mp.mass, y: rnd(0.4, 1) * k * a.mp.mass, z: rnd(-0.5, 0.5) * k * a.mp.mass }, true);

@@ -13,7 +13,7 @@
   visibility: visible;
 }
 
-/* turbo speed lines (cheap: two rotating conic layers masked to the screen edges) */
+/* turbo speed lines: one pre-rendered streak bitmap (see Stunts.ts), animated with transform/opacity only */
 .speedlines {
   position: absolute;
   inset: 0;
@@ -21,33 +21,27 @@
   overflow: hidden;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.35s ease;
-  -webkit-mask: radial-gradient(ellipse 62% 58% at 50% 52%, transparent 55%, #000 100%);
-  mask: radial-gradient(ellipse 62% 58% at 50% 52%, transparent 55%, #000 100%);
+  transition: opacity 0.3s ease;
 }
 .speedlines.on {
   opacity: 1;
 }
 .speedlines i {
   position: absolute;
-  left: 50%;
-  top: 52%;
-  width: 170vmax;
-  height: 170vmax;
-  margin: -85vmax 0 0 -85vmax;
-  background: repeating-conic-gradient(rgba(255, 255, 255, 0.6) 0 0.35deg, transparent 0.35deg 4.1deg);
-  -webkit-mask: repeating-radial-gradient(circle at center, #000 0 6vmax, transparent 6vmax 11vmax);
-  mask: repeating-radial-gradient(circle at center, #000 0 6vmax, transparent 6vmax 11vmax);
+  inset: -14%;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  will-change: transform, opacity;
 }
 .speedlines .sl2 {
-  background: repeating-conic-gradient(from 2deg, rgba(255, 220, 180, 0.35) 0 0.25deg, transparent 0.25deg 6.7deg);
+  transform: rotate(7deg);
 }
 .speedlines.on .sl1 {
-  animation: sl-zoom 0.32s linear infinite;
+  animation: sl-zoom 0.34s linear infinite;
 }
 .speedlines.on .sl2 {
-  animation: sl-zoom 0.45s linear infinite;
-  animation-delay: -0.2s;
+  animation: sl-zoom2 0.34s linear infinite;
+  animation-delay: -0.17s;
 }
 
 /* air time */
@@ -243,11 +237,29 @@
 }
 
 @keyframes sl-zoom {
-  from {
-    transform: scale(1);
+  0% {
+    transform: scale(0.94);
+    opacity: 0;
   }
-  to {
-    transform: scale(1.2);
+  35% {
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.12);
+    opacity: 0;
+  }
+}
+@keyframes sl-zoom2 {
+  0% {
+    transform: rotate(7deg) scale(0.94);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(7deg) scale(1.12);
+    opacity: 0;
   }
 }
 @keyframes br-pulse {

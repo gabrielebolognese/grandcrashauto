@@ -171,18 +171,16 @@ vLN = normal;
 vCar = aCar;
 vCEmit = vec3(0.0);
 {
+  // paintMask: 1 paint, 0.5 glass, 0.25 lamp lens (warm-white front / red rear), 0 other
   vec3 c = color.rgb;
   float isPaint = step(0.75, paintMask);
-  float isGlass = step(0.25, paintMask) * (1.0 - isPaint);
-  float other = 1.0 - step(0.25, paintMask);
+  float isGlass = step(0.375, paintMask) * (1.0 - isPaint);
+  float isLamp = step(0.125, paintMask) * (1.0 - step(0.375, paintMask));
   c = mix(c, aPaint, isPaint);
   c = mix(c, vec3(0.03, 0.04, 0.05), isGlass);
-  float hl = aCar.z;
-  float lum = dot(color.rgb, vec3(0.3, 0.55, 0.15));
-  float front = step(hl * 0.8, position.z) * step(0.66, lum) * other;
-  float rear = step(position.z, -hl * 0.8) * step(0.35, color.r) * step(color.g, 0.25) * other;
   float on = aCar.w * pCarLamp;
-  vCEmit = (front * (0.15 + 2.4 * on) + rear * (0.15 + 1.8 * on)) * color.rgb * pNight;
+  float rear = step(color.g * 1.8 + 0.05, color.r);
+  vCEmit = isLamp * color.rgb * pNight * (0.12 + mix(2.4, 1.7, rear) * on);
   c *= 1.0 - 0.82 * aCar.y;
   #ifdef USE_COLOR
   vColor.rgb = c;
@@ -199,7 +197,7 @@ varying vec3 vCEmit;
 `;
 
 const CAR_GLASS = /* glsl */ `
-if (vPM > 0.25 && vPM < 0.75 && vCar.x > 0.5) {
+if (vPM > 0.375 && vPM < 0.75 && vCar.x > 0.5) {
   vec3 an = abs(vLN);
   vec2 q = an.x > an.y && an.x > an.z ? vLP.yz : (an.y > an.z ? vLP.xz : vLP.xy);
   q *= 13.0;
@@ -225,8 +223,8 @@ export function makeCarMaterial(external?: (m: THREE.Material) => void): THREE.M
       shader.vertexShader = vs;
       let fs = after(shader.fragmentShader, 'common', CAR_FRAG_PARS);
       fs = after(fs, 'color_fragment', CAR_GLASS);
-      fs = after(fs, 'roughnessmap_fragment', 'roughnessFactor = vPM > 0.75 ? mix(0.22, 0.85, vCar.y) : (vPM > 0.25 ? (vCar.x > 0.5 ? 0.55 : 0.03) : 0.6);');
-      fs = after(fs, 'metalnessmap_fragment', 'metalnessFactor = vPM > 0.75 ? 0.35 * (1.0 - vCar.y) : (vPM > 0.25 ? 0.0 : 0.1);');
+      fs = after(fs, 'roughnessmap_fragment', 'roughnessFactor = vPM > 0.75 ? mix(0.22, 0.85, vCar.y) : (vPM > 0.375 ? (vCar.x > 0.5 ? 0.55 : 0.03) : (vPM > 0.125 ? 0.12 : 0.6));');
+      fs = after(fs, 'metalnessmap_fragment', 'metalnessFactor = vPM > 0.75 ? 0.35 * (1.0 - vCar.y) : (vPM > 0.125 ? 0.0 : 0.1);');
       fs = after(fs, 'emissivemap_fragment', 'totalEmissiveRadiance += vCEmit;');
       shader.fragmentShader = fs;
     },

@@ -217,8 +217,11 @@ export class PlaneSystem implements IPlaneSystem {
   }
 
   // ─────────────────────────────── helpers ───────────────────────────────
-  /** Ground (or water surface) height below (x, z), searching down from `fromY`. */
-  private groundAt(x: number, z: number, fromY: number): number {
+  /**
+   * Ground (or water surface) height below (x, z), searching down from `fromY`. Rapier only sees colliders after a
+   * physics step, so callers that know the expected height (stands, runway) pass it as `fallback`.
+   */
+  private groundAt(x: number, z: number, fromY: number, fallback = -Infinity): number {
     const { physics, world, terrain } = this.ctx;
     let gy = -Infinity;
     const ray = this.ray;
@@ -238,6 +241,7 @@ export class PlaneSystem implements IPlaneSystem {
       } catch {
         gy = 0;
       }
+      gy = Math.max(gy, fallback);
     }
     try {
       const w = terrain?.waterAt?.(x, z);
@@ -315,7 +319,7 @@ export class PlaneSystem implements IPlaneSystem {
     physics.removeBody(rec.body);
     rec.body = null;
     const cfg = planeCfg(rec.type);
-    const gy = this.groundAt(rec.pos.x, rec.pos.z, rec.pos.y + 60);
+    const gy = this.groundAt(rec.pos.x, rec.pos.z, rec.pos.y + 60, rec.pos.y);
     rec.pos.y = gy;
     const y = gy + PlaneGear.restHeight(rec.visual, cfg);
     const root = rec.visual.root;
@@ -361,7 +365,7 @@ export class PlaneSystem implements IPlaneSystem {
       if (where === 'runway' && rw) {
         pos.copy(rw.start).addScaledVector(rw.dir, visual.dims.length * 0.5 + 25);
         yaw = Math.atan2(rw.dir.x, rw.dir.z);
-        pos.y = this.groundAt(pos.x, pos.z, rw.start.y + 60) + rest;
+        pos.y = this.groundAt(pos.x, pos.z, rw.start.y + 60, rw.start.y) + rest;
       } else {
         air = true;
         const dir = rw ? rw.dir : new THREE.Vector3(-1, 0, 0);
@@ -375,7 +379,7 @@ export class PlaneSystem implements IPlaneSystem {
       const p = where === 'stand' ? this.standFor(type).p : rec.pos;
       if (where === 'stand') yaw = this.standFor(type).yaw;
       pos.set(p.x, 0, p.z);
-      pos.y = this.groundAt(pos.x, pos.z, p.y + 60) + rest + 0.03;
+      pos.y = this.groundAt(pos.x, pos.z, p.y + 60, p.y) + rest + 0.03;
     }
     _q.setFromAxisAngle(UP, yaw);
 
@@ -619,7 +623,7 @@ export class PlaneSystem implements IPlaneSystem {
       const cx = t.x + local.x;
       const cz = t.z + local.z;
       this.teardownFlight();
-      rec.pos.set(t.x, t.y, t.z);
+      rec.pos.set(t.x, t.y - PlaneGear.restHeight(visual, planeCfg(rec.type)), t.z);
       rec.yaw = yaw;
       rec.occupied = false;
       this.placeParked(rec);

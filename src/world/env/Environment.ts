@@ -57,7 +57,7 @@ export class Environment implements IEnvironment {
   private unsubs: (() => void)[] = [];
 
   private pal = makePalette();
-  private envKey = { hours: -99, cover: -1, fog: -1, time: -99 };
+  private envKey = { hours: -99, cover: -1, fog: -1, time: -99, sun: new THREE.Vector3(), zenith: new THREE.Color(-1, -1, -1), horizon: new THREE.Color(-1, -1, -1), light: new THREE.Color(-1, -1, -1) };
   private saveTimer = 0;
   private focus = new THREE.Vector3();
   private lightDir = new THREE.Vector3(0.5, 0.8, 0.3).normalize();
@@ -344,7 +344,21 @@ export class Environment implements IEnvironment {
     const minutes = Math.min(dh, 24 - dh) * 60;
     const now = this.ctx.engine.time;
     if (now - k.time < 1.5) return false; // hard rate limit
-    return minutes >= CONFIG.env.envRefreshGameMinutes || Math.abs(ws.cloudCover - k.cover) > 0.08 || Math.abs(ws.fog - k.fog) > 0.15;
+    if (k.hours < -50) return true;
+    // Only when the sky actually changed (dawn/dusk, weather), at most every few game minutes.
+    if (minutes < CONFIG.env.envRefreshGameMinutes * 0.5) return false;
+    const p = this.pal;
+    const tol = this.qLevel === 0 ? 0.09 : 0.05;
+    const dc = (a: THREE.Color, b: THREE.Color) => Math.max(Math.abs(a.r - b.r), Math.abs(a.g - b.g), Math.abs(a.b - b.b)) / Math.max(0.05, (b.r + b.g + b.b) / 3);
+    this.c2.copy(this.sun.color).multiplyScalar(this.sun.intensity / DAY_SUN_INTENSITY);
+    return (
+      Math.abs(ws.cloudCover - k.cover) > 0.08 ||
+      Math.abs(ws.fog - k.fog) > 0.15 ||
+      this.clock.sunDir.dot(k.sun) < 0.99 ||
+      dc(p.zenith, k.zenith) > tol ||
+      dc(p.horizon, k.horizon) > tol ||
+      dc(this.c2, k.light) > tol * 2
+    );
   }
 
   private refreshEnvMap(): void {
@@ -354,6 +368,10 @@ export class Environment implements IEnvironment {
     k.cover = this.weatherSim.state.cloudCover;
     k.fog = this.weatherSim.state.fog;
     k.time = this.ctx.engine.time;
+    k.sun.copy(this.clock.sunDir);
+    k.zenith.copy(this.pal.zenith);
+    k.horizon.copy(this.pal.horizon);
+    k.light.copy(this.sun.color).multiplyScalar(this.sun.intensity / DAY_SUN_INTENSITY);
     try {
       const rt = this.pmrem.fromScene(this.captureScene, 0, 0.1, 100, { size: CONFIG.env.envMapSize });
       const old = this.envRT;
@@ -388,6 +406,16 @@ export class Environment implements IEnvironment {
     // Rain colour: catches the ambient light (bright grey by day, dim blue at night), snow nearly white.
     this.c1.copy(p.fog).lerp(this.c2.setRGB(1, 1, 1), 0.35).multiplyScalar(0.55 + 0.45 * (1 - this.nightFactor));
     this.c2.copy(p.hemiSky).multiplyScalar(0.25 * p.hemiIntensity).addScalar(0.55 * (1 - this.nightFactor * 0.7));
+    if (this.precip && ws.rain > 0.05) {
+      const cam = this.ctx.engine.camera;
+      let gy = -1e4;
+      try {
+        gy = this.ctx.world?.groundHeightAt(cam.position.x, cam.position.z) ?? -1e4;
+      } catch {
+        gy = -1e4;
+      }
+      this.precip.setGround(gy, this.qLevel >= 1);
+    }
     this.precip?.update(realDt, this.ctx.engine.time, this.ctx.engine.camera, this.camAbs, lowSnowOverlay ? ws.rain : amount, snowFrac, this.wind, this.c1, this.c2);
     GLOBAL_UNIFORMS.uRain.value = ws.rain;
   }

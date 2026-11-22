@@ -84,9 +84,10 @@ html body #boot.boot-out {
 html body #boot h1.boot-word {
   position: relative;
   margin: 0;
-  font: 900 clamp(42px, 11vmin, 112px) / 1 var(--font-display);
+  font: 900 min(clamp(42px, 11vmin, 112px), calc(92vw / (var(--c1, 9) * 0.86))) / 1 var(--font-display);
   letter-spacing: 0.1em;
   padding-left: 0.1em;
+  white-space: nowrap;
   color: var(--c-white);
   text-shadow: 0 0.03em 0 #ffbf94, 0 0.06em 0 #ff9a7c, 0 0.09em 0 var(--c-coral), 0 0.12em 0 var(--c-coral-d), 0 0.22em 0.3em rgba(34, 48, 77, 0.3);
   animation: cl-drop 0.9s var(--ease-back) both;
@@ -230,12 +231,27 @@ html body #fatal.fatal-styled {
   opacity: 0.95;
 }
 .logo-word {
-  font: 900 1em/1 var(--font-display);
+  font: 900 min(1em, calc(var(--fit, 92vw) / (var(--c1, 9) * 0.86))) / 1 var(--font-display);
   letter-spacing: 0.1em;
   padding-left: 0.1em;
   color: var(--c-white);
   white-space: nowrap;
   text-shadow: 0 0.03em 0 #ffbf94, 0 0.06em 0 #ff9a7c, 0 0.09em 0 var(--c-coral), 0 0.12em 0 var(--c-coral-d), 0 0.22em 0.3em rgba(34, 48, 77, 0.32);
+}
+.lw-line + .lw-line {
+  margin-left: 0.32em;
+}
+.logo-menu .logo-word,
+.logo-credits .logo-word {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.04;
+  font-size: min(1em, calc(var(--fit) / (var(--c2, 9) * 0.86)));
+}
+.logo-menu .lw-line + .lw-line,
+.logo-credits .lw-line + .lw-line {
+  margin-left: 0;
 }
 .logo-rule {
   display: flex;
@@ -256,14 +272,17 @@ html body #fatal.fatal-styled {
 }
 .logo-xl {
   --ls: clamp(44px, 12vmin, 124px);
+  --fit: 90vw;
 }
 .logo-menu {
   --ls: clamp(30px, 6.6vmin, 62px);
+  --fit: min(280px, 36vw);
   align-self: center;
   margin-top: 0.15em;
 }
 .logo-credits {
   --ls: clamp(30px, 6vmin, 54px);
+  --fit: min(520px, 70vw);
 }
 
 /* ───────────────────────────── title ───────────────────────────── */

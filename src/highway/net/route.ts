@@ -63,7 +63,7 @@ export interface EdgeRoute {
   /** corridor segments: [ax, az, bx, bz, ya, yb, halfWidth, kind] × nSegs */
   segs: Float64Array;
   nSegs: number;
-  stats: { minRadius: number; maxGrade: number; samples: number; ms: number };
+  stats: { minRadius: number; maxGrade: number; samples: number; ms: number; windows: number };
 }
 
 // ───────────────────────────── cross-section helpers ─────────────────────────────
@@ -99,6 +99,7 @@ interface PlanOut {
   ds: number;
   L: number;
   minRadius: number;
+  windows: number;
 }
 
 function wrap(a: number): number {
@@ -159,8 +160,10 @@ function* planGen(d: EdgeDesc, rng: Rng): Generator<void, PlanOut> {
   const arcA: number[] = [], arcB: number[] = [];
   const RA = eA.main ? C.designRadius * 1.25 : C.designRadius * 1.15;
   const RB = eB.main ? C.designRadius * 1.25 : C.designRadius * 1.15;
-  const ra = arcToward(aEndX, aEndZ, Math.atan2(eA.dir.x, eA.dir.z), bEndX, bEndZ, RA, 1500, arcA);
-  const rb = arcToward(bEndX, bEndZ, Math.atan2(eB.dir.x, eB.dir.z), ra.x, ra.z, RB, 1500, arcB);
+  const chord = Math.hypot(bEndX - aEndX, bEndZ - aEndZ);
+  const arcMax = Math.min(1500, 0.33 * chord);
+  const ra = arcToward(aEndX, aEndZ, Math.atan2(eA.dir.x, eA.dir.z), bEndX, bEndZ, RA, arcMax, arcA);
+  const rb = arcToward(bEndX, bEndZ, Math.atan2(eB.dir.x, eB.dir.z), ra.x, ra.z, RB, arcMax, arcB);
   lenA += (arcA.length / 2) * 100;
   lenB += (arcB.length / 2) * 100;
   yield;
@@ -470,7 +473,9 @@ function* planGen(d: EdgeDesc, rng: Rng): Generator<void, PlanOut> {
     tx[i] = (x[i + 1] - x[i - 1]) / l;
     tz[i] = (z[i + 1] - z[i - 1]) / l;
   }
-  return { x, z, tx, tz, n, ds, L, minRadius: worstK > 0 ? 1 / worstK : Infinity };
+  let wins = 0;
+  for (let w = 0; w < windows.length; w++) if (winOf[windows[w][0]] === w) wins++;
+  return { x, z, tx, tz, n, ds, L, minRadius: worstK > 0 ? 1 / worstK : Infinity, windows: wins };
 }
 
 // ───────────────────────────── profile ─────────────────────────────
@@ -686,7 +691,7 @@ export function* routeGen(key: string): Generator<void, EdgeRoute | null> {
     forkA: d.endA.fork, forkB: d.endB.fork, exitA: d.endA.exit, exitB: d.endB.exit, lanes: d.lanes,
     features: { rest: [], kickers: [], megas: [], gantries: [], lightsA: false, lightsB: false },
     minX: 0, minZ: 0, maxX: 0, maxZ: 0, segs: new Float64Array(0), nSegs: 0,
-    stats: { minRadius: plan.minRadius, maxGrade, samples: 0, ms: 0 },
+    stats: { minRadius: plan.minRadius, maxGrade, samples: 0, ms: 0, windows: plan.windows },
   };
   yield;
   // ── features ──

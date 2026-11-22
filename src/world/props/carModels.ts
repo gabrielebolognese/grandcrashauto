@@ -128,14 +128,14 @@ export function buildFallbackCar(model: CarModelId): THREE.BufferGeometry {
   }
   const zf = s.top[0][0] + 0.04;
   const zr = s.top[s.top.length - 1][0] - 0.04;
-  const trim = s.chrome ? '#c9ced3' : '#2c3036';
+  const trim = s.chrome ? '#bfc4c9' : '#2c3036';
   // bumpers, grille, lamps, plates
   b.add(extrude([[-0.08, -0.09], [0.06, -0.09], [0.09, 0.0], [0.06, 0.09], [-0.08, 0.09]], s.W * 0.97, 0.01).rotateY(-Math.PI / 2), trim, {}, M(0, s.yb + 0.1, zf - 0.03));
   b.add(extrude([[-0.06, -0.09], [0.08, -0.09], [0.08, 0.09], [-0.09, 0.09], [-0.09, 0.0]], s.W * 0.97, 0.01).rotateY(-Math.PI / 2), trim, {}, M(0, s.yb + 0.1, zr + 0.03));
   b.add(box(s.W * 0.4, 0.13, 0.05), '#16191c', {}, M(0, s.hlY - 0.12, zf - 0.02));
   for (const x of [-1, 1]) {
-    b.add(box(0.36, 0.12, 0.08), '#fff8e0', {}, M(x * (s.W / 2 - 0.3), s.hlY, zf - 0.05));
-    b.add(box(0.4, 0.1, 0.07), '#e2251f', {}, M(x * (s.W / 2 - 0.3), s.tlY, zr + 0.03));
+    b.add(box(0.36, 0.12, 0.08), '#fff3d9', { paint: 0.25 }, M(x * (s.W / 2 - 0.3), s.hlY, zf - 0.05));
+    b.add(box(0.4, 0.1, 0.07), '#e2251f', { paint: 0.25 }, M(x * (s.W / 2 - 0.3), s.tlY, zr + 0.03));
     b.add(box(0.14, 0.05, 0.075), '#ff9a2a', {}, M(x * (s.W / 2 - 0.12), s.hlY - 0.08, zf - 0.07));
     // side mirrors
     b.add(box(0.13, 0.09, 0.1), '#ffffff', paint, M(x * (s.W / 2 + 0.05), s.cabin[0][1] + 0.1, s.cabin[0][0] - 0.2));

@@ -63,7 +63,10 @@ export class BloomPost implements PostProcessor {
   private output: OutputPass;
   private renderPass: RenderPass;
 
+  private renderer: THREE.WebGLRenderer;
+
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, width: number, height: number, pixelRatio: number, samples: number) {
+    this.renderer = renderer;
     this.target = new THREE.WebGLRenderTarget(Math.max(1, width * pixelRatio), Math.max(1, height * pixelRatio), {
       type: THREE.HalfFloatType,
       samples,
@@ -98,12 +101,20 @@ export class BloomPost implements PostProcessor {
     this.composer.render(dt);
   }
 
-  /** Compile every pass (incl. the normally-disabled turbo pass) behind the loading screen. */
+  /**
+   * Compile the normally-disabled turbo pass for the composer's render target (no full render: the scene/bloom
+   * programs get compiled by the regular warm-up frames that render through this composer).
+   */
   warm(): void {
-    const was = this.turbo.enabled;
-    this.turbo.enabled = true;
-    this.composer.render(0);
-    this.turbo.enabled = was;
+    const r = this.renderer;
+    const prev = r.getRenderTarget();
+    const scene = new THREE.Scene();
+    const geo = new THREE.PlaneGeometry(2, 2);
+    scene.add(new THREE.Mesh(geo, this.turbo.material));
+    r.setRenderTarget(this.target);
+    r.compile(scene, new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1));
+    r.setRenderTarget(prev);
+    geo.dispose();
   }
 
   setSize(width: number, height: number, pixelRatio: number): void {
@@ -172,9 +183,13 @@ export class TurboDirect implements PostProcessor {
     // The framebuffer texture follows the drawing buffer size lazily in render().
   }
 
-  /** Compile the quad + allocate the framebuffer copy behind the loading screen. */
+  /** Compile the quad program (screen target) behind the loading screen — no render. */
   warm(): void {
-    this.render();
+    const r = this.renderer;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(null);
+    r.compile(this.quadScene, this.quadCam);
+    r.setRenderTarget(prev);
   }
 
   dispose(): void {

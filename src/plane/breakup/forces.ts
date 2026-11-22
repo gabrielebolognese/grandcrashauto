@@ -362,7 +362,7 @@ export function liftCoef(alpha: number): number {
   if (a <= as) return cfg.liftSlope * alpha;
   if (a >= Math.PI - as) return cfg.liftSlope * 0.5 * (alpha - Math.sign(alpha) * Math.PI);
   // sharp break just past the stall (negative slope → a dropping wing keeps dropping: spin entry), then flat plate
-  const brk = 0.2;
+  const brk = 0.27;
   if (a < as + brk) {
     const peak = cfg.liftSlope * as;
     const post = cfg.postStallCl * Math.sin(2 * (as + brk));

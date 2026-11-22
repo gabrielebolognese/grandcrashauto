@@ -366,7 +366,7 @@ export const CONFIG = {
       countersteerMax: 0.5, // rad
     },
     brakes: {
-      decel: 11.5, // m/s² at full pedal (≈ 100→0 km/h in 2.5 s), capped per wheel by the tyre grip (ABS)
+      decel: 11.0, // m/s² at full pedal (≈ 100→0 km/h in 2.4 s), capped per wheel by the tyre grip (ABS)
       frontBias: 0.64,
       absLimit: 0.92, // fraction of each tyre's grip (μ·load) the brakes may use — ABS: no lock-up, steering stays alive
       absPulse: 0.08, // ABS modulation depth when a wheel is at its grip limit
@@ -494,9 +494,9 @@ export const CONFIG = {
       shakeFreq: 8, // Hz
       wobbleStartKmh: 90,
       wobbleFullKmh: 320,
-      lowGripWild: 2.2, // wobble/kick multiplier per unit of lost grip (rain ≈ ×1.5, snow ≈ ×2.2)
-      liftOffYaw: 0.14, // rad/s yaw kick when releasing turbo mid-corner
-      liftOffRearSide: 0.72, // rear side grip during the lift-off kick
+      lowGripWild: 1.6, // wobble/kick multiplier per unit of lost grip (rain ≈ ×1.4, snow ≈ ×1.9)
+      liftOffYaw: 0.3, // rad/s yaw kick when releasing turbo mid-corner
+      liftOffRearSide: 0.55, // rear side grip during the lift-off kick
       liftOffTime: 0.45, // s
       liftOffMinYawRate: 0.1, // rad/s cornering needed for the kick
       perfAccel1: 1.15, perfAccel2: 1.3, // perf.turbo levels
@@ -1177,8 +1177,8 @@ export const CONFIG = {
     damage: {
       vBreak: 14, // m/s of impact severity that breaks a strength-1 joint at the contact
       v0: 4, // no damage below this impact speed
-      globalV0: 18, // above this the whole frame is shaken (weak joints anywhere break)
-      globalFrac: 0.25,
+      globalV0: 26, // above this the whole frame is shaken (weak joints anywhere break)
+      globalFrac: 0.15,
       radiusFrac: 0.22, // damage fall-off radius = × plane length
       tangentFactor: 0.12, // share of the sliding speed that counts as impact severity
       scrapeV: 260, // sliding: m of travel at 1 m/s… (rate = v/scrapeV × vBreak per s, × hardness)
@@ -1248,7 +1248,10 @@ export const CONFIG = {
     },
     fx: {
       sparkInterval: 0.06,
-      gougeStep: 1.2,
+      gougeStep: 1.8,
+      maxSparksPerStep: 4, // fx call budgets across all sliding pieces
+      maxDustPerStep: 3,
+      maxGougePerStep: 4,
     },
   },
 

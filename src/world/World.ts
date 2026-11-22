@@ -47,6 +47,8 @@ export class World implements IWorld {
   private lodDirty = true;
   private bldDirty = true;
   private bldKeySig = '';
+  private sortX = 0;
+  private sortZ = 0;
   private focusAbs = new THREE.Vector3();
   private focusLocal = new THREE.Vector3();
   private focusChunk = '';
@@ -253,8 +255,11 @@ export class World implements IWorld {
         if (this.altitudeMode > 0 || Math.max(Math.abs(cx - fcx), Math.abs(cz - fcz)) <= r) set.add(k);
       }
       const sig = [...set].sort().join('|') + this.altitudeMode;
-      if (sig !== this.bldKeySig) {
+      const moved = Math.hypot(this.focusAbs.x - this.sortX, this.focusAbs.z - this.sortZ) > 90;
+      if (sig !== this.bldKeySig || moved) {
         this.bldKeySig = sig;
+        this.sortX = this.focusAbs.x;
+        this.sortZ = this.focusAbs.z;
         this.buildings.detail = this.altitudeMode;
         this.buildings.rebuild(set, this.focusAbs.x, this.focusAbs.z);
       }
@@ -266,12 +271,19 @@ export class World implements IWorld {
     let agl = this.focusLocal.y - this.groundHeightAt(this.focusLocal.x, this.focusLocal.z);
     const planes = this.ctx.planes;
     if (this.ctx.game.mode === 'plane' && planes?.active && planes.state) agl = planes.state.altitudeAgl;
-    const mode = agl > 600 ? 2 : agl > 150 ? 1 : agl < 120 ? 0 : this.altitudeMode;
+    // title/menu showcase cameras may orbit high: keep the detailed city there
+    if (this.ctx.game.state !== 'driving') agl = 0;
+    let mode = this.altitudeMode; // hysteresis: 150/120 m and 600/520 m
+    if (agl > 600) mode = 2;
+    else if (agl > 150) mode = mode === 2 && agl > 520 ? 2 : 1;
+    else if (agl < 120) mode = 0;
+    else if (mode === 2) mode = 1;
     if (mode !== this.altitudeMode) {
       this.altitudeMode = mode;
       this.focusChunk = '';
     }
     this.refreshDesired();
+    if (Math.hypot(this.focusAbs.x - this.sortX, this.focusAbs.z - this.sortZ) > 90) this.bldDirty = true;
     // time-sliced chunk building: ≤ 1 chunk per frame (2 if the first one was quick)
     const t0 = performance.now();
     let built = 0;
