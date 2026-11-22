@@ -296,10 +296,51 @@
   gap: 6px;
   padding: 2px 4px 4px;
 }
+.nm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.nm-tp {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(180deg, #ff9784 0%, var(--c-coral) 60%, #f76b5d 100%);
+  box-shadow: 0 3px 0 var(--c-coral-d), 0 6px 14px rgba(226, 88, 76, 0.3);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 0.12s var(--ease-out), filter 0.2s;
+  outline: none;
+}
+.nm-tp .nv-ic {
+  width: 20px;
+  height: 20px;
+}
+.nm-tp:active {
+  transform: translateY(2px) scale(0.94);
+}
+.nm-tp:focus-visible {
+  box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--c-sea);
+}
+.nm-tp[disabled] {
+  filter: grayscale(0.9);
+  opacity: 0.45;
+  pointer-events: none;
+}
 .nm-item {
   appearance: none;
   border: 0;
   margin: 0;
+  flex: 1;
+  min-width: 0;
   width: 100%;
   display: flex;
   align-items: center;

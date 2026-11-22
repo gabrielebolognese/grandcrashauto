@@ -497,7 +497,9 @@ export class PropPhysics {
     if (this.hitsThisStep < 4) {
       this.hitsThisStep++;
       rec.cool = 0.3;
-      this.ctx.events.emit('propHit', { position: _ev.fromArray(rec.curr, 0), kind: def.event, speed: evSpeed });
+      _ev.fromArray(rec.curr, 0);
+      this.ctx.events.emit('propHit', { position: _ev, kind: def.event, speed: evSpeed });
+      if (evSpeed > 7) this.ctx.fx.dust(_ev, Math.min(0.8, evSpeed / 30));
     }
   }
 

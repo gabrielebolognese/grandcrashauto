@@ -29,8 +29,8 @@ const hex = (h: number): RGB => [(h >> 16) & 255, (h >> 8) & 255, h & 255];
 export const PAL = {
   sand: hex(0xf3dcb2), wetSand: hex(0xdcc49a), dune: hex(0xecd3a2), duneGrass: hex(0xc8c98c),
   seabed: hex(0xe6cfa2), seabedDeep: hex(0xb3a284), lakeBed: hex(0x9c9a78), mud: hex(0xb5a07c),
-  grassCoast: hex(0xaed385), grass: hex(0x97c66c), grassLush: hex(0x7fb862), meadowDry: hex(0xc9c97f),
-  lawn: hex(0xa6d47f), hedge: hex(0x5f9450),
+  grassCoast: hex(0xa2ce70), grass: hex(0x8bc25c), grassLush: hex(0x6eaf52), meadowDry: hex(0xc3c26a),
+  lawn: hex(0x9acd6a), hedge: hex(0x548a46),
   forest: hex(0x5e9a52), forestDark: hex(0x4c8749), pine: hex(0x4d7c4e), pineDark: hex(0x3f6a46),
   rockyHill: hex(0xb4a791), rock: hex(0x9d949c), rockDark: hex(0x827b88), cliff: hex(0xccb08e), cliffDark: hex(0xab9176),
   alpine: hex(0xa6c47f), alpineDry: hex(0xbab987),
@@ -39,15 +39,15 @@ export const PAL = {
 
 // Crop palette (pastel patchwork) + weights.
 const CROPS: RGB[] = [
-  hex(0xe9d07a), // wheat
-  hex(0x9fcd6b), // green crop
-  hex(0xf2df6a), // canola (butter)
-  hex(0xb9a7e6), // lavender
-  hex(0xa9825d), // ploughed
-  hex(0xa3dcae), // pasture (mint)
-  hex(0xcbbc8c), // fallow
-  hex(0xb6d06d), // corn
-  hex(0xffb99a), // poppy/peach meadow (rare)
+  hex(0xd9bc5a), // wheat
+  hex(0x86bf55), // green crop
+  hex(0xe6cb45), // canola (butter)
+  hex(0xa08fd6), // lavender
+  hex(0x9a7352), // ploughed
+  hex(0x8ccb98), // pasture (mint)
+  hex(0xb9a774), // fallow
+  hex(0xa2bd55), // corn
+  hex(0xf09c80), // poppy/peach meadow (rare)
 ];
 const CROP_W = [0.22, 0.2, 0.09, 0.08, 0.12, 0.15, 0.07, 0.05, 0.02];
 const CROP_CUM: number[] = [];
@@ -222,9 +222,10 @@ export function shadeAt(ax: number, az: number, info: TerrainInfo, ny: number, c
   blend(PAL.grassLush, sstep(0.55, 0.85, moist) * 0.8);
   blend(PAL.grassCoast, (1 - sstep(150, 900, c)) * 0.55);
   // large-scale tonal patches
-  const tone = n.n(ax / 320 + 9.1, az / 320 - 3.3);
-  cr *= 1 + tone * 0.035;
-  cg *= 1 + tone * 0.05;
+  const tone = n.n(ax / 320 + 9.1, az / 320 - 3.3) + 0.5 * n.n(ax / 95 - 4.4, az / 95 + 6.6);
+  cr *= 1 + tone * 0.06;
+  cg *= 1 + tone * 0.075;
+  cb *= 1 - tone * 0.03;
 
   // ── suburbs (lawns) / farmland patchwork ──
   const sub = (1 - sstep(450, 1700, info.city)) * sstep(0.95, 0.99, ny);
@@ -354,7 +355,7 @@ export function shadeAt(ax: number, az: number, info: TerrainInfo, ny: number, c
     blend(PAL.grass, 0.5);
   }
 
-  return finish(jit, biome, surf, 0.085);
+  return finish(jit, biome, surf, 0.11);
 }
 
 function finish(jit: number, biome: number, surf: number, amount: number): Shade {

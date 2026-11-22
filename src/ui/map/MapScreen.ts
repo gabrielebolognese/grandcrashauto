@@ -121,7 +121,7 @@ export class MapScreen {
     this.scaleLabel = el('span', '', '');
     const scale = el('div', 'nm-scale');
     scale.append(this.scaleLabel, this.scaleBar);
-    const hint = el('div', 'nm-hint', 'Drag to pan · scroll to zoom · tap a place');
+    const hint = el('div', 'nm-hint', 'Drag to pan · scroll to zoom · tap a place to teleport or get directions');
     this.loading = el('div', 'nm-loading', 'Charting the land…');
 
     // places panel
@@ -143,8 +143,8 @@ export class MapScreen {
     this.cardWhy = el('div', 'nm-card-why');
     ct.append(this.cardName, this.cardMeta, this.cardWhy);
     const cb = el('div', 'nm-card-b');
-    this.dirBtn = this.bigBtn('route', 'Directions', 'btn btn-primary', () => this.onDirections());
-    this.tpBtn = this.bigBtn('teleport', 'Teleport', 'btn btn-mint', () => this.onTeleport());
+    this.dirBtn = this.bigBtn('route', 'Directions', 'btn btn-mint', () => this.onDirections());
+    this.tpBtn = this.bigBtn('teleport', 'Teleport', 'btn btn-primary', () => this.onTeleport());
     cb.append(this.dirBtn, this.tpBtn);
     this.card.append(this.cardIc, ct, cb);
 
@@ -372,7 +372,7 @@ export class MapScreen {
     }
     this.loading.classList.toggle('show', !!this.tiles?.busy && (this.tiles?.size ?? 0) < 6);
     // places list (rebuild when membership / discovery / destination change; distances refresh on open)
-    const sig = list.map((p) => `${p.id}:${p.discovered ? 1 : 0}`).join(',') + `|${d?.id ?? ''}|${this.renderer.selected?.id ?? ''}|${units}`;
+    const sig = list.map((p) => `${p.id}:${p.discovered ? 1 : 0}`).join(',') + `|${d?.id ?? ''}|${this.renderer.selected?.id ?? ''}|${units}|${this.ctx.vehicle.state.exploded}`;
     if (sig !== this.listSig) {
       this.listSig = sig;
       this.buildList(list);
@@ -386,6 +386,7 @@ export class MapScreen {
     const sorted = [...list].sort((a, b) => Number(b.discovered) - Number(a.discovered) || Math.hypot(a.ax - f.x, a.az - f.z) - Math.hypot(b.ax - f.x, b.az - f.z));
     this.list.textContent = '';
     for (const p of sorted) {
+      const row = el('div', 'nm-row');
       const b = el('button', `nm-item${p.discovered ? '' : ' locked'}${p === this.renderer.selected ? ' sel' : ''}`);
       b.type = 'button';
       const ic = el('span', 'nm-item-ic', p.icon);
@@ -399,7 +400,23 @@ export class MapScreen {
         this.flyTo(p.ax, p.az, Math.max(this.renderer.view.ppm, 0.3));
         if (window.innerWidth < 1000) this.toggleList(false);
       });
-      this.list.append(b);
+      row.append(b);
+      // one-tap teleport for discovered places (the fastest way back to the fun)
+      if (p.discovered) {
+        const tp = el('button', 'nm-tp');
+        tp.type = 'button';
+        tp.title = `Teleport to ${p.name}`;
+        tp.setAttribute('aria-label', `Teleport to ${p.name}`);
+        tp.append(navIcon('teleport'));
+        tp.disabled = !this.nav.canTeleport(p).ok;
+        tp.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.select(p);
+          this.onTeleport();
+        });
+        row.append(tp);
+      }
+      this.list.append(row);
     }
   }
 
@@ -432,13 +449,15 @@ export class MapScreen {
     }
     const tp = this.nav.canTeleport(p);
     const isDest = this.nav.destination?.id === p.id;
-    const why = !tp.ok ? tp.reason : isDest ? 'Route active — follow the glowing chevrons' : 'Get directions or jump straight there';
+    const why = !tp.ok ? tp.reason : isDest ? 'Route active — follow the glowing chevrons' : 'Jump straight there, or follow directions';
     if (this.cardWhy.textContent !== why) this.cardWhy.textContent = why;
     this.tpBtn.disabled = !tp.ok;
     const dl = this.dirBtn.querySelector('.nm-lbl');
     const label = isDest ? 'Stop route' : 'Directions';
     if (dl && dl.textContent !== label) dl.textContent = label;
-    this.dirBtn.classList.toggle('btn-primary', !isDest);
+    // Teleport is the primary action when available; otherwise Directions takes the coral style
+    this.dirBtn.classList.toggle('btn-primary', !isDest && !tp.ok);
+    this.dirBtn.classList.toggle('btn-mint', !isDest && tp.ok);
     this.dirBtn.classList.toggle('btn-ghost', isDest);
   }
 
@@ -456,6 +475,14 @@ export class MapScreen {
       return;
     }
     this.nav.directionsFromMap(p.id);
+  }
+
+  /** Enter / gamepad A: teleport when allowed, else directions. */
+  private primaryAction(): void {
+    const p = this.renderer.selected;
+    if (!p) return;
+    if (this.nav.canTeleport(p).ok) this.onTeleport();
+    else this.onDirections();
   }
 
   private onTeleport(): void {
@@ -646,6 +673,10 @@ export class MapScreen {
       case 'NumpadEnter':
       case 'Space':
         stop();
+        if (!e.repeat && this.renderer.selected) this.primaryAction();
+        return;
+      case 'KeyG':
+        stop();
         if (!e.repeat && this.renderer.selected) this.onDirections();
         return;
       case 'KeyT':
@@ -718,9 +749,9 @@ export class MapScreen {
       const R = this.renderer;
       const hit = R.hitPoi(R.W / 2, R.H / 2);
       if (hit && hit !== R.selected) this.select(hit);
-      else if (R.selected) this.onDirections();
+      else if (R.selected) this.primaryAction();
     }
-    if (edge(3)) this.onTeleport();
+    if (edge(3)) this.onDirections();
     if (edge(2)) this.recenter();
     return res;
   }
