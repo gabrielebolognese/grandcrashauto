@@ -3,6 +3,11 @@ import { CONFIG } from '../config';
 import { CELL, RAMP } from './textures';
 import { type FxKit, pick, rnd, rndS } from './kit';
 
+const sstep = (a: number, b: number, v: number) => {
+  const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
 /**
  * Continuous emitters. All of them emit in WORLD space with sub-frame interpolation: the n particles spawned this
  * frame are spread along the segment prev→cur and get birth times spread over the frame (negative delay), so fast
@@ -58,6 +63,14 @@ export class FireEmitter {
     this.active = false;
     this.target = null;
     this.gen++;
+  }
+
+  /** Floating origin: cached positions are in scene space. */
+  shift(dx: number, dz: number): void {
+    this.prev.x -= dx;
+    this.prev.z -= dz;
+    this.cur.x -= dx;
+    this.cur.z -= dz;
   }
 
   /** Light request intensity this frame (0 if none). */
@@ -132,7 +145,7 @@ export class FireEmitter {
       s.vx = this.vel.x * cfg.inheritFlame + rndS() * 0.35 * sq;
       s.vy = this.vel.y * cfg.inheritFlame + rnd(1.0, 2.2) * sq;
       s.vz = this.vel.z * cfg.inheritFlame + rndS() * 0.35 * sq;
-      s.air(stretch > 0 ? 6 : 2.5, wind, 3.2 * sq);
+      s.air(2.5 + speed * 0.03, wind, 3.2 * sq);
       s.life = rnd(cfg.flameLife[0], cfg.flameLife[1]) * (0.8 + 0.2 * sq);
       s.size0 = rnd(cfg.flameSize[0], cfg.flameSize[1]) * S * (0.7 + 0.3 * lv);
       s.size1 = 0.3 * S;
@@ -180,8 +193,8 @@ export class FireEmitter {
       s.vx = this.vel.x * cfg.inheritSmoke + rndS() * 0.4;
       s.vy = this.vel.y * cfg.inheritSmoke + rnd(1.4, 2.6) * sq;
       s.vz = this.vel.z * cfg.inheritSmoke + rndS() * 0.4;
-      s.air(0.9, wind, 0.9 * sq);
-      s.life = rnd(cfg.smokeLife[0], cfg.smokeLife[1]) * (0.8 + 0.2 * sq);
+      s.air(0.9 + speed * 0.02, wind, 0.9 * sq);
+      s.life = rnd(cfg.smokeLife[0], cfg.smokeLife[1]) * (0.8 + 0.2 * sq) * (speed > 30 ? 1.6 : 1);
       s.size0 = rnd(0.7, 1.1) * S;
       s.size1 = rnd(cfg.smokeSize[0], cfg.smokeSize[1]) * S;
       s.rot = rnd(0, 6.28);
@@ -221,7 +234,7 @@ export class FireEmitter {
   }
 }
 
-export const EmKind = { None: 0, Streamer: 1, Column: 2, Geyser: 3 } as const;
+export const EmKind = { None: 0, Streamer: 1, Column: 2, Geyser: 3, FuelFire: 4 } as const;
 
 /** Small CPU-integrated emitters (burning debris streamers, lingering smoke columns, hydrant geysers). */
 export class CpuEmitter {
@@ -238,11 +251,106 @@ export class CpuEmitter {
   floor = -1e5;
   acc = 0;
   acc2 = 0;
+  // fuel fire: analytic drift x(t) = x0 + w·t + (v0 - w)(1 - e^(-kt))/k (same closed form as the particles)
+  k = 0.8;
+  wx = 0;
+  wz = 0;
+  onWater = false;
+  level = 0;
+  seed = 0;
 
   update(kit: FxKit, dt: number): void {
     if (this.kind === EmKind.Streamer) this.streamer(kit, dt);
     else if (this.kind === EmKind.Column) this.column(kit, dt);
     else if (this.kind === EmKind.Geyser) this.geyser(kit, dt);
+    else if (this.kind === EmKind.FuelFire) this.fuelFire(kit, dt);
+  }
+
+  shift(dx: number, dz: number): void {
+    this.x -= dx;
+    this.z -= dz;
+  }
+
+  /** Current drifted position of a fuel patch. */
+  patchPos(out: THREE.Vector3): THREE.Vector3 {
+    const t = this.age;
+    const e = (1 - Math.exp(-this.k * t)) / this.k;
+    return out.set(this.x + this.wx * t + (this.vx - this.wx) * e, this.y, this.z + this.wz * t + (this.vz - this.wz) * e);
+  }
+
+  /** Light request intensity for burning patches. */
+  glow(time: number): number {
+    if (this.kind !== EmKind.FuelFire) return 0;
+    const f = 0.75 + 0.15 * Math.sin(time * 11.3 + this.seed) + 0.1 * Math.sin(time * 27.1 + this.seed * 1.7);
+    return CONFIG.fx.fire.glowIntensity * 0.6 * Math.pow(this.scale, 1.3) * this.level * f;
+  }
+
+  private fuelFire(kit: FxKit, dt: number): void {
+    const { s, wind } = kit;
+    this.age += dt;
+    if (this.age >= this.life) {
+      this.kind = EmKind.None;
+      return;
+    }
+    const t = this.age / this.life;
+    this.level = Math.min(1, this.age / 0.6) * (1 - sstep(0.65, 1, t));
+    const S = this.scale; // patch diameter (m)
+    const R = S * 0.5;
+    this.patchPos(tmp);
+    const q = kit.q;
+    const now = kit.time;
+    // flames: many low, wide tongues over the patch area (count grows with area, size capped)
+    const fs = Math.min(3.2, 0.5 + S * 0.18);
+    this.acc += 22 * Math.pow(S, 0.8) * this.level * q * dt;
+    let n = Math.min(30, Math.floor(this.acc));
+    this.acc -= n;
+    while (n-- > 0) {
+      const a = Math.random() * 6.283;
+      const r = Math.sqrt(Math.random()) * R * 0.85;
+      s.reset();
+      s.x = tmp.x + Math.cos(a) * r;
+      s.y = tmp.y + 0.05;
+      s.z = tmp.z + Math.sin(a) * r;
+      s.delay = -Math.random() * dt;
+      s.vx = rndS() * 0.3;
+      s.vy = rnd(0.8, 1.8) * Math.sqrt(fs);
+      s.vz = rndS() * 0.3;
+      s.air(2.5, wind, 2.8 * Math.sqrt(fs));
+      s.life = rnd(0.45, 0.9);
+      s.size0 = rnd(0.8, 1.3) * fs * (0.6 + 0.4 * this.level);
+      s.size1 = 0.3 * fs;
+      s.rot = rndS() * 0.3;
+      s.spin = rndS() * 0.6;
+      s.turb = 0.12 * fs;
+      s.heat = rnd(2.0, 3.0);
+      s.cell = pick(CELL.FLAME_A, CELL.FLAME_B);
+      s.ramp = RAMP.FLAME;
+      kit.glow.emit(s, now);
+    }
+    // black smoke column
+    this.acc2 += 5 * Math.pow(S, 0.6) * this.level * q * dt;
+    n = Math.min(6, Math.floor(this.acc2));
+    this.acc2 -= n;
+    while (n-- > 0) {
+      s.reset();
+      s.x = tmp.x + rndS() * R * 0.5;
+      s.y = tmp.y + fs * 0.8;
+      s.z = tmp.z + rndS() * R * 0.5;
+      s.delay = -Math.random() * dt;
+      s.vx = rndS() * 0.5;
+      s.vy = rnd(1.8, 3.2) * Math.sqrt(fs);
+      s.vz = rndS() * 0.5;
+      s.air(0.6, wind, 0.8 * Math.sqrt(fs));
+      s.life = rnd(4, 7);
+      s.size0 = rnd(0.8, 1.2) * fs;
+      s.size1 = rnd(4, 6) * fs;
+      s.rot = rnd(0, 6.28);
+      s.spin = rndS() * 0.25;
+      s.turb = 0.4 * fs;
+      s.cell = pick(CELL.SMOKE_A, CELL.SMOKE_B);
+      s.ramp = RAMP.FIRE_SMOKE;
+      kit.main.emit(s, now);
+    }
   }
 
   private streamer(kit: FxKit, dt: number): void {
@@ -269,10 +377,11 @@ export class CpuEmitter {
     const dy = this.y - py;
     const dz = this.z - pz;
     const dist = Math.hypot(dx, dy, dz);
-    const spacing = 0.22 * Math.sqrt(S);
+    // emission by distance travelled (continuous trails), capped per second so plane-scale blasts stay in budget
+    const spacing = 0.22 * Math.max(1, S);
     this.acc += dist / spacing;
-    const n = Math.min(14, Math.floor(this.acc));
-    this.acc -= n;
+    const n = Math.min(Math.max(1, Math.ceil(220 * kit.q * dt)), 14, Math.floor(this.acc));
+    this.acc = Math.min(2, this.acc - n);
     const fireAmt = 1 - lifeT * 0.85;
     for (let i = 0; i < n; i++) {
       const f = (i + Math.random()) / n;
@@ -292,8 +401,8 @@ export class CpuEmitter {
         s.vz = this.vz * 0.15 + rndS() * 0.3;
         s.air(3, wind, 2);
         s.life = rnd(0.25, 0.45);
-        s.size0 = rnd(0.55, 0.9) * Math.sqrt(S) * fireAmt + 0.1;
-        s.size1 = 0.15 * Math.sqrt(S);
+        s.size0 = rnd(0.55, 0.9) * S * fireAmt + 0.1;
+        s.size1 = 0.15 * S;
         s.rot = rnd(0, 6.28);
         s.spin = rndS() * 2;
         s.heat = rnd(2.2, 3.2);
@@ -313,8 +422,8 @@ export class CpuEmitter {
         s.vz = this.vz * 0.08 + rndS() * 0.3;
         s.air(1.2, wind, 0.6);
         s.life = rnd(1.4, 2.6);
-        s.size0 = rnd(0.35, 0.55) * Math.sqrt(S);
-        s.size1 = rnd(1.6, 2.4) * Math.sqrt(S);
+        s.size0 = rnd(0.35, 0.55) * S;
+        s.size1 = rnd(1.6, 2.4) * S;
         s.rot = rnd(0, 6.28);
         s.spin = rndS() * 0.4;
         s.turb = 0.2;

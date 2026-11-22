@@ -46,6 +46,14 @@ export const RAMP = {
   FIRE_SMOKE: 15,
   WATER: 16,
   COLUMN: 17,
+  TURBO: 18,
+  VAPOR: 19,
+  HEAT: 20,
+  FOAM: 21,
+  STEAM: 22,
+  TAIL: 23,
+  SLICK: 24,
+  MIST: 25,
 } as const;
 
 /** Rows reserved in the ramp texture (2 per ramp). Room for part-2 ramps (steam, foam, mist, fuel fire...). */
@@ -189,12 +197,12 @@ PAINTERS[CELL.FLAME_B] = (u, v, o) => {
 };
 PAINTERS[CELL.SPARK] = (u, v, o) => {
   // vertical streak, hot head at the bottom, fading tail upward
-  const w = Math.exp(-((u / 0.2) ** 2));
+  const w = Math.exp(-((u / 0.5) ** 2)) * (1 - sstep(0.85, 1.0, Math.abs(u)));
   let along: number;
   if (v < -0.72) along = sstep(-0.95, -0.72, v);
   else along = Math.pow(sat(1 - (v + 0.72) / 1.64), 1.6);
   o[1] = w * along;
-  o[0] = sat(w * w * along * 1.3);
+  o[0] = sat(w * w * along * 1.4);
 };
 PAINTERS[CELL.DUST] = (u, v, o) => {
   const r = Math.hypot(u, v);
@@ -393,21 +401,22 @@ function sampleKeys(keys: number[][], t: number, n: number): number[] {
 const RAMPS: RampDef[] = [];
 RAMPS[RAMP.FIREBALL] = {
   color: [
-    [0.0, 1.0, 0.95, 0.85, 0.0],
-    [0.03, 1.0, 0.88, 0.62, 1.0],
-    [0.08, 1.0, 0.7, 0.3, 1.0],
-    [0.18, 1.0, 0.42, 0.1, 1.0],
-    [0.32, 0.72, 0.16, 0.035, 0.95],
-    [0.46, 0.2, 0.08, 0.045, 0.9],
-    [0.62, 0.11, 0.1, 0.1, 0.8],
-    [0.82, 0.22, 0.21, 0.22, 0.45],
-    [1.0, 0.32, 0.32, 0.34, 0.0],
+    [0.0, 1.0, 0.82, 0.42, 0.0],
+    [0.015, 1.0, 0.7, 0.24, 1.0],
+    [0.04, 1.0, 0.48, 0.09, 1.0],
+    [0.11, 0.95, 0.3, 0.035, 1.0],
+    [0.24, 0.72, 0.12, 0.018, 1.0],
+    [0.36, 0.32, 0.055, 0.018, 0.97],
+    [0.48, 0.1, 0.065, 0.055, 0.92],
+    [0.66, 0.1, 0.095, 0.095, 0.8],
+    [0.84, 0.2, 0.19, 0.2, 0.45],
+    [1.0, 0.3, 0.3, 0.32, 0.0],
   ],
   params: [
-    [0.0, 1, 0.3, 0],
-    [0.12, 1, 0.08, 0],
+    [0.0, 1, 0.18, 0],
+    [0.07, 1, 0.0, 0],
     [0.3, 1, 0, 0.1],
-    [0.52, 0, 0, 1],
+    [0.5, 0, 0, 1],
     [1.0, 0, 0, 1],
   ],
 };
@@ -415,33 +424,33 @@ RAMPS[RAMP.HOTCORE] = {
   color: (t) => {
     const c = sampleKeys(
       [
-        [0, 1, 1, 0.95],
-        [0.3, 1, 0.85, 0.5],
-        [1, 1, 0.48, 0.14],
+        [0, 1, 0.95, 0.8],
+        [0.25, 1, 0.7, 0.25],
+        [1, 1, 0.35, 0.06],
       ],
       t,
       3,
     );
-    return [...c, Math.pow(1 - t, 1.5) * sstep(0, 0.04, t)];
+    return [...c, Math.pow(1 - t, 2) * sstep(0, 0.04, t)];
   },
   params: [[0, 1, 1, 0]],
 };
 RAMPS[RAMP.FLAME] = {
   color: [
-    [0.0, 1.0, 0.92, 0.7, 0.0],
-    [0.08, 1.0, 0.82, 0.48, 1.0],
-    [0.25, 1.0, 0.58, 0.18, 0.95],
-    [0.6, 0.92, 0.28, 0.05, 0.7],
-    [1.0, 0.42, 0.08, 0.02, 0.0],
+    [0.0, 1.0, 0.85, 0.5, 0.0],
+    [0.08, 1.0, 0.68, 0.22, 1.0],
+    [0.25, 1.0, 0.45, 0.08, 0.95],
+    [0.6, 0.85, 0.2, 0.03, 0.7],
+    [1.0, 0.35, 0.06, 0.02, 0.0],
   ],
   params: [[0, 1, 0.25, 0]],
 };
 RAMPS[RAMP.SPARK] = {
   color: [
-    [0.0, 1.0, 0.95, 0.8, 1.0],
-    [0.3, 1.0, 0.75, 0.35, 1.0],
-    [0.72, 1.0, 0.42, 0.1, 0.9],
-    [1.0, 0.7, 0.15, 0.03, 0.0],
+    [0.0, 1.0, 0.88, 0.55, 1.0],
+    [0.25, 1.0, 0.66, 0.22, 1.0],
+    [0.7, 1.0, 0.38, 0.07, 0.9],
+    [1.0, 0.7, 0.13, 0.02, 0.0],
   ],
   params: [[0, 1, 1, 0]],
 };
@@ -574,10 +583,77 @@ RAMPS[RAMP.COLUMN] = {
   params: [[0, 0, 0, 1]],
 };
 
-const toHalf = THREE.DataUtils.toHalfFloat;
+RAMPS[RAMP.TURBO] = {
+  color: [
+    [0.0, 0.75, 0.88, 1.0, 0.0],
+    [0.05, 0.6, 0.8, 1.0, 1.0],
+    [0.2, 0.25, 0.5, 1.0, 0.95],
+    [0.55, 0.28, 0.22, 0.95, 0.65],
+    [1.0, 0.25, 0.08, 0.6, 0.0],
+  ],
+  params: [[0, 1, 0.4, 0]],
+};
+RAMPS[RAMP.VAPOR] = {
+  color: [
+    [0.0, 0.95, 0.97, 1.0, 0.0],
+    [0.06, 0.95, 0.97, 1.0, 0.6],
+    [0.55, 0.95, 0.97, 1.0, 0.32],
+    [1.0, 0.95, 0.97, 1.0, 0.0],
+  ],
+  params: [[0, 0.25, 0, 0.5]],
+};
+RAMPS[RAMP.HEAT] = {
+  color: (t) => [1, 0.97, 0.93, 0.035 * sstep(0, 0.15, t) * (1 - sstep(0.4, 1, t))],
+  params: [[0, 0.3, 0.3, 0]],
+};
+RAMPS[RAMP.FOAM] = {
+  color: [
+    [0.0, 0.95, 0.98, 1.0, 0.0],
+    [0.04, 0.95, 0.98, 1.0, 0.8],
+    [0.6, 0.95, 0.98, 1.0, 0.55],
+    [1.0, 0.95, 0.98, 1.0, 0.0],
+  ],
+  params: [[0, 0.05, 0, 0]],
+};
+RAMPS[RAMP.STEAM] = {
+  color: [
+    [0.0, 0.95, 0.95, 0.97, 0.0],
+    [0.06, 0.95, 0.95, 0.97, 0.65],
+    [0.45, 0.95, 0.95, 0.97, 0.32],
+    [1.0, 0.95, 0.95, 0.97, 0.0],
+  ],
+  params: [[0, 0.1, 0, 1]],
+};
+RAMPS[RAMP.TAIL] = {
+  color: (t) => [1, 0.12 + 0.1 * (1 - t), 0.06, (1 - t) * (1 - t) * sstep(0, 0.05, t)],
+  params: [[0, 1, 1, 0]],
+};
+RAMPS[RAMP.SLICK] = {
+  color: [
+    [0.0, 1, 1, 1, 0.0],
+    [0.03, 1, 1, 1, 0.85],
+    [0.8, 1, 1, 1, 0.75],
+    [1.0, 1, 1, 1, 0.0],
+  ],
+  params: [[0, 0, 0, 0]],
+};
+RAMPS[RAMP.MIST] = {
+  color: [
+    [0.0, 0.97, 0.97, 0.98, 0.0],
+    [0.04, 0.97, 0.97, 0.98, 0.85],
+    [0.35, 0.96, 0.96, 0.98, 0.45],
+    [1.0, 0.95, 0.95, 0.97, 0.0],
+  ],
+  params: [[0, 0.2, 0, 0.8]],
+};
 
+/**
+ * RGBA8 (universally supported, incl. vertex texture fetch on mobile GPUs). Colour rows are gamma-2 encoded
+ * (stored sqrt(c), decoded c = v²) for precision in the darks; param rows are linear.
+ */
 export function createRamps(): THREE.DataTexture {
-  const data = new Uint16Array(RAMP_W * RAMP_ROWS * 4);
+  const data = new Uint8Array(RAMP_W * RAMP_ROWS * 4);
+  const b = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
   for (let r = 0; r < RAMP_SLOTS; r++) {
     const def = RAMPS[r];
     for (let x = 0; x < RAMP_W; x++) {
@@ -590,14 +666,17 @@ export function createRamps(): THREE.DataTexture {
       }
       const i0 = ((r * 2) * RAMP_W + x) * 4;
       const i1 = ((r * 2 + 1) * RAMP_W + x) * 4;
-      for (let k = 0; k < 4; k++) data[i0 + k] = toHalf(Math.max(0, c[k] ?? 0));
-      data[i1] = toHalf(p[0] ?? 0);
-      data[i1 + 1] = toHalf(p[1] ?? 0);
-      data[i1 + 2] = toHalf(p[2] ?? 0);
-      data[i1 + 3] = toHalf(1);
+      data[i0] = b(Math.sqrt(Math.max(0, c[0] ?? 0)));
+      data[i0 + 1] = b(Math.sqrt(Math.max(0, c[1] ?? 0)));
+      data[i0 + 2] = b(Math.sqrt(Math.max(0, c[2] ?? 0)));
+      data[i0 + 3] = b(c[3] ?? 0);
+      data[i1] = b(p[0] ?? 0);
+      data[i1 + 1] = b(p[1] ?? 0);
+      data[i1 + 2] = b(p[2] ?? 0);
+      data[i1 + 3] = 255;
     }
   }
-  const tex = new THREE.DataTexture(data, RAMP_W, RAMP_ROWS, THREE.RGBAFormat, THREE.HalfFloatType);
+  const tex = new THREE.DataTexture(data, RAMP_W, RAMP_ROWS, THREE.RGBAFormat, THREE.UnsignedByteType);
   tex.flipY = false;
   tex.generateMipmaps = false;
   tex.minFilter = THREE.LinearFilter;

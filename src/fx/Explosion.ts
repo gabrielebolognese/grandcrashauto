@@ -63,11 +63,11 @@ export function spawnExplosion(kit: FxKit, o: ExplosionOpts, sink: StreamerSink,
   s.air(2, wind, 0);
   s.cell = CELL.GLOW;
   s.ramp = RAMP.FLASH;
-  s.size0 = 3.0 * R;
-  s.size1 = 3.6 * R;
-  s.life = 0.2 * ls;
-  s.heat = 4;
-  s.tint(1, 0.95, 0.85, 0.9);
+  s.size0 = 3.4 * R;
+  s.size1 = 4.0 * R;
+  s.life = 0.16 * ls;
+  s.heat = 3;
+  s.tint(1, 0.85, 0.6, 0.85);
   kit.glow.emit(s, now);
 
   s.cell = CELL.STAR;
@@ -87,10 +87,10 @@ export function spawnExplosion(kit: FxKit, o: ExplosionOpts, sink: StreamerSink,
     s.air(3, wind, 0.6 * R);
     s.cell = CELL.BILLOW;
     s.ramp = RAMP.HOTCORE;
-    s.size0 = rnd(0.45, 0.6) * R;
-    s.size1 = rnd(1.1, 1.35) * R;
-    s.life = rnd(0.3, 0.42) * ls;
-    s.heat = 6;
+    s.size0 = rnd(0.4, 0.5) * R;
+    s.size1 = rnd(0.8, 0.95) * R;
+    s.life = rnd(0.18, 0.26) * ls;
+    s.heat = 3;
     s.rot = rnd(0, 6.28);
     s.spin = rndS();
     kit.glow.emit(s, now);
@@ -178,14 +178,15 @@ export function spawnExplosion(kit: FxKit, o: ExplosionOpts, sink: StreamerSink,
   s.size0 = 0.5 * R;
   s.size1 = cfg.shockGrow * 2 * R;
   s.life = cfg.shockLife * ls;
-  s.heat = 1.4;
-  s.tint(1, 0.96, 0.9, 0.75);
+  s.heat = 1.1;
+  const domeA = 1 / (1 + R / 15);
+  s.tint(1, 0.94, 0.86, 0.55 * domeA);
   kit.glow.emit(s, now);
   s.size0 = 0.8 * R;
   s.size1 = cfg.shockGrow * 3.2 * R;
   s.life = cfg.shockLife * 1.8 * ls;
-  s.heat = 0.8;
-  s.tint(1, 0.97, 0.94, 0.3);
+  s.heat = 0.7;
+  s.tint(1, 0.95, 0.9, 0.2 * domeA);
   kit.glow.emit(s, now);
 
   // ── 4. ground: dust ring, radial dust, scorch, smoke column ──

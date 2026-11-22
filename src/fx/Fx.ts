@@ -9,16 +9,20 @@ import { SkidMarks } from './SkidMarks';
 import { LightPool } from './LightPool';
 import { CpuEmitter, EmKind, FireEmitter } from './Emitters';
 import { spawnExplosion, type ExplosionOpts, type StreamerSink } from './Explosion';
+import { VehicleFx } from './VehicleFx';
+import { FallbackBlast } from './FallbackBlast';
+import * as W from './WorldFx';
 import { CELL, RAMP, createAtlas, createRamps } from './textures';
 import { type FxKit, count, pick, randDir, rnd, rndS } from './kit';
 
 /**
- * Effects system (spec §6, §10; SPEC-PART2 §12). Owner: fx.
- *  - 3 GPU particle pools (main / glow / decals) + 1 skid-mark ribbon buffer = at most 4 draw calls, 0 when idle.
- *  - Pooled point lights (created once at init, intensity 0 when unused) for explosion flashes and fire glow.
- *  - Reacts to events: explosion, impact, scrape, glassBreak, propHit, partDetached, npcHit, parkedCarHit.
- *  - Reads ctx.vehicle.state.wheels every frame for skid marks, tyre smoke, dust and water spray.
- *  - clearAll() is instant and free: the fx clock jumps forward and a shared uniform kills everything born before.
+ * Effects system (spec §6, §10; SPEC-PART2 §12; SPEC-PART3 §6–8). Owner: fx.
+ *  - 3 GPU particle pools (decals / main / glow) + 1 ground-ribbon buffer (skids, gouges) = at most 4 draw calls,
+ *    0 when idle. Simulation is closed-form in the vertex shader (zero CPU per live particle, zero allocations).
+ *  - Pooled point lights created once at init (intensity 0 when unused) for flashes, fires and burning slicks.
+ *  - Floating origin: the fx root is a top-level scene child shifted by core; buffers store root-space positions,
+ *    so live particles/decals/skids move with the world; cached emitter positions are shifted on 'originShift'.
+ *  - clearAll() is instant and free: the fx clock jumps and a shared uniform kills everything born before.
  */
 
 interface Flash {
@@ -30,13 +34,18 @@ interface Flash {
   peak: number;
   decay: number;
   dist: number;
+  r: number;
+  g: number;
+  b: number;
 }
 
 type Level = 'low' | 'medium' | 'high';
+type ExKind = 'car' | 'engine' | 'plane' | 'secondary' | 'impact';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const ZERO = new THREE.Vector3();
 const _v = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _c = new THREE.Color();
@@ -44,6 +53,7 @@ const _c = new THREE.Color();
 export class Fx implements IFx, FxKit, StreamerSink {
   readonly name = 'fx';
   time = 0;
+  dt = 0;
   q = 1;
   gravity = -14;
   readonly wind = new THREE.Vector3();
@@ -54,6 +64,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
 
   private skid!: SkidMarks;
   private lights!: LightPool;
+  private vfx!: VehicleFx;
   private u!: FxSharedUniforms;
   private readonly root = new THREE.Group();
   private materials: THREE.Material[] = [];
@@ -61,62 +72,50 @@ export class Fx implements IFx, FxKit, StreamerSink {
   private fires: FireEmitter[] = [];
   private emitters: CpuEmitter[] = [];
   private flashes: Flash[] = [];
-  private wheelAcc = new Float32Array(8);
   private scrapeAcc = 0;
+  private sheetAcc = { v: 0 };
   private autoTarget: THREE.Object3D | null = null;
   private autoT = -1;
   private offs: (() => void)[] = [];
   private ambientKey = '';
   private colorCache = new Map<string, THREE.Color>();
   private level: Level = 'medium';
+  /** Recent explosionEx calls (x, z, time, radius) — dedupes a generic 'explosion' event fired for the same blast. */
+  private recent = new Float32Array(4 * 6);
+  private recentHead = 0;
+  private lastExRadius = -1;
+  /** GPU particle path usable (init ok + shaders linked). Otherwise explosions use the fallback blast. */
+  private ok = false;
+  private fallback: FallbackBlast | null = null;
+  private checkFrames = 6;
 
   constructor(private ctx: GameContext) {}
 
   // ─────────────────────────────── lifecycle ───────────────────────────────
   init(): void {
     const { ctx } = this;
-    const atlas = createAtlas();
-    const ramps = createRamps();
-    this.textures.push(atlas, ramps);
-    this.u = {
-      uFxTime: { value: 0 },
-      uClear: { value: -1 },
-      uRamp: { value: ramps },
-      uAtlas: { value: atlas },
-      uNearFade: { value: new THREE.Vector2(0.4, 2.5) },
-      uSunView: { value: new THREE.Vector3(0, 1, 0) },
-      uSunColor: GLOBAL_UNIFORMS.uSunColor,
-      uAmbient: { value: new THREE.Color(CONFIG.fx.ambient) },
-      uDim: { value: 1 },
-    };
-    const mat = createParticleMaterial(this.u);
-    const decalMat = createParticleMaterial(this.u, true);
-    this.materials.push(mat, decalMat);
-
-    this.level = ctx.quality.level as Level;
-    const caps = this.caps();
-    this.decals = new ParticlePool('decals', CONFIG.fx.decalCap, decalMat, 1);
-    this.main = new ParticlePool('main', caps.main, mat, 10);
-    this.glow = new ParticlePool('glow', caps.glow, mat, 11);
-    this.skid = new SkidMarks(CONFIG.fx.skidCap[this.level] ?? 2000, this.u);
     this.root.name = 'fx';
-    this.root.add(this.decals.mesh, this.skid.mesh, this.main.mesh, this.glow.mesh);
     ctx.engine.scene.add(this.root);
-    this.lights = new LightPool(ctx.engine.scene, CONFIG.fx.lights[this.level] ?? 1);
-
-    for (let i = 0; i < CONFIG.fx.fire.maxFires; i++) this.fires.push(new FireEmitter());
-    for (let i = 0; i < 48; i++) this.emitters.push(new CpuEmitter());
-    for (let i = 0; i < 8; i++) this.flashes.push({ active: false, x: 0, y: 0, z: 0, t0: 0, peak: 0, decay: 1, dist: 10 });
-
-    // Draw every fx mesh for a few frames (no live particles) so programs/buffers exist before the first explosion.
-    for (const p of [this.main, this.glow, this.decals]) p.warmup(4);
-    this.skid.warmup(4);
+    this.level = (ctx.quality.level as Level) ?? 'medium';
     try {
-      ctx.engine.renderer.compile(this.root, ctx.engine.camera, ctx.engine.scene);
-      ctx.engine.renderer.initTexture(atlas);
-      ctx.engine.renderer.initTexture(ramps);
+      this.lights = new LightPool(ctx.engine.scene, CONFIG.fx.lights[this.level] ?? 1);
     } catch (err) {
-      console.warn('[fx] precompile failed', err);
+      reportError('[fx] light pool init failed', err);
+    }
+    try {
+      this.fallback = new FallbackBlast(this.root);
+    } catch (err) {
+      reportError('[fx] fallback blast init failed', err);
+    }
+    for (let i = 0; i < 10; i++) this.flashes.push({ active: false, x: 0, y: 0, z: 0, t0: 0, peak: 0, decay: 1, dist: 10, r: 1, g: 0.8, b: 0.6 });
+    this.recent.fill(-1e9);
+    try {
+      this.initParticles();
+      this.ok = true;
+    } catch (err) {
+      // Loud in ?debug, graceful otherwise: explosions still show the fallback fireball + flash.
+      reportError('[fx] particle system init failed - using fallback blasts', err);
+      this.ok = false;
     }
 
     const ev = ctx.events;
@@ -132,7 +131,92 @@ export class Fx implements IFx, FxKit, StreamerSink {
         if (e.speed > 7) this.sparks(e.position, UP, Math.min(1, e.speed / 25));
       }),
       ev.on('qualityChanged', () => this.onQuality()),
+      ev.on('originShift', (e) => this.onOriginShift(e.delta.x, e.delta.z)),
+      ev.on('turbo', (e) => {
+        if (e.on && this.ok) this.vfx.pop(this, 1);
+      }),
+      ev.on('stunt', (e) => {
+        if (!this.ok) return;
+        if (e.kind === 'cleanLanding') this.vfx.landing(this, false, (p, n, k, i) => this.sparks(p, n, k, i));
+        else if (e.kind === 'crashLanding') this.vfx.landing(this, true, (p, n, k, i) => this.sparks(p, n, k, i));
+      }),
+      // plane hooks with no dedicated IFx member
+      ev.on('touchdown', (e) => this.onTouchdown(e.position, e.verticalSpeed, e.hard)),
+      ev.on('gearCollapse', (e) => this.sparks(e.position, UP, 1.2)),
+      ev.on('planeBreak', (e) => this.sparks(e.position, UP, 0.6 + e.intensity, e.velocity)),
+      ev.on('engineExplode', (e) => this.onPlaneBlast(e.position, e.velocity, e.radius, 'engine')),
+      ev.on('planeExplosion', (e) => this.onPlaneBlast(e.position, e.velocity, e.radius, e.kind === 'secondary' ? 'secondary' : 'plane')),
     );
+  }
+
+  private initParticles(): void {
+    const { ctx } = this;
+    const atlas = createAtlas();
+    const ramps = createRamps();
+    this.textures.push(atlas, ramps);
+    this.u = {
+      uFxTime: { value: 0 },
+      uClear: { value: -1 },
+      uRamp: { value: ramps },
+      uAtlas: { value: atlas },
+      uNearFade: { value: new THREE.Vector2(0.25, 1.4) },
+      uMinSize: { value: 0.002 },
+      uSunView: { value: new THREE.Vector3(0, 1, 0) },
+      uSunColor: GLOBAL_UNIFORMS.uSunColor,
+      uAmbient: { value: new THREE.Color(CONFIG.fx.ambient) },
+      uDim: { value: 1 },
+    };
+    const mat = createParticleMaterial(this.u);
+    const decalMat = createParticleMaterial(this.u, true);
+    this.materials.push(mat, decalMat);
+    const caps = this.caps();
+    this.decals = new ParticlePool('decals', CONFIG.fx.decalCap, decalMat, 1, this.root);
+    this.main = new ParticlePool('main', caps.main, mat, 10, this.root);
+    this.glow = new ParticlePool('glow', caps.glow, mat, 11, this.root);
+    this.skid = new SkidMarks(CONFIG.fx.skidCap[this.level] ?? 2000, this.u, this.root);
+    this.root.add(this.decals.mesh, this.skid.mesh, this.main.mesh, this.glow.mesh);
+    this.vfx = new VehicleFx(ctx, this.skid);
+    for (let i = 0; i < CONFIG.fx.fire.maxFires; i++) this.fires.push(new FireEmitter());
+    for (let i = 0; i < 64; i++) this.emitters.push(new CpuEmitter());
+    // Draw every fx mesh for a few frames (no live particles) so programs/buffers exist before the first explosion.
+    for (const p of [this.main, this.glow, this.decals]) p.warmup(4);
+    this.skid.warmup(4);
+    try {
+      ctx.engine.renderer.compile(this.root, ctx.engine.camera, ctx.engine.scene);
+      ctx.engine.renderer.initTexture(atlas);
+      ctx.engine.renderer.initTexture(ramps);
+    } catch (err) {
+      console.warn('[fx] precompile failed', err);
+    }
+  }
+
+  /** GameSystem warm-up (behind the loading bar): upload textures, compile programs, draw the empty pools once. */
+  warmup(): void {
+    if (!this.ok || !this.main) return;
+    const r = this.ctx.engine.renderer;
+    try {
+      for (const t of this.textures) r.initTexture(t);
+      r.compile(this.root, this.ctx.engine.camera, this.ctx.engine.scene);
+    } catch (err) {
+      console.warn('[fx] warmup failed', err);
+    }
+    for (const p of [this.main, this.glow, this.decals]) p.warmup(4);
+    this.skid.warmup(4);
+    this.checkFrames = 6;
+  }
+
+  /** After the warm-up frames: if a particle shader failed to compile/link on this device, switch to the fallback. */
+  private checkPrograms(): void {
+    const r = this.ctx.engine.renderer;
+    const mats: THREE.Material[] = [...this.materials, this.skid.mesh.material as THREE.Material];
+    for (const m of mats) {
+      const prog = (r.properties.get(m) as { currentProgram?: { diagnostics?: { runnable: boolean } } }).currentProgram;
+      if (prog?.diagnostics && prog.diagnostics.runnable === false) {
+        reportError('[fx] particle shader failed on this device - using fallback blasts', new Error(m.name));
+        this.ok = false;
+        return;
+      }
+    }
   }
 
   private caps(): { main: number; glow: number } {
@@ -142,7 +226,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
   }
 
   private onQuality(): void {
-    if (!this.main) return;
+    if (!this.ok || !this.main) return;
     const lvl = this.ctx.quality.level as Level;
     if (lvl === this.level) return;
     this.level = lvl;
@@ -151,33 +235,62 @@ export class Fx implements IFx, FxKit, StreamerSink {
     this.glow.resize(caps.glow);
   }
 
+  private onOriginShift(dx: number, dz: number): void {
+    for (const f of this.flashes) {
+      f.x -= dx;
+      f.z -= dz;
+    }
+    if (!this.ok) return;
+    // Pools/decals/skids live in the root's space (core already shifted the root); cached scene-space state:
+    for (const f of this.fires) if (f.active) f.shift(dx, dz);
+    for (const e of this.emitters) if (e.kind !== EmKind.None) e.shift(dx, dz);
+    for (let i = 0; i < 6; i++) {
+      this.recent[i * 4] -= dx;
+      this.recent[i * 4 + 1] -= dz;
+    }
+    this.skid.shift(dx, dz);
+    this.vfx.shift(dx, dz);
+  }
+
   dispose(): void {
     for (const off of this.offs) off();
     this.offs.length = 0;
-    if (!this.main) return;
+    this.fallback?.dispose();
+    this.lights?.dispose();
     this.root.removeFromParent();
+    if (!this.main) return;
     this.main.dispose();
     this.glow.dispose();
     this.decals.dispose();
     this.skid.dispose();
-    this.lights.dispose();
     for (const m of this.materials) m.dispose();
     for (const t of this.textures) t.dispose();
   }
 
   // ─────────────────────────────── per frame ───────────────────────────────
   update(dt: number): void {
-    if (!this.main) return;
+    this.fallback?.update(dt);
+    if (!this.ok) {
+      this.time += dt;
+      if (this.lights) this.updateLights();
+      return;
+    }
+    if (this.checkFrames > 0 && --this.checkFrames === 0) this.checkPrograms();
     const cfg = CONFIG.fx;
-    this.q = this.ctx.quality.current.particleScale ?? 1;
+    this.q = this.ctx.quality.current?.particleScale ?? 1;
     this.gravity = CONFIG.physics.gravity;
-    this.wind.set(cfg.wind[0], cfg.wind[1], cfg.wind[2]);
+    const w = this.ctx.env?.wind ?? GLOBAL_UNIFORMS.uWind.value;
+    this.wind.copy(w).multiplyScalar(cfg.windScale);
+    this.wind.y = 0;
+    this.dt = dt;
     this.time += dt;
     const u = this.u;
     u.uFxTime.value = this.time;
     u.uNearFade.value.set(cfg.nearFade[0], cfg.nearFade[1]);
     u.uDim.value = 1 + (cfg.nightDim - 1) * GLOBAL_UNIFORMS.uNight.value;
     const cam = this.ctx.engine.camera;
+    const vh = Math.max(240, this.ctx.engine.renderer.domElement.height || 720);
+    u.uMinSize.value = (cfg.minPixels * 2 * Math.tan(((cam.fov || 60) * Math.PI) / 360)) / vh;
     u.uSunView.value.copy(GLOBAL_UNIFORMS.uSunDir.value).transformDirection(cam.matrixWorldInverse);
     if (this.ambientKey !== cfg.ambient) {
       this.ambientKey = cfg.ambient;
@@ -198,15 +311,20 @@ export class Fx implements IFx, FxKit, StreamerSink {
       }
     }
 
-    this.updateWheels(dt);
+    try {
+      this.vfx.update(this, dt);
+    } catch (err) {
+      reportError('[fx] vehicle fx failed', err);
+    }
     for (const f of this.fires) if (f.active) f.update(this, dt);
     for (const e of this.emitters) if (e.kind !== EmKind.None) e.update(this, dt);
     this.updateLights();
 
+    const weather = this.ctx.env?.weather;
     this.decals.update(this.time);
     this.main.update(this.time);
     this.glow.update(this.time);
-    this.skid.update(this.time);
+    this.skid.update(this.time, weather ? weather.wetness : GLOBAL_UNIFORMS.uWetness.value);
   }
 
   private updateLights(): void {
@@ -222,148 +340,23 @@ export class Fx implements IFx, FxKit, StreamerSink {
         f.active = false;
         continue;
       }
-      L.request(f.x, f.y, f.z, I, 1, 0.62 + 0.25 * e, 0.32 + 0.35 * e, f.dist);
+      // warm flashes cool from white-yellow to orange as they decay
+      const warm = f.b < f.g;
+      L.request(f.x, f.y, f.z, I, f.r, warm ? f.g * (0.75 + 0.25 * e) : f.g, warm ? f.b * (0.55 + 0.45 * e) : f.b, f.dist);
     }
     for (const f of this.fires) {
       if (!f.active) continue;
       const I = f.glow(this.time);
       L.request(f.cur.x, f.cur.y + 0.8 * f.size, f.cur.z, I, 1, 0.5, 0.18, 16 * f.size);
     }
+    for (const e of this.emitters) {
+      if (e.kind !== EmKind.FuelFire) continue;
+      const I = e.glow(this.time);
+      if (I <= 0) continue;
+      e.patchPos(_v2);
+      L.request(_v2.x, _v2.y + 1 + e.scale * 0.15, _v2.z, I, 1, 0.5, 0.18, 10 + e.scale * 4);
+    }
     L.end();
-  }
-
-  // ─────────────────────────────── wheels ───────────────────────────────
-  private updateWheels(dt: number): void {
-    const v = this.ctx.vehicle;
-    const st = v?.state;
-    const wheels = st?.wheels;
-    if (!v || !v.active || !st || st.exploded || !wheels || wheels.length === 0 || dt <= 0) {
-      this.skid.endAll();
-      return;
-    }
-    const cfg = CONFIG.fx;
-    const { s, wind } = this;
-    const now = this.time;
-    const vel = st.velocity;
-    const speed = vel.length();
-    const n = Math.min(8, wheels.length);
-    for (let i = 0; i < n; i++) {
-      const w = wheels[i];
-      if (!w || !w.position || !w.contact) {
-        this.skid.end(i);
-        continue;
-      }
-      const slip = w.slip || 0;
-      const surf: SurfaceMaterial = w.surface ?? 'asphalt';
-      const paved = surf === 'asphalt' || surf === 'concrete';
-      const p = w.position;
-      const nrm = w.normal ?? UP;
-      const th = cfg.skid.slipThreshold;
-      if (paved && slip > th && (speed > 0.8 || slip > 0.6)) {
-        this.skid.add(i, p, nrm, smooth(th, th + 0.3, slip), now);
-      } else this.skid.end(i);
-
-      if (paved && slip > cfg.tyreSmoke.slipThreshold) {
-        const ts = cfg.tyreSmoke;
-        const k = smooth(ts.slipThreshold, 1, slip);
-        this.wheelAcc[i] += ts.rate * (0.25 + k) * this.q * dt;
-        let m = Math.min(6, Math.floor(this.wheelAcc[i]));
-        this.wheelAcc[i] -= m;
-        while (m-- > 0) {
-          s.reset();
-          s.x = p.x + rndS() * 0.15;
-          s.y = p.y + 0.18;
-          s.z = p.z + rndS() * 0.15;
-          s.delay = -Math.random() * dt;
-          s.vx = vel.x * 0.3 + rndS() * 0.6;
-          s.vy = rnd(0.25, 0.9);
-          s.vz = vel.z * 0.3 + rndS() * 0.6;
-          s.air(1.6, wind, 0.45);
-          s.floor = p.y;
-          s.life = rnd(ts.life[0], ts.life[1]);
-          s.size0 = rnd(0.45, 0.7) * (ts.size[0] / 0.6);
-          s.size1 = rnd(0.8, 1.1) * ts.size[1] * (0.65 + 0.5 * k);
-          s.rot = rnd(0, 6.28);
-          s.spin = rndS() * 0.6;
-          s.turb = 0.3;
-          s.cell = pick(CELL.WISP, CELL.SMOKE_A);
-          s.ramp = RAMP.SMOKE_LIGHT;
-          s.tint(1, 1, 1, 0.45 + 0.5 * k);
-          this.main.emit(s, now);
-        }
-      } else if ((surf === 'sand' || surf === 'grass') && speed > cfg.dust.minSpeed) {
-        const k = Math.min(1, speed / 20) * 0.75 + slip * 0.6;
-        this.wheelAcc[i] += cfg.dust.rate * k * this.q * dt;
-        let m = Math.min(6, Math.floor(this.wheelAcc[i]));
-        this.wheelAcc[i] -= m;
-        const col = this.color(surf === 'sand' ? cfg.dust.sand : cfg.dust.grass);
-        while (m-- > 0) {
-          s.reset();
-          s.x = p.x + rndS() * 0.2;
-          s.y = p.y + 0.12;
-          s.z = p.z + rndS() * 0.2;
-          s.delay = -Math.random() * dt;
-          s.vx = vel.x * 0.2 + rndS() * 1.0;
-          s.vy = rnd(0.6, 1.8) * (0.5 + 0.5 * k);
-          s.vz = vel.z * 0.2 + rndS() * 1.0;
-          s.air(1.8, wind, -0.35);
-          s.floor = p.y;
-          s.life = rnd(cfg.dust.life[0], cfg.dust.life[1]);
-          s.size0 = rnd(0.8, 1.2) * cfg.dust.size[0];
-          s.size1 = rnd(0.7, 1.05) * cfg.dust.size[1] * (0.6 + 0.6 * Math.min(1, k));
-          s.rot = rnd(0, 6.28);
-          s.spin = rndS() * 0.5;
-          s.turb = 0.25;
-          s.cell = pick(CELL.DUST, CELL.WISP);
-          s.ramp = RAMP.DUST;
-          s.tint(col.r, col.g, col.b, Math.min(1, 0.45 + 0.4 * k));
-          this.main.emit(s, now);
-          if (surf === 'grass' && Math.random() < 0.3) {
-            s.reset();
-            s.x = p.x;
-            s.y = p.y + 0.1;
-            s.z = p.z;
-            s.vx = vel.x * 0.4 + rndS() * 2;
-            s.vy = rnd(2, 4);
-            s.vz = vel.z * 0.4 + rndS() * 2;
-            s.air(1.2, wind, this.gravity * 0.6);
-            s.floor = p.y + 0.02;
-            s.life = rnd(1.0, 1.8);
-            s.size0 = s.size1 = rnd(0.07, 0.12);
-            s.rot = rnd(0, 6.28);
-            s.spin = rndS() * 8;
-            s.cell = CELL.LEAF;
-            s.ramp = RAMP.SOLID;
-            s.tint(0.28, rnd(0.45, 0.6), 0.2, 1);
-            this.main.emit(s, now);
-          }
-        }
-      } else if (surf === 'water' && speed > cfg.spray.minSpeed) {
-        const k = Math.min(1, speed / 15);
-        this.wheelAcc[i] += cfg.spray.rate * k * this.q * dt;
-        let m = Math.min(8, Math.floor(this.wheelAcc[i]));
-        this.wheelAcc[i] -= m;
-        while (m-- > 0) {
-          s.reset();
-          s.x = p.x + rndS() * 0.2;
-          s.y = p.y + 0.1;
-          s.z = p.z + rndS() * 0.2;
-          s.delay = -Math.random() * dt;
-          s.vx = vel.x * 0.5 + rndS() * 1.6;
-          s.vy = rnd(1.5, 3.5) * (0.5 + k);
-          s.vz = vel.z * 0.5 + rndS() * 1.6;
-          s.air(0.6, wind, this.gravity);
-          s.floor = p.y - 0.2;
-          s.life = rnd(0.6, 1.1);
-          s.size0 = rnd(0.12, 0.22);
-          s.size1 = rnd(0.5, 0.9);
-          s.rot = rnd(0, 6.28);
-          s.cell = Math.random() < 0.5 ? CELL.DROP : CELL.WISP;
-          s.ramp = RAMP.WATER;
-          this.main.emit(s, now);
-        }
-      }
-    }
   }
 
   // ─────────────────────────────── FxKit / StreamerSink ───────────────────────────────
@@ -376,7 +369,11 @@ export class Fx implements IFx, FxKit, StreamerSink {
     }
   }
 
-  flash(x: number, y: number, z: number, peak: number, decay: number, distance: number, delay = 0): void {
+  private waterY(): number {
+    return CONFIG.world.waterLevel ?? 0;
+  }
+
+  flash(x: number, y: number, z: number, peak: number, decay: number, distance: number, delay = 0, r = 1, g = 0.82, b = 0.6): void {
     let slot = this.flashes.find((f) => !f.active);
     if (!slot) {
       slot = this.flashes[0];
@@ -390,6 +387,9 @@ export class Fx implements IFx, FxKit, StreamerSink {
     slot.peak = peak;
     slot.decay = decay;
     slot.dist = distance;
+    slot.r = r;
+    slot.g = g;
+    slot.b = b;
   }
 
   private freeEmitter(): CpuEmitter | null {
@@ -438,8 +438,24 @@ export class Fx implements IFx, FxKit, StreamerSink {
   }
 
   // ─────────────────────────────── explosions ───────────────────────────────
+  /** Was a blast already spawned here within `window` s (within `dist` m)? */
+  private recentHit(x: number, z: number, window: number, dist: number): boolean {
+    for (let i = 0; i < 6; i++) {
+      const o = i * 4;
+      if (this.time - this.recent[o + 2] < window && (x - this.recent[o]) ** 2 + (z - this.recent[o + 1]) ** 2 < Math.max(dist, this.recent[o + 3]) ** 2) return true;
+    }
+    return false;
+  }
+
+  /** Plane systems may call explosionEx directly AND emit the event (or only one of them): spawn exactly once. */
+  private onPlaneBlast(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, kind: ExKind): void {
+    if (this.recentHit(pos.x, pos.z, 0.12, Math.max(2, radius * 0.5))) return;
+    this.explosionEx({ position: pos, velocity: vel, radius, kind });
+  }
+
   private onExplosion(pos: THREE.Vector3, radius: number): void {
-    if (!this.main) return;
+    // A system that already called explosionEx for this blast may also emit the generic event (props/npcs react).
+    if (this.recentHit(pos.x, pos.z, 0.3, 10)) return;
     const cfg = CONFIG.fx.explosion;
     const scale = Math.min(3, Math.max(0.4, Math.sqrt(Math.max(0, radius) / cfg.refRadius)));
     const v = this.ctx.vehicle;
@@ -452,25 +468,33 @@ export class Fx implements IFx, FxKit, StreamerSink {
         this.autoT = CONFIG.fx.fire.autoDelay;
       }
     }
-    this.explosionEx({ position: pos, velocity: vel, radius: cfg.fireballRadius * scale, kind: 'car' });
+    this.explode(pos, vel ?? ZERO, cfg.fireballRadius * scale, 'car', undefined, true);
   }
 
   explosion(pos: THREE.Vector3, scale: number): void {
     this.explosionEx({ position: pos, radius: CONFIG.fx.explosion.fireballRadius * Math.max(0.1, scale), kind: 'car' });
   }
 
-  explosionEx(o: {
-    position: THREE.Vector3;
-    velocity?: THREE.Vector3;
-    radius: number;
-    kind?: 'car' | 'engine' | 'plane' | 'secondary' | 'impact';
-    nearSurface?: 'ground' | 'water' | null;
-    light?: boolean;
-  }): void {
-    if (!this.main) return;
-    const p = o.position;
-    const vel = o.velocity ?? ZERO;
-    let surface: 'ground' | 'water' | null = o.nearSurface === undefined ? 'ground' : o.nearSurface;
+  explosionEx(o: { position: THREE.Vector3; velocity?: THREE.Vector3; radius: number; kind?: ExKind; nearSurface?: 'ground' | 'water' | null; light?: boolean }): void {
+    if (this.recentHit(o.position.x, o.position.z, 0.12, Math.max(2, o.radius * 0.5)) && this.lastExRadius === o.radius) return;
+    this.lastExRadius = o.radius;
+    const r = this.recentHead * 4;
+    this.recent[r] = o.position.x;
+    this.recent[r + 1] = o.position.z;
+    this.recent[r + 2] = this.time;
+    this.recent[r + 3] = o.radius * 0.5;
+    this.recentHead = (this.recentHead + 1) % 6;
+    this.explode(o.position, o.velocity ?? ZERO, o.radius, o.kind ?? 'plane', o.nearSurface, o.light ?? true);
+  }
+
+  private explode(p: THREE.Vector3, vel: THREE.Vector3, radius: number, kind: ExKind, near: 'ground' | 'water' | null | undefined, light: boolean): void {
+    if (!this.ok) {
+      const X = CONFIG.fx.explosion;
+      if (CONFIG.fx.fallbackBlast) this.fallback?.trigger(p, radius);
+      if (light) this.flash(p.x, p.y + radius * 0.3, p.z, X.flashIntensity * (radius / 6) ** 2, X.flashDecay, X.flashDistance * radius);
+      return;
+    }
+    let surface: 'ground' | 'water' | null = near === undefined ? 'ground' : near;
     let surfaceY = this.ground(p.x, p.z);
     let mat: SurfaceMaterial = 'asphalt';
     try {
@@ -478,24 +502,22 @@ export class Fx implements IFx, FxKit, StreamerSink {
     } catch {
       /* world not ready */
     }
-    if (o.nearSurface === undefined && mat === 'water') surface = 'water';
-    if (surface === 'water') surfaceY = Math.max(surfaceY, CONFIG.world.waterLevel ?? 0);
-    const dustCol = this.dustColorFor(mat);
-    const opts: ExplosionOpts = {
-      x: p.x,
-      y: p.y,
-      z: p.z,
-      vx: vel.x,
-      vy: vel.y,
-      vz: vel.z,
-      radius: o.radius,
-      kind: o.kind ?? 'car',
-      surface,
-      surfaceY,
-      light: o.light ?? true,
-    };
+    if (near === undefined) {
+      if (mat === 'water') surface = 'water';
+      else {
+        try {
+          if (this.ctx.world.isDeepWater(p.x, p.z)) surface = 'water';
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (surface === 'water') surfaceY = Math.max(surfaceY, this.waterY());
+    // no surface effects when the blast is far above it (~100 m for planes)
+    if (surface && p.y - surfaceY > Math.max(CONFIG.fx.explosion.groundMaxHeight * radius, kind === 'car' ? 0 : 100)) surface = null;
+    const opts: ExplosionOpts = { x: p.x, y: p.y, z: p.z, vx: vel.x, vy: vel.y, vz: vel.z, radius, kind, surface, surfaceY, light };
     try {
-      spawnExplosion(this, opts, this, dustCol);
+      spawnExplosion(this, opts, this, this.dustColorFor(mat));
     } catch (err) {
       reportError('[fx] explosion failed', err);
     }
@@ -504,7 +526,9 @@ export class Fx implements IFx, FxKit, StreamerSink {
   private dustArr = [0.8, 0.76, 0.7];
   private dustColorFor(mat: SurfaceMaterial): number[] {
     const cfg = CONFIG.fx.dust;
-    const c = this.color(mat === 'sand' ? cfg.sand : mat === 'grass' || mat === 'foliage' ? cfg.grass : cfg.other);
+    const weather = this.ctx.env?.weather;
+    const snow = (weather ? weather.snow : GLOBAL_UNIFORMS.uSnow.value) > 0.35;
+    const c = this.color(snow ? cfg.snow : mat === 'sand' ? cfg.sand : mat === 'grass' || mat === 'foliage' ? cfg.grass : cfg.other);
     this.dustArr[0] = c.r;
     this.dustArr[1] = c.g;
     this.dustArr[2] = c.b;
@@ -554,19 +578,109 @@ export class Fx implements IFx, FxKit, StreamerSink {
     };
   }
 
-  // ─────────────────────────────── one-shot effects ───────────────────────────────
+  fuelFire(o: { position: THREE.Vector3; velocity?: THREE.Vector3; size: number; duration: number; onWater: boolean }): void {
+    if (!this.ok) return;
+    const e = this.freeEmitter();
+    if (!e) return;
+    const p = o.position;
+    const vel = o.velocity ?? ZERO;
+    const y = o.onWater ? this.waterY() : this.ground(p.x, p.z);
+    e.kind = EmKind.FuelFire;
+    e.x = p.x;
+    e.y = y + 0.02;
+    e.z = p.z;
+    e.vx = vel.x * 0.6;
+    e.vy = 0;
+    e.vz = vel.z * 0.6;
+    e.k = o.onWater ? 0.5 : 1.4;
+    // slicks drift slowly with the wind; ground patches stop where they slid
+    e.wx = o.onWater ? this.wind.x * 0.06 : 0;
+    e.wz = o.onWater ? this.wind.z * 0.06 : 0;
+    e.onWater = o.onWater;
+    e.age = 0;
+    e.life = Math.max(1, o.duration);
+    e.scale = Math.max(0.5, o.size);
+    e.acc = e.acc2 = 0;
+    e.level = 0;
+    e.seed = Math.random() * 100;
+    // the burnt patch / dark slick under it follows the same closed-form drift
+    const { s } = this;
+    s.reset();
+    s.x = e.x;
+    s.y = e.y + 0.02;
+    s.z = e.z;
+    s.vx = e.vx;
+    s.vz = e.vz;
+    s.drag = e.k;
+    s.ax = e.k * e.wx;
+    s.az = e.k * e.wz;
+    s.floor = e.y + 0.02;
+    s.stretch = -1;
+    s.cell = o.onWater ? CELL.DUST : CELL.SCORCH;
+    s.ramp = o.onWater ? RAMP.SLICK : RAMP.SCORCH;
+    s.size0 = e.scale * 1.1;
+    s.size1 = e.scale * (o.onWater ? 1.8 : 1.3);
+    s.life = e.life + 15;
+    s.rot = rnd(0, 6.28);
+    if (o.onWater) s.tint(0.03, 0.028, 0.03, 0.75);
+    else s.tint(0.045, 0.04, 0.038, 0.9);
+    this.decals.emit(s, this.time);
+  }
+
+  // ─────────────────────────────── part-2 one-shots ───────────────────────────────
+  splash(o: { position: THREE.Vector3; velocity: THREE.Vector3; size: number }): void {
+    if (!this.ok) return;
+    W.splash(this, o.position, o.velocity ?? ZERO, o.size, this.waterY());
+  }
+
+  spraySheet(position: THREE.Vector3, velocity: THREE.Vector3, intensity: number): void {
+    if (!this.ok) return;
+    W.spraySheet(this, position, velocity, intensity, this.sheetAcc);
+  }
+
+  steam(position: THREE.Vector3, size: number): void {
+    if (!this.ok) return;
+    W.steam(this, position, size);
+  }
+
+  bubbles(position: THREE.Vector3, size: number): void {
+    if (!this.ok) return;
+    W.bubbles(this, position, size, this.waterY());
+  }
+
+  gouge(a: THREE.Vector3, b: THREE.Vector3, width: number): void {
+    if (!this.ok) return;
+    this.skid.gouge(a, b, width, this.time);
+  }
+
+  debrisBurst(o: { position: THREE.Vector3; velocity: THREE.Vector3; count: number; size: number; kind?: 'metal' | 'panel' | 'paper' | 'cushion' }): void {
+    if (!this.ok) return;
+    W.debrisBurst(this, o);
+  }
+
+  mist(position: THREE.Vector3, velocity: THREE.Vector3, size: number): void {
+    if (!this.ok) return;
+    W.mist(this, position, velocity ?? ZERO, size);
+  }
+
+  scorch(position: THREE.Vector3, normal: THREE.Vector3, size: number): void {
+    if (!this.ok) return;
+    W.scorch(this, position, normal, size);
+  }
+
+  // ─────────────────────────────── part-1 one-shots ───────────────────────────────
   sparks(pos: THREE.Vector3, normal: THREE.Vector3, intensity: number, inherit?: THREE.Vector3): void {
-    if (!this.main) return;
+    if (!this.ok) return;
     const cfg = CONFIG.fx.sparks;
     const { s, wind } = this;
     const now = this.time;
-    const k = Math.min(1.5, Math.max(0, intensity));
+    const k = Math.min(2, Math.max(0, intensity));
     _n.copy(normal);
     if (_n.lengthSq() < 0.01) _n.copy(UP);
     _n.normalize();
     const floor = this.ground(pos.x, pos.z) + 0.03;
     const iv = inherit ?? ZERO;
-    const n = Math.max(3, count(cfg.impactCount * (0.3 + k), this.q, 120));
+    const n = Math.max(3, count(cfg.impactCount * (0.3 + k), this.q, 160));
     for (let i = 0; i < n; i++) {
       randDir(_d).multiplyScalar(0.85).addScaledVector(_n, rnd(0.5, 1.1));
       _d.y += 0.25;
@@ -588,6 +702,10 @@ export class Fx implements IFx, FxKit, StreamerSink {
     }
     // impact flash
     s.reset().pos(pos);
+    s.vx = iv.x;
+    s.vy = iv.y;
+    s.vz = iv.z;
+    s.air(4, wind, 0);
     s.cell = CELL.STAR;
     s.ramp = RAMP.FLASH;
     s.size0 = 0.8 + 1.4 * k;
@@ -623,7 +741,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
   }
 
   dust(pos: THREE.Vector3, intensity: number, color?: THREE.ColorRepresentation): void {
-    if (!this.main) return;
+    if (!this.ok) return;
     const { s, wind } = this;
     const k = Math.min(2, Math.max(0, intensity));
     if (color !== undefined) _c.set(color);
@@ -654,7 +772,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
   }
 
   smoke(pos: THREE.Vector3, intensity: number): void {
-    if (!this.main) return;
+    if (!this.ok) return;
     const { s, wind } = this;
     const k = Math.min(3, Math.max(0, intensity));
     const n = Math.max(1, count(3 + 9 * k, this.q, 60));
@@ -680,7 +798,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
   }
 
   glassShards(pos: THREE.Vector3, n: number): void {
-    if (!this.main) return;
+    if (!this.ok) return;
     const cfg = CONFIG.fx.glass;
     const { s, wind } = this;
     const floor = this.ground(pos.x, pos.z) + 0.02;
@@ -721,7 +839,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
 
   // ─────────────────────────────── event handlers ───────────────────────────────
   private onImpact(pos: THREE.Vector3, normal: THREE.Vector3, strength: number, material: SurfaceMaterial): void {
-    if (!this.main) return;
+    if (!this.ok) return;
     const cfg = CONFIG.fx.sparks;
     const inherit = this.vehicleVel(pos, 0.5);
     switch (material) {
@@ -739,6 +857,9 @@ export class Fx implements IFx, FxKit, StreamerSink {
       case 'grass':
         if (strength >= cfg.impactThreshold * 0.5) this.dust(pos, strength, material === 'sand' ? CONFIG.fx.dust.sand : CONFIG.fx.dust.grass);
         break;
+      case 'water':
+        if (strength >= cfg.impactThreshold * 0.5) W.splash(this, pos, inherit, 0.6 + strength, this.waterY());
+        break;
       default:
         break;
     }
@@ -752,7 +873,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
   }
 
   private onScrape(pos: THREE.Vector3, intensity: number): void {
-    if (!this.main) return;
+    if (!this.ok) return;
     const cfg = CONFIG.fx.sparks;
     this.scrapeAcc += Math.max(0, intensity) * cfg.scrapeRate * (1 / 60) * this.q;
     let n = Math.min(10, Math.floor(this.scrapeAcc));
@@ -812,7 +933,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
   }
 
   private onPropHit(pos: THREE.Vector3, kind: string, speed: number): void {
-    if (!this.main) return;
+    if (!this.ok) return;
     const k = Math.min(1, speed / 20);
     const name = (kind || '').toLowerCase();
     let hex = 0xbdb6aa;
@@ -840,14 +961,47 @@ export class Fx implements IFx, FxKit, StreamerSink {
   }
 
   private onPartDetached(pos: THREE.Vector3): void {
-    if (!this.main) return;
+    if (!this.ok) return;
     this.sparks(pos, UP, 0.5, this.vehicleVel(pos, 0.6));
     this.smoke(pos, 0.3);
   }
 
+  /** Plane wheels touching down: tyre smoke puffs scaled by vertical speed. */
+  private onTouchdown(pos: THREE.Vector3, vs: number, hard: boolean): void {
+    if (!this.ok) return;
+    const { s, wind } = this;
+    const k = Math.min(2, 0.4 + Math.abs(vs) / 3);
+    const n = Math.max(3, count(10 * k, this.q, 40));
+    const gy = this.ground(pos.x, pos.z);
+    for (let i = 0; i < n; i++) {
+      s.reset().pos(pos);
+      s.y = gy + 0.3;
+      s.x += rndS() * 0.6;
+      s.z += rndS() * 0.6;
+      s.vx = rndS() * 1.5;
+      s.vy = rnd(0.5, 1.6);
+      s.vz = rndS() * 1.5;
+      s.air(1.4, wind, 0.4);
+      s.floor = gy;
+      s.life = rnd(1.4, 2.6);
+      s.size0 = rnd(0.6, 1.0) * k;
+      s.size1 = rnd(3, 4.5) * k;
+      s.rot = rnd(0, 6.28);
+      s.spin = rndS() * 0.5;
+      s.cell = pick(CELL.WISP, CELL.SMOKE_A);
+      s.ramp = RAMP.SMOKE_LIGHT;
+      s.tint(1, 1, 1, 0.75);
+      this.main.emit(s, this.time);
+    }
+    if (hard) this.sparks(_v.set(pos.x, gy + 0.2, pos.z), UP, 0.8);
+  }
+
   // ─────────────────────────────── reset ───────────────────────────────
   clearAll(): void {
-    if (!this.main) return;
+    this.fallback?.clear();
+    for (const f of this.flashes) f.active = false;
+    this.lights?.off();
+    if (!this.ok || !this.main) return;
     // Jump the clock past every pending spawn delay; the shader kills everything born before uClear.
     this.time += CONFIG.fx.clearJump;
     this.u.uFxTime.value = this.time;
@@ -860,15 +1014,16 @@ export class Fx implements IFx, FxKit, StreamerSink {
     for (const e of this.emitters) e.kind = EmKind.None;
     for (const f of this.flashes) f.active = false;
     this.lights.off();
+    this.vfx.reset();
     this.autoTarget = null;
     this.autoT = -1;
-    this.wheelAcc.fill(0);
     this.scrapeAcc = 0;
+    this.sheetAcc.v = 0;
   }
 
   /** Debug/testing snapshot (not part of IFx). */
   debugStats(): Record<string, number> {
-    if (!this.main) return {};
+    if (!this.ok) return { ok: 0, time: +this.time.toFixed(2) };
     return {
       time: +this.time.toFixed(2),
       main: this.main.liveEstimate,
@@ -882,11 +1037,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
       emitters: this.emitters.filter((e) => e.kind !== EmKind.None).length,
       lights: this.lights.lights.filter((l) => l.intensity > 0).length,
       visibleMeshes: this.root.children.filter((c) => c.visible).length,
+      ok: 1,
     };
   }
-}
-
-function smooth(a: number, b: number, v: number): number {
-  const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
-  return t * t * (3 - 2 * t);
 }

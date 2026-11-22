@@ -5,6 +5,8 @@ import type { ParticlePool, Spawn } from './ParticlePool';
 export interface FxKit {
   /** fx clock (game time, slowed by slow-mo, frozen while paused). */
   readonly time: number;
+  /** Last update's game dt (for per-frame callers like spraySheet). */
+  readonly dt: number;
   /** Alpha-ish pool drawn first: smoke, dust, debris, glass. */
   readonly main: ParticlePool;
   /** Pool drawn after `main`: fireballs, flames, sparks, embers, glows, shock domes. */
@@ -20,8 +22,8 @@ export interface FxKit {
   /** Gravity (negative, m/s²). */
   readonly gravity: number;
   ground(x: number, z: number): number;
-  /** Light flash (pooled point lights). delay in s. */
-  flash(x: number, y: number, z: number, peak: number, decay: number, distance: number, delay?: number): void;
+  /** Light flash (pooled point lights). delay in s; color defaults to warm fire white. */
+  flash(x: number, y: number, z: number, peak: number, decay: number, distance: number, delay?: number, r?: number, g?: number, b?: number): void;
 }
 
 export const rnd = (a: number, b: number): number => a + Math.random() * (b - a);

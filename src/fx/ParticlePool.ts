@@ -12,7 +12,10 @@ import { RAMP_ROWS } from './textures';
  *   a0 = pos.xyz, birthTime        a1 = vel.xyz, life
  *   a2 = accel.xyz, drag k         a3 = size0, size1, rot0, spin
  *   a4 = tint.rgb, alpha           a5 = packed(cell | ramp<<4 | heat*8<<10), floorY, stretch, turbulence
- * stretch > 0: velocity-stretched (seconds of motion blur), < 0: ground-aligned quad, 0: camera billboard.
+ * stretch > 0: velocity-stretched (seconds of motion blur), -1: ground-aligned quad, -2: static decal oriented by
+ * the normal stored in vel.xyz, 0: camera billboard.
+ * Positions are stored in the fx root's local space (local = scene - root.position): core's floating origin shifts
+ * the root, so live particles move with the world for free and emit() converts new spawns.
  * Blending is premultiplied (ONE, ONE_MINUS_SRC_ALPHA); the ramp's "additive" param blends each particle anywhere
  * between occluding (alpha) and pure additive, so a fireball stays optically thick while its core glows.
  */
@@ -99,6 +102,7 @@ uniform float uFxTime;
 uniform float uClear;
 uniform sampler2D uRamp;
 uniform vec2 uNearFade;
+uniform float uMinSize;
 attribute vec4 a0;
 attribute vec4 a1;
 attribute vec4 a2;
@@ -154,6 +158,9 @@ void main() {
   float te = 1.0 - (1.0 - t) * (1.0 - t);
   float size = mix(a3.x, a3.y, te);
   float rot = a3.z + a3.w * age;
+  // never thinner than ~2 px on screen (tiny sparks/embers would shimmer away under mip filtering)
+  float centerDepth = max(0.1, -(modelViewMatrix * vec4(p, 1.0)).z);
+  size = max(size, centerDepth * uMinSize * (a5.z > 0.0 ? 1.5 : 1.0));
 
   vec2 corner = position.xy;
   vec3 camRight = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
@@ -171,6 +178,17 @@ void main() {
     float len = size + sp * stretch;
     wp = p + ax * (corner.x * size) + ay * (corner.y * len);
     cdir = corner * 2.0;
+  } else if (stretch < -1.5) {
+    // static decal oriented by the normal stored in the velocity slot (facade scorch, slicks on slopes)
+    p = a0.xyz;
+    vec3 nn = normalize(a1.xyz + vec3(0.0, 1e-5, 0.0));
+    vec3 tt = abs(nn.y) < 0.98 ? normalize(cross(vec3(0.0, 1.0, 0.0), nn)) : vec3(1.0, 0.0, 0.0);
+    vec3 bb = cross(nn, tt);
+    float c = cos(rot);
+    float s = sin(rot);
+    vec2 q = corner * size;
+    wp = p + tt * (q.x * c - q.y * s) + bb * (q.x * s + q.y * c);
+    cdir = vec2(0.0);
   } else if (stretch < 0.0) {
     float c = cos(rot);
     float s = sin(rot);
@@ -186,11 +204,13 @@ void main() {
   }
   float nearA = 1.0;
   if (stretch >= 0.0) {
-    float depth = -(viewMatrix * vec4(p, 1.0)).z - size * 0.4;
+    // only sprites right in front of the lens fade (fill-rate); big fireball puffs near the camera stay visible
+    float depth = centerDepth - min(size * 0.25, 1.2);
     nearA = clamp((depth - uNearFade.x) / (uNearFade.y - uNearFade.x), 0.0, 1.0);
     vFloor = (wp.y - a5.y) / max(size * 0.28, 0.04);
   }
-  vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
+  // data lives in the fx root's space (core shifts the root on floating-origin moves; it only translates)
+  vec4 mvPosition = modelViewMatrix * vec4(wp, 1.0);
   gl_Position = projectionMatrix * mvPosition;
 
   vec2 uvq = corner + 0.5;
@@ -202,7 +222,7 @@ void main() {
   float ru = t * (127.0 / 128.0) + 0.5 / 128.0;
   vec4 rc = texture2D(uRamp, vec2(ru, (ramp * 2.0 + 0.5) / RAMP_ROWS));
   vec4 rp = texture2D(uRamp, vec2(ru, (ramp * 2.0 + 1.5) / RAMP_ROWS));
-  vColor = vec4(rc.rgb * a4.rgb, rc.a * a4.a * nearA);
+  vColor = vec4(rc.rgb * rc.rgb * a4.rgb, rc.a * a4.a * nearA);
   vParams = vec4(rp.rgb, heatQ * 0.125);
   #include <fog_vertex>
 }
@@ -230,7 +250,9 @@ void main() {
   float ndl = dot(n, uSunView) * 0.5 + 0.5;
   float shade = mix(tex.r, ndl * (0.55 + 0.6 * tex.r), vParams.z);
   vec3 lit = vColor.rgb * mix(uAmbient, uSunColor, clamp(shade, 0.0, 1.2)) * uDim;
-  vec3 emi = vColor.rgb * vParams.w * (0.45 + 0.9 * tex.r);
+  // emissive: hot where the puff is dense, darker & redder toward its soft rim (optically thick, not a white sum)
+  float dense = max(smoothstep(0.1, 0.85, tex.a), vParams.y);
+  vec3 emi = vColor.rgb * vParams.w * (0.35 + 0.9 * tex.r) * mix(vec3(0.5, 0.28, 0.2), vec3(1.0), dense);
   vec3 rgb = mix(lit, emi, vParams.x);
   float add = vParams.y;
   #ifdef USE_FOG
@@ -254,6 +276,8 @@ export interface FxSharedUniforms {
   uRamp: { value: THREE.Texture };
   uAtlas: { value: THREE.Texture };
   uNearFade: { value: THREE.Vector2 };
+  /** View-space size of ~2 px per metre of depth (set per frame from the camera fov / viewport height). */
+  uMinSize: { value: number };
   uSunView: { value: THREE.Vector3 };
   uSunColor: { value: THREE.Color };
   uAmbient: { value: THREE.Color };
@@ -321,6 +345,7 @@ export class ParticlePool {
     capacity: number,
     material: THREE.Material,
     renderOrder: number,
+    private readonly root: THREE.Object3D,
   ) {
     this.geo = this.build(capacity);
     this.mesh = new THREE.Mesh(this.geo, material);
@@ -383,9 +408,10 @@ export class ParticlePool {
     const o = i * STRIDE;
     const d = this.data;
     const t0 = now + s.delay;
-    d[o] = s.x;
-    d[o + 1] = s.y;
-    d[o + 2] = s.z;
+    const rp = this.root.position;
+    d[o] = s.x - rp.x;
+    d[o + 1] = s.y - rp.y;
+    d[o + 2] = s.z - rp.z;
     d[o + 3] = t0;
     d[o + 4] = s.vx;
     d[o + 5] = s.vy;
@@ -405,7 +431,7 @@ export class ParticlePool {
     d[o + 19] = s.a;
     const heatQ = Math.round(Math.min(2000, Math.max(0, s.heat)) * 8);
     d[o + 20] = (s.cell & 15) + 16 * (s.ramp & 63) + 1024 * heatQ;
-    d[o + 21] = s.floor;
+    d[o + 21] = s.floor - rp.y;
     d[o + 22] = s.stretch;
     d[o + 23] = s.turb;
     const death = t0 + s.life;
