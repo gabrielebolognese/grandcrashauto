@@ -74,6 +74,7 @@ uniform float uOpacity;
 varying float vAlpha;
 varying vec2 vUv;
 varying float vSnow;
+varying float vSplash;
 void main() {
   float a;
   vec3 c;

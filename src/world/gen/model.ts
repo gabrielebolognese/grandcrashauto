@@ -96,6 +96,8 @@ export interface Solid {
   collide: boolean;
   /** Optional top-surface slope: height at local -z end = cy + h0, at +z end = cy + h (wedge). */
   h0?: number;
+  /** Also part of the low-detail layer (long structures visible from afar: sea wall). */
+  lod?: boolean;
 }
 
 export interface Cylinder {

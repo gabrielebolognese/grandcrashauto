@@ -340,7 +340,16 @@ export class PlaneSystem implements IPlaneSystem {
     const { ctx } = this;
     const rec = this.parked.get(type);
     if (!rec) return;
+    const prev = this.rec;
     this.teardownFlight();
+    if (prev && prev !== rec) {
+      // switching planes: the previous one goes back to its stand
+      const st = this.standFor(prev.type);
+      prev.pos.copy(st.p);
+      prev.yaw = st.yaw;
+      prev.occupied = false;
+      this.placeParked(prev);
+    }
     ctx.physics.removeBody(rec.body);
     rec.body = null;
     rec.occupied = true;
@@ -410,7 +419,7 @@ export class PlaneSystem implements IPlaneSystem {
 
     // Engines.
     this.engines = visual.engines.map((info) => ({
-      drag: { point: info.thrustPoint.clone(), cdA: 0.3 * Math.PI * Math.max(0.3, info.radius) ** 2 },
+      drag: { point: info.thrustPoint.clone(), cdA: 0.1 * Math.PI * Math.max(0.3, info.radius) ** 2 },
       info, st: { status: 'ok', spool: 0, thrust: 0, fire: 0 }, propAngle: 0, propSpeed: 0, windmill: false, trail: null, trailSize: 1,
       spreadAt: Infinity, spreadWill: false, spread: false, tearAt: Infinity,
     }));
@@ -710,7 +719,7 @@ export class PlaneSystem implements IPlaneSystem {
       const I = this.model.inertia;
       const up = _v.set(0, 1, 0).applyQuaternion(visual.root.quaternion);
       const fwd = _v2.set(0, 0, 1).applyQuaternion(visual.root.quaternion);
-      const ky = I.y * 0.05 * side;
+      const ky = I.y * 0.08 * side;
       const kr = -I.z * 0.03 * side;
       body.applyTorqueImpulse({ x: up.x * ky + fwd.x * kr, y: up.y * ky + fwd.y * kr, z: up.z * ky + fwd.z * kr }, true);
     }
@@ -1072,7 +1081,7 @@ export class PlaneSystem implements IPlaneSystem {
             e.spread = true;
             e.st.fire = 1;
             const p = e.info.thrustPoint;
-            this.sideDrag.push({ point: new THREE.Vector3(p.x * 0.7, p.y, p.z), cdA: 0.012 * model.S });
+            this.sideDrag.push({ point: new THREE.Vector3(p.x * 0.7, p.y, p.z), cdA: 0.006 * model.S });
             this.assistPenalty += 0.15;
             this.ctx.events.emit('engineFireSpread', { engine: i + 1, position: this.worldPoint(p, new THREE.Vector3()) });
           }

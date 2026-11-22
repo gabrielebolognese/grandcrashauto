@@ -41,15 +41,15 @@ export interface WindowLayout {
 }
 
 export function makeUniforms(win: WindowLayout | null): PlaneUniforms {
-  const vec4s = (n: number) => Array.from({ length: n }, () => new THREE.Vector4());
+  const vec4s = (n: number) => Array.from({ length: n }, () => new THREE.Vector4(0, 0, 0, 0));
   const U: PlaneUniforms = {
     uSurfA: { value: vec4s(NSURF).map((v) => v.set(1, 0, 0, 0)) },
     uSurfP: { value: vec4s(NSURF) },
     uPartOff: { value: vec4s(NPART) },
     uCharV: { value: vec4s(NPART / 4) },
-    uDmg: { value: new THREE.Vector4() },
-    uFlags: { value: new THREE.Vector4() },
-    uCrush: { value: new THREE.Vector4() },
+    uDmg: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uFlags: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uCrush: { value: new THREE.Vector4(0, 0, 0, 0) },
     uCrushDir: { value: new THREE.Vector4(0, 0, -1, -1) },
     uCrushR: { value: 1 },
     uWin: { value: new THREE.Vector4(0.5, 0.12, 0.17, 0.08) },
@@ -352,7 +352,7 @@ export interface GlowUniforms {
 }
 
 export function createGlowMaterial(): { mat: THREE.ShaderMaterial; uniforms: GlowUniforms } {
-  const uniforms: GlowUniforms = { uOn: { value: new THREE.Vector4() }, uTime: { value: 0 } };
+  const uniforms: GlowUniforms = { uOn: { value: new THREE.Vector4(0, 0, 0, 0) }, uTime: { value: 0 } };
   const mat = new THREE.ShaderMaterial({
     uniforms: { ...uniforms, uNight: GLOBAL_UNIFORMS.uNight },
     vertexShader: GLOW_VERT,

@@ -167,6 +167,7 @@ export class NpcSystem implements INpcSystem {
   private pending: Pending[] = Array.from({ length: 256 }, () => ({ active: false, t: 0, kind: 0, npc: -1, site: -1, member: -1, gen: 0, vx: 0, vy: 0, vz: 0, wx: 0, wy: 0, wz: 0 }));
   private pendingCount = 0;
   private animTime = 0;
+  private frameNo = 0;
   private prevCarT = new THREE.Vector3();
   private prevCarQ = new THREE.Quaternion();
   private hasPrevCar = false;
@@ -1885,14 +1886,28 @@ export class NpcSystem implements INpcSystem {
     // per-NPC behaviour
     const despR2 = C.despawn * C.despawn;
     let crowdDyn = 0;
+    this.frameNo++;
     for (const n of this.npcs) {
       if (!n.active) continue;
-      this.updateNpc(n, dt, alpha);
+      // logic LOD: calm NPCs that are far / unseen think at a lower rate (staggered), no visible difference
+      n.acc += dt;
+      let every = 1;
+      const st = n.st;
+      if (n.reactT < 0 && (st === S.Walk || st === S.Stand || st === S.Group || st === S.Sit || st === S.Wander || st === S.Return)) {
+        if (!n.vis && n.dist > 35) every = 4;
+        else if (n.dist > 55) every = 2;
+      }
+      if (n.act === ACT.Crowd) {
+        crowdDyn++;
+        n.actT -= dt;
+      }
+      if (n.fade !== n.fadeTo && every > 1) n.fade = n.fade < n.fadeTo ? Math.min(n.fadeTo, n.fade + dt / C.fadeTime) : Math.max(n.fadeTo, n.fade - dt / C.fadeTime);
+      if (every > 1 && (this.frameNo + n.i) % every !== 0) continue;
+      this.updateNpc(n, n.acc, alpha);
+      n.acc = 0;
       if (!n.active) continue;
       if (n.act === ACT.Crowd) {
         // taken-over crowd member: once calm and unseen (or far), it slips back into its static crowd
-        crowdDyn++;
-        n.actT -= dt;
         const calm = n.st === S.Stand || n.st === S.Approach || n.st === S.Wander;
         if (n.actT <= 0 && calm && (!n.vis || n.dist > 45) && Math.hypot(n.x - n.homeX, n.z - n.homeZ) < 25) {
           if (this.crowd.restore(n.crowdSite, n.crowdGen, n.crowdMember)) {
@@ -1905,7 +1920,7 @@ export class NpcSystem implements INpcSystem {
       }
       // fades
       if (n.fade !== n.fadeTo) {
-        const step = dt / C.fadeTime;
+        const step = every > 1 ? 0 : dt / C.fadeTime;
         n.fade = n.fade < n.fadeTo ? Math.min(n.fadeTo, n.fade + step) : Math.max(n.fadeTo, n.fade - step);
         if (n.fade <= 0 && n.fadeTo <= 0) {
           this.despawn(n);

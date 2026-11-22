@@ -131,7 +131,9 @@ export class Stunts {
 
     // ── barrel roll
     if (f.barrel !== 0 && i.active && !i.rolling && i.predicted >= S.rollMinAir) {
-      const dur = Math.min(S.rollMaxTime, Math.max(S.rollMinTime, i.predicted * S.rollTimeFrac));
+      // time the roll on the arc WITHOUT glide lift: the lift turns with the car while it rolls
+      const noLift = f.liftAccel > 0 ? Math.min(i.predicted, this.predict(f, 0)) : i.predicted;
+      const dur = Math.min(S.rollMaxTime, Math.max(S.rollMinTime, noLift * S.rollTimeFrac));
       this.rollDir = f.barrel;
       this.rollOmega = (Math.PI * 2) / dur;
       this.rolled = 0;
@@ -186,10 +188,10 @@ export class Stunts {
   }
 
   /** Remaining air time (s): ballistic arc from the car's underside, ray-cast segment by segment. */
-  private predict(f: StuntFrame): number {
+  private predict(f: StuntFrame, liftAccel = f.liftAccel): number {
     const S = CONFIG.vehicle.stunts;
     const world = this.host.ctx.physics.world;
-    const gy = -f.gravity + f.liftAccel * Math.max(0, f.up.y);
+    const gy = -f.gravity + liftAccel * Math.max(0, f.up.y);
     const step = Math.max(0.03, S.predictStep);
     let px = f.pos.x, py = f.pos.y - 0.3, pz = f.pos.z;
     const vx = f.vel.x, vz = f.vel.z;

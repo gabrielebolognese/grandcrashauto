@@ -195,6 +195,11 @@ export class ChunkBuilder {
           const col = isl.interior === 'yard' ? lerpHex(COLORS.yard, COLORS.sidewalk, 0.2) : green ? COLORS.park : isl.interior === 'lot' ? COLORS.lot : isl.interior === 'plaza' ? COLORS.plaza : COLORS.sidewalk;
           gb.rect(a, b, c, d, isl.top, col, green ? Mat.Grass : Mat.Sidewalk);
         }
+      if (bk)
+        for (const i of bk.solids) {
+          const sd = this.layout.solids[i];
+          if (sd.lod && sd.col >= 0) gb.box(sd.cx, sd.cy, sd.cz, sd.w, sd.h, sd.d, sd.yaw, sd.col, sd.mat, sd.h0 ?? sd.h);
+        }
       ranges.set(k, [start, gb.idx.length - start]);
     }
     const geometry = gb.toGeometry();

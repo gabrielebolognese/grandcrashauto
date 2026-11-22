@@ -755,7 +755,7 @@ export class PlayerVehicle implements IPlayerVehicle, DamageHost, StuntHost {
       if (tl > 0) {
         const Tb = V.turbo;
         const sf = smoothstep(Tb.wobbleStartKmh, Tb.wobbleFullKmh, absV * KMH) * tl;
-        acc += Tb.wobbleYaw * this.turbo.noise(Tb.wobbleFreq) * sf * this.wild;
+        acc += Tb.wobbleYaw * this.turbo.noise(Tb.wobbleFreq) * sf * (1 + (this.wild - 1) * 0.5);
         const sh = Tb.shake * sf;
         tq.addScaledVector(fwd, sh * this.turbo.noise(Tb.shakeFreq, 1) * I.z);
         tq.addScaledVector(left, sh * 0.6 * this.turbo.noise(Tb.shakeFreq * 1.3, 2) * I.x);

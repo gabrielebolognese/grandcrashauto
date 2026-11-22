@@ -57,7 +57,8 @@ export interface RawPath {
 }
 
 const CELL = 48;
-const key = (cx: number, cz: number) => (cx + 1048576) * 2097152 + (cz + 1048576);
+/** Small-integer grid key (15 bits per axis, wraps every 32768 cells — fine for any realistic network). */
+const key = (cx: number, cz: number) => ((cx & 0x7fff) << 15) | (cz & 0x7fff);
 
 export class NavGraph {
   nodeX: number[] = [];
@@ -70,6 +71,11 @@ export class NavGraph {
   dBase = new Int32Array(0);
   dRev = new Uint8Array(0);
   dCost = new Float64Array(0);
+  /** Unit start / end directions (xz) of every directed edge (turn penalties, manoeuvres). */
+  dSX = new Float32Array(0);
+  dSZ = new Float32Array(0);
+  dEX = new Float32Array(0);
+  dEZ = new Float32Array(0);
   outStart = new Int32Array(1);
   outList = new Int32Array(0);
   maxSpeed = 10;
@@ -80,6 +86,8 @@ export class NavGraph {
   private parent = new Int32Array(0);
   private stamp = new Uint32Array(0);
   private closed = new Uint32Array(0);
+  private inX = new Float32Array(0);
+  private inZ = new Float32Array(0);
   private search = 0;
   private heapN: number[] = [];
   private heapF: number[] = [];
@@ -237,23 +245,51 @@ export class NavGraph {
     this.dBase = new Int32Array(m);
     this.dRev = new Uint8Array(m);
     this.dCost = new Float64Array(m);
+    this.dSX = new Float32Array(m);
+    this.dSZ = new Float32Array(m);
+    this.dEX = new Float32Array(m);
+    this.dEZ = new Float32Array(m);
     let k = 0;
     let vmax = 5;
+    const p = { x: 0, y: 0, z: 0 };
     for (let i = 0; i < this.base.length; i++) {
       const e = this.base[i];
       if (e.dead) continue;
       vmax = Math.max(vmax, e.speed);
       const c = e.len / e.speed;
+      // forward start / end directions over the first / last ~10 m
+      const n = e.pts.length;
+      const look = Math.min(10, e.len);
+      this.pointAt(i, look, p);
+      let sx = p.x - e.pts[0];
+      let sz = p.z - e.pts[2];
+      let l = Math.hypot(sx, sz) || 1;
+      sx /= l;
+      sz /= l;
+      this.pointAt(i, e.len - look, p);
+      let ex = e.pts[n - 3] - p.x;
+      let ez = e.pts[n - 1] - p.z;
+      l = Math.hypot(ex, ez) || 1;
+      ex /= l;
+      ez /= l;
       this.dFrom[k] = e.a;
       this.dTo[k] = e.b;
       this.dBase[k] = i;
       this.dRev[k] = 0;
+      this.dSX[k] = sx;
+      this.dSZ[k] = sz;
+      this.dEX[k] = ex;
+      this.dEZ[k] = ez;
       this.dCost[k++] = c;
       if (!e.oneWay) {
         this.dFrom[k] = e.b;
         this.dTo[k] = e.a;
         this.dBase[k] = i;
         this.dRev[k] = 1;
+        this.dSX[k] = -ex;
+        this.dSZ[k] = -ez;
+        this.dEX[k] = -sx;
+        this.dEZ[k] = -sz;
         this.dCost[k++] = c;
       }
     }
@@ -418,7 +454,11 @@ export class NavGraph {
       this.parent = new Int32Array(M);
       this.stamp = new Uint32Array(M);
       this.closed = new Uint32Array(M);
+      this.inX = new Float32Array(M);
+      this.inZ = new Float32Array(M);
     }
+    const inX = this.inX;
+    const inZ = this.inZ;
     const g = this.g;
     const parent = this.parent;
     const stamp = this.stamp;
@@ -443,7 +483,7 @@ export class NavGraph {
     const heapF = this.heapF;
     heapN.length = 0;
     heapF.length = 0;
-    const relax = (v: number, cost: number, par: number) => {
+    const relax = (v: number, cost: number, par: number, dx: number, dz: number) => {
       if (stamp[v] !== sid) {
         stamp[v] = sid;
         g[v] = Infinity;
@@ -451,8 +491,12 @@ export class NavGraph {
       if (cost >= g[v] || closed[v] === sid) return;
       g[v] = cost;
       parent[v] = par;
+      inX[v] = dx;
+      inZ[v] = dz;
       heapPush(heapN, heapF, v, cost + hFn(v));
     };
+    // turn penalty at a junction from the arrival direction to the next edge's start direction (s)
+    const turnCost = (c: number) => (c > 0.82 ? 0 : c > -0.2 ? 5 : c > -0.8 ? 12 : 30);
     // parent codes: >= 0 directed edge; -2 start fwd; -3 start rev; -4 start→goal direct fwd; -5 direct rev
     // goal parent encodes the node via goalVia + direction
     let goalVia = -1;
@@ -472,14 +516,18 @@ export class NavGraph {
     stamp[S] = sid;
     g[S] = 0;
     parent[S] = -1;
-    relax(se.b, (se.len - start.s) / se.speed + penF, -2);
-    if (!se.oneWay) relax(se.a, start.s / se.speed + penR, -3);
+    {
+      const fwd = this.firstDirected(start.edge, 0);
+      if (fwd >= 0) relax(se.b, (se.len - start.s) / se.speed + penF, -2, this.dEX[fwd], this.dEZ[fwd]);
+      const rev = se.oneWay ? -1 : this.firstDirected(start.edge, 1);
+      if (rev >= 0) relax(se.a, start.s / se.speed + penR, -3, this.dEX[rev], this.dEZ[rev]);
+    }
     let ge: BaseEdge | null = null;
     if (goal) {
       ge = this.base[goal.edge];
       if (goal.edge === start.edge) {
-        if (goal.s >= start.s) relax(T, (goal.s - start.s) / se.speed + penF, -4);
-        else if (!se.oneWay) relax(T, (start.s - goal.s) / se.speed + penR, -5);
+        if (goal.s >= start.s) relax(T, (goal.s - start.s) / se.speed + penF, -4, 0, 0);
+        else if (!se.oneWay) relax(T, (start.s - goal.s) / se.speed + penR, -5, 0, 0);
       }
     }
     let bestNode = -1;
@@ -507,9 +555,11 @@ export class NavGraph {
         if (u === ge.a) tryGoal(gu + goal.s / ge.speed, u, 0);
         if (u === ge.b && !ge.oneWay) tryGoal(gu + (ge.len - goal.s) / ge.speed, u, 1);
       }
+      const ix = inX[u];
+      const iz = inZ[u];
       for (let k = this.outStart[u]; k < this.outStart[u + 1]; k++) {
         const d = this.outList[k];
-        relax(this.dTo[d], gu + this.dCost[d], d);
+        relax(this.dTo[d], gu + this.dCost[d] + turnCost(ix * this.dSX[d] + iz * this.dSZ[d]), d, this.dEX[d], this.dEZ[d]);
       }
     }
 
@@ -587,6 +637,16 @@ export class NavGraph {
       push(tmp, -1);
     }
     return { pts, node, offroad: off, partial: endNode !== T, uturnStart, cost: endNode === T ? g[T] : g[endNode], expansions: exp };
+  }
+
+  /** Index of the directed edge of base edge `ei` in direction `rev` (0 = a→b, 1 = b→a), or -1. */
+  private firstDirected(ei: number, rev: number): number {
+    const a = rev ? this.base[ei].b : this.base[ei].a;
+    for (let k = this.outStart[a]; k < this.outStart[a + 1]; k++) {
+      const d = this.outList[k];
+      if (this.dBase[d] === ei && this.dRev[d] === rev) return d;
+    }
+    return -1;
   }
 
   /** Unit tangent (xz) of base edge e at distance s, in the a→b direction. */

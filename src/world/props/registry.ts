@@ -265,7 +265,7 @@ export function buildRegistry(): void {
   });
   defineKind({
     name: 'trafficLight', event: 'trafficLight', material: 'prop',
-    lods: [{ geo: Mdl.trafficLight(), dist: 170, shadow: true }],
+    lods: [{ geo: Mdl.trafficLight(), dist: 170, shadow: false }],
     cull: 170, phys: 'heavy', mass: 150, surface: 'metal', topple: 16, radius: 0.25, height: 3.8,
     colliders: [{ shape: 'cyl', hx: 0.11, hy: 1.85, hz: 0, cx: 0, cy: 1.85, cz: 0 }],
     variant: (v, out) => {
@@ -308,7 +308,7 @@ export function buildRegistry(): void {
     const d = carSpecDims(model);
     defineKind({
       name: `car:${model}`, event: 'parkedCar', material: 'car', car: model,
-      lods: [{ geo: buildFallbackCar(model), dist: 50, shadow: true }],
+      lods: [{ geo: buildFallbackCar(model), dist: 30, shadow: true }],
       cull: 230, phys: 'light', mass: MASS[model], friction: 0.22, surface: 'metal', radius: d.L / 2, height: d.H,
       colliders: [carCollider(d.L, d.W, d.H)],
       carLamps: carLampsFor(d.L, d.W, d.H),

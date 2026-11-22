@@ -120,6 +120,8 @@ export interface PlaneVisual {
   crumple?(partName: string, point: THREE.Vector3, amount: number): void;
   /** 0 = high, 1 = medium, 2 = low. */
   setLod(level: 0 | 1 | 2): void;
+  /** Recommended LOD for a camera distance in metres (planemodels: CONFIG.planeModels.lodDistance). */
+  lodForDistance?(distance: number): 0 | 1 | 2;
   /** Reattach every part to root with original transforms, hide caps, clear damage/charring. */
   repair(): void;
   update(dt: number): void;

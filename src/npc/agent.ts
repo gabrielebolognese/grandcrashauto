@@ -133,6 +133,7 @@ export class Npc {
   vis = false;
   dist = 0;
   slot = 0;
+  acc = 0; // accumulated dt while time-sliced
   constructor(readonly i: number) {}
 }
 

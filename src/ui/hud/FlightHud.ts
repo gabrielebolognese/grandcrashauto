@@ -266,6 +266,9 @@ export class FlightHud {
     g.fill();
     g.save();
     g.clip();
+    g.beginPath();
+    g.rect(0, 17, w, H - 34);
+    g.clip();
     const span = 120; // display units visible
     const ppu = H / span;
     const cy = H / 2;
@@ -320,7 +323,11 @@ export class FlightHud {
     g.fillText(String(Math.round(v)), (w - 7) / 2 + 1, cy + 0.5);
     g.fillStyle = 'rgba(255,255,255,0.8)';
     g.font = '800 8px system-ui, sans-serif';
-    g.fillText(unit, w / 2, H - 8);
+    g.fillText(unit, w / 2, 9);
+    if (vr > 0) {
+      g.fillStyle = '#ffd36e';
+      g.fillText(`Vr ${Math.round(vr)}`, w / 2, H - 8);
+    }
   }
 
   private drawAlt(alt: number, ground: number, vsMs: number): void {
@@ -335,6 +342,9 @@ export class FlightHud {
     g.fillStyle = PANEL;
     g.fill();
     g.save();
+    g.clip();
+    g.beginPath();
+    g.rect(0, 17, w, H - 34);
     g.clip();
     const span = 300;
     const ppu = H / span;

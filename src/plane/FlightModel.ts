@@ -276,9 +276,11 @@ export class FlightModel {
     const vRef = 1.6 * this.vStall;
     this.qRef = 0.5 * this.rho * vRef * vRef;
     const qnT = Math.min(this.qnMax[0], qT / this.qRef);
-    // Pitch: full stick must hold the stall AoA (+3°) from trim at trim speed, with margin.
-    const da = this.alphaStallBody + 3 * DEG - aT;
-    const dM = this.pitchMomentAt(aT, vT) - this.pitchMomentAt(aT + da, vT);
+    // Pitch: full stick reaches ~the stall AoA (+3°) from trim at trim speed. Stiffness is measured in the linear
+    // range and extrapolated (past the stall the downwash collapse adds a big nose-down moment: the nose drops).
+    const daFull = this.alphaStallBody + 3 * DEG - aT;
+    const daLin = Math.max(2 * DEG, this.alphaStallBody - 2 * DEG - aT);
+    const dM = (this.pitchMomentAt(aT, vT) - this.pitchMomentAt(aT + daLin, vT)) * (daFull / daLin);
     this.Ap = (cfg.pitchAuthority * Math.max(0, dM)) / (this.inertia.x * qnT);
     // … and rotate the plane about its main gear at Vr.
     const qnR = Math.min(this.qnMax[0], (0.5 * this.rho * this.vRot * this.vRot) / this.qRef);
@@ -577,8 +579,8 @@ export class FlightModel {
         const thGround = Math.min(cfg.rotatePitchDeg * DEG + 1 * DEG, this.tailStrikePitch - 1.5 * DEG);
         if (V < 0.9 * this.vRot) qCmd = Math.min(qCmd, 2 * (1 * DEG - this.pitch));
         else if (inp.rotationHelp && sP > 0.1 && V >= 0.95 * this.vRot && this.pitch < cfg.rotatePitchDeg * DEG) {
-          qCmd = Math.max(qCmd, cfg.rotateRateDeg * DEG * Math.min(1, sP * 2));
-          pitchHelp = 1.15 * this.mass * g * this.mainGearArm * Math.min(1, sP * 2.5);
+          qCmd = Math.max(qCmd, cfg.rotateRateDeg * DEG * Math.min(1, sP * 2.5));
+          pitchHelp = 1.2 * this.mass * g * this.mainGearArm * Math.min(1, sP * 2.5);
         }
         qCmd = Math.min(qCmd, 2 * (thGround - this.pitch));
       } else {
@@ -636,9 +638,10 @@ export class FlightModel {
       de = clamp(de, -1, 1);
     }
     // Auto-trim (stabilizer): steady elevator is trimmed out — fast in Assisted, slow in Realistic.
-    if (!inp.onGround && V > 0.8 * this.vStall && !inp.tailLost) {
-      const k = (af > 0 ? 0.045 : 0.012) * (inp.assisted ? 1 : 0.6);
-      this.trim = clamp(this.trim - de * k * dt, -10 * DEG, 10 * DEG);
+    // Frozen near the stall and for big deflections (a held full pull must not wind the trim away).
+    if (!inp.onGround && V > 0.8 * this.vStall && !inp.tailLost && !this.stallWarning && Math.abs(de) < 0.8) {
+      const k = af > 0 ? 0.045 : 0.008;
+      this.trim = clamp(this.trim - de * k * dt, -8 * DEG, 8 * DEG);
     } else if (inp.onGround) this.trim *= Math.exp(-dt / 3);
     const cs = inp.controlScale;
     this.controls.elevator = de;

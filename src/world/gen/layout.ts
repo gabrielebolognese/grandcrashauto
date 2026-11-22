@@ -128,18 +128,18 @@ export const RAMP_HALFW = 3.6;
 /** Jump spur on the inner side of the north leg (eastbound). Kicker launches east over a row of containers. */
 export const JUMP = {
   divergeX: -125,
-  mergeX: 155,
+  mergeX: 172,
   laneZ: -353.5, // highway eastbound right lane centre
   z: -330, // spur straight centreline
   straightX0: -75,
-  straightX1: 100,
+  straightX1: 118,
   kickerX0: -38,
   lipX: 0,
   lipHeight: 4.0,
   lipAngleDeg: 14,
-  landX0: 26,
+  landX0: 23,
   landHeight: 4.2,
-  landX1: 81,
+  landX1: 100,
   halfW: 4.5,
 };
 

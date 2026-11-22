@@ -62,9 +62,7 @@ export function fuselageCap(b: GeoBuilder, P: FusProfile, L: FusLivery, zc: numb
     const cIn = rnd() < 0.5 ? PRIMER : PRIMER_DARK;
     const pt = (t: number, s: number) => {
       // s: 0 = base (inside the part), 1 = cut line, >1 past the cut
-      const z = zc - dir * overlap + dir * (overlap + len) * Math.max(0, s);
-      const zz = s < 1 ? zc - dir * overlap * (1 - s) : zc + dir * len * (s - 1) / 1;
-      void z;
+      const zz = s < 1 ? zc - dir * overlap * (1 - s) : zc + dir * len * (s - 1);
       fusPoint(P, zc, t, p0, pa);
       fusNormal(P, zc, t, nrm);
       const past = Math.max(0, s - 1);

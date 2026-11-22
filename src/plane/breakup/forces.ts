@@ -118,7 +118,7 @@ export class ForceModel {
         const f = a * 2 + (c > 0 ? 0 : 1);
         const st = this.faceState(s, asm, broken, p, f);
         if (st === 1) continue;
-        const C = (st === 2 ? cfg.openFaceCd : cfg.faceCd) * p.cdScale;
+        const C = (st === 2 ? cfg.openFaceCd : cfg.faceCd * faceShape(p, f, st)) * p.cdScale;
         const mag = -0.5 * rho * C * c * Math.abs(c) * p.faceArea[f];
         if (a === 0) fx += mag;
         else if (a === 1) fy += mag;
@@ -274,7 +274,9 @@ export class ForceModel {
         if (st === 1) continue;
         const b = (a + 1) % 3;
         const c = (a + 2) % 3;
-        const area4 = p.faceArea[f] * 0.25 * (st === 2 ? cfg.openFaceFactor : 1);
+        const area4 = p.faceArea[f] * 0.25 * faceShape(p, f, st);
+        // the rounded underside of a closed nose turns part of the frontal pressure into lift (rides up, skims)
+        const bow = st === 0 && f === 4 && (p.kind === 'fuselage' || p.kind === 'cockpit') ? cfg.bowLift : 0;
         for (let k = 0; k < 4; k++) {
           const sb = k & 1 ? 0.5 : -0.5;
           const sc = k & 2 ? 0.5 : -0.5;
@@ -303,6 +305,7 @@ export class ForceModel {
           if (vn > 0) {
             const pr = (0.5 * rho * cfg.pressureCd * vn * vn + rho * cfg.linDamp * vn) * area4 * w;
             this.f.addScaledVector(this.nW, -pr);
+            if (bow > 0) this.f.addScaledVector(this.axW[1], pr * bow);
             if (this.ns < MAX_SAMPLES) {
               const o = this.ns * 3;
               this.sR[o] = this.r.x;
@@ -356,6 +359,18 @@ export class ForceModel {
     T.add(Td);
     return res;
   }
+}
+
+/**
+ * Newtonian pressure shape factor of a box face: closed fore/aft ends of fuselage parts are really rounded noses / tail
+ * cones (much lower frontal pressure), nacelle ends are rounded intakes/exhausts; open (torn) ends are cups.
+ */
+export function faceShape(p: PartDef, f: number, state: 0 | 1 | 2): number {
+  if (state === 2) return 1.2;
+  if (faceAxis(f) !== 2) return 1;
+  if (p.kind === 'fuselage' || p.kind === 'cockpit') return CONFIG.breakup.water.roundedEnd;
+  if (p.kind === 'engine') return 0.6;
+  return 1;
 }
 
 /** Lift coefficient over the full ±180° range: linear to the stall, flat-plate beyond, weak when flying backwards. */

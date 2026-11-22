@@ -142,8 +142,8 @@ export function placeFeatures(r: EdgeRoute, rng: Rng): Features {
       const kr = kindRange(r, s0 - 40, s1 + 40);
       if (kr.mixed || kr.first !== K_ROAD) continue;
       let ok = true;
-      for (let s = s0; s <= s1; s += 30) if (Math.abs(grade(s)) > 0.035 || Math.abs(r.bank[sampleAt(r, s)]) > 0.03) ok = false;
-      if (!ok || straightness(r, sc, 150, 150, 1) > 30) continue;
+      for (let s = s0; s <= s1; s += 30) if (Math.abs(grade(s)) > 0.05) ok = false;
+      if (!ok || straightness(r, sc, 150, 150, 1) > 40) continue;
       const side: 1 | -1 = rng.chance(0.5) ? 1 : -1;
       const near = side === 1 ? d.b : d.a;
       f.rest.push({ id: `rest:${r.key}`, s0, s1, side, lOff: a2 + 0.4, w: 40, name: near.name });

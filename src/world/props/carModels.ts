@@ -90,14 +90,14 @@ export function carSpecDims(model: CarModelId): { L: number; W: number; H: numbe
 }
 
 /** Body outline: given top contour (front → rear) + a bottom edge with wheel arches (rear → front). */
-function outline(s: CarSpec): number[][] {
+function outline(s: CarSpec, archSegs = 7): number[][] {
   const pts = s.top.map((p) => [p[0], p[1]]);
   const ra = s.r + 0.06;
   const arch = (wz: number) => {
     const d = Math.asin(Math.min(0.99, Math.max(-0.99, (s.r - s.yb) / ra)));
     const a0 = Math.PI + d, a1 = -d;
-    for (let k = 0; k <= 7; k++) {
-      const a = a0 + ((a1 - a0) * k) / 7;
+    for (let k = 0; k <= archSegs; k++) {
+      const a = a0 + ((a1 - a0) * k) / archSegs;
       pts.push([wz + ra * Math.cos(a), s.r + ra * Math.sin(a)]);
     }
   };
@@ -163,10 +163,22 @@ export function buildFallbackCar(model: CarModelId): THREE.BufferGeometry {
 
 /** Generic far-LOD car (L 4.3, W 1.82, H 1.3): instance scale adapts it per model. */
 export function buildFarCar(): THREE.BufferGeometry {
+  // generic coupe-ish silhouette (L 4.3, W 1.82, H 1.27) with arches, wheels and lamp lenses; ~260 triangles
+  const spec: CarSpec = {
+    L: 4.3, W: 1.82, r: 0.33, wf: 1.35, wr: -1.3, yb: 0.26, tw: 0.22,
+    top: [[2.12, 0.3], [2.17, 0.6], [1.95, 0.71], [0.75, 0.84], [-1.6, 0.88], [-2.1, 0.84], [-2.15, 0.32]],
+    cabin: [[0.78, 0.8], [0.05, 1.24], [-0.85, 1.25], [-1.6, 0.86], [-1.64, 0.8]],
+    inset: 0.13, roof: [0.05, -0.85, 1.245], pillars: [], hlY: 0.6, tlY: 0.72,
+  };
   const b = new GeoBuilder('car', 0.2, 0.15);
-  b.add(extrude([[2.15, 0.28], [2.15, 0.66], [0.8, 0.84], [-2.15, 0.86], [-2.15, 0.3]], 1.82).rotateY(-Math.PI / 2), '#ffffff', { paint: 1 });
-  b.add(extrude([[0.8, 0.8], [0.05, 1.24], [-0.85, 1.25], [-1.6, 0.82]], 1.56).rotateY(-Math.PI / 2), '#223040', { paint: 0.5 });
-  b.add(box(1.58, 0.04, 0.92), '#ffffff', { paint: 1 }, M(0, 1.25, -0.4));
-  for (const z of [1.35, -1.3]) for (const x of [-0.8, 0.8]) b.add(box(0.24, 0.62, 0.62), '#1b1d20', {}, M(x, 0.31, z));
+  b.add(extrude(outline(spec, 4), spec.W, 0, 1).rotateY(-Math.PI / 2), '#ffffff', { paint: 1 });
+  b.add(extrude(spec.cabin, 1.56, 0, 1).rotateY(-Math.PI / 2), '#223040', { paint: 0.5 });
+  b.add(box(1.58, 0.04, 0.96), '#ffffff', { paint: 1 }, M(0, 1.25, -0.4));
+  for (const x of [-1, 1]) {
+    b.add(box(0.34, 0.11, 0.05), '#fff3d9', { paint: 0.25 }, M(x * 0.62, spec.hlY, 2.15));
+    b.add(box(0.38, 0.1, 0.05), '#e2251f', { paint: 0.25 }, M(x * 0.62, spec.tlY, -2.14));
+  }
+  b.add(box(1.5, 0.5, 3.2), '#101214', {}, M(0, 0.4, 0));
+  for (const z of [spec.wf, spec.wr]) for (const x of [-0.79, 0.79]) b.add(cylX(spec.r, spec.tw, 7), '#1b1d20', {}, M(x, spec.r, z));
   return b.build();
 }

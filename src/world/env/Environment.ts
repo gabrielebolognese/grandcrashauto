@@ -27,6 +27,12 @@ import { patchMaterial as patchWet, puddleMask, WET_UNIFORMS, type PatchKind } f
  */
 
 const UP = new THREE.Vector3(0, 1, 0);
+
+/** GLSL-style smoothstep that also works for descending edges (THREE.MathUtils.smoothstep does not). */
+function sstep(x: number, e0: number, e1: number): number {
+  const t = THREE.MathUtils.clamp((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
 const DAY_SUN_INTENSITY = 3.3; // GLOBAL_UNIFORMS.uSunColor is normalised to ≈1 for the full day sun
 const WEATHER_KINDS: WeatherKind[] = ['clear', 'fewClouds', 'cloudy', 'overcast', 'lightRain', 'heavyRain', 'storm', 'fog', 'snow'];
 
@@ -296,7 +302,7 @@ export class Environment implements IEnvironment {
         this.lightDir.set(this.lightDir.x * k, minY, this.lightDir.z * k);
       }
       const phaseLight = moonCfg.minLight + (1 - moonCfg.minLight) * clk.moonIllum;
-      const fadeIn = THREE.MathUtils.smoothstep(clk.sunElevation, -4, -9);
+      const fadeIn = sstep(clk.sunElevation, -4, -9);
       intensity = moonCfg.intensity * phaseLight * fadeIn * (1 - 0.8 * THREE.MathUtils.smoothstep(ws.cloudCover, 0.4, 1));
       this.sun.color.set(moonCfg.color);
     }
@@ -325,7 +331,7 @@ export class Environment implements IEnvironment {
     U.uSkySun.value.copy(clk.sunDir);
     U.uSunDisk.value = p.sunDisk;
     U.uSunSize.value = p.sunSize;
-    const moonVis = (1 - sunUp) * THREE.MathUtils.smoothstep(clk.sunElevation, -2, -8);
+    const moonVis = (1 - sunUp) * sstep(clk.sunElevation, -2, -8);
     U.uMoon.value = moonVis;
     U.uMoonDir.value.copy(clk.sunElevation > -4 ? clk.moonDir : this.lightDir);
     U.uStars.value = p.stars;
@@ -494,30 +500,25 @@ export class Environment implements IEnvironment {
       near = THREE.MathUtils.lerp(near, 0, w);
       this.fog.color.lerp(this.c1.copy(this.pal.cloudLit).multiplyScalar(1.05), w);
     }
-    this.fog.near = near;
-    this.fog.far = Math.max(near + 10, far);
+    far = Math.min(far, cam.far * 0.96); // fully fogged before the far plane clips anything
+    this.fog.near = Math.min(near, far * 0.5);
+    this.fog.far = Math.max(this.fog.near + 10, far);
     this.visibility = this.fog.far;
     ws.visibility = Math.round(far);
     SKY_UNIFORMS.uWhiteout.value = w;
     GLOBAL_UNIFORMS.uFogDensity.value = Math.max(ws.fog, w);
 
-    // Camera far plane follows visibility (+ altitude), near grows at altitude for depth precision.
-    const wantFar = THREE.MathUtils.clamp(Math.max(CONFIG.camera.far, base * altBoost * 1.15), CONFIG.camera.far, cfg.maxFar);
-    const wantNear = THREE.MathUtils.clamp(CONFIG.camera.near * (1 + camH / 60), CONFIG.camera.near, 3);
-    if (Math.abs(cam.far - wantFar) > wantFar * 0.03 || Math.abs(cam.near - wantNear) > wantNear * 0.1) {
-      cam.far = wantFar;
-      cam.near = wantNear;
-      cam.updateProjectionMatrix();
-    }
+    // (camera near/far are owned by the camera rig; the fog is clamped to its far plane above)
   }
 
   private updateScreen(realDt: number): void {
     const screen = this.screen;
     if (!screen) return;
     const ws = this.weatherSim.state;
-    const rig = this.ctx.cameraRig;
+    const rig = this.ctx.cameraRig as { mode?: string; view?: string } | undefined;
     const planes = this.ctx.planes as { inCockpitSequence?: boolean } | undefined;
-    const close = rig?.mode === 'hood' || !!planes?.inCockpitSequence;
+    const view = rig?.view ?? rig?.mode;
+    const close = view === 'hood' || view === 'cockpit' || !!planes?.inCockpitSequence;
     const target = close && this.qLevel >= 0 ? Math.min(1, ws.rain * 1.4) : 0;
     if (!close) screen.drops = 0; // the drops live on the lens/windshield of the close camera
     else screen.drops += (target - screen.drops) * (1 - Math.exp(-realDt * (target > screen.drops ? 0.8 : 0.3)));

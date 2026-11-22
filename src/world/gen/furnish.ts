@@ -188,7 +188,7 @@ export function furnish(ctx: GenCtx, yardSpots: number[]): void {
     const n = Math.ceil((x1 - x0) / 20); // ≤ 20 m pieces so chunk streaming never drops a long wall
     for (let k = 0; k < n; k++) {
       const a = x0 + ((x1 - x0) * k) / n, b = x0 + ((x1 - x0) * (k + 1)) / n;
-      layout.solids.push({ cx: (a + b) / 2, cy: 0, cz: wz, w: b - a, h: L.SEA_WALL_TOP, d: L.SEA_WALL_T, yaw: 0, col: wallCol, mat: Mat.Concrete, collide: true });
+      layout.solids.push({ cx: (a + b) / 2, cy: 0, cz: wz, w: b - a, h: L.SEA_WALL_TOP, d: L.SEA_WALL_T, yaw: 0, col: wallCol, mat: Mat.Concrete, collide: true, lod: true });
       layout.solids.push({ cx: (a + b) / 2, cy: L.SEA_WALL_TOP, cz: wz, w: b - a + 0.02, h: 0.12, d: L.SEA_WALL_T + 0.25, yaw: 0, col: 0xffffff, mat: Mat.Concrete, collide: false });
       // balusters pattern: small pilasters every 2.5 m on the promenade side
       for (let px = a + 1.25; px < b - 0.5; px += 2.5) layout.solids.push({ cx: px, cy: 0, cz: wz - L.SEA_WALL_T / 2 - 0.06, w: 0.35, h: L.SEA_WALL_TOP - 0.05, d: 0.12, yaw: 0, col: 0xfbf8f2, mat: Mat.Concrete, collide: false });

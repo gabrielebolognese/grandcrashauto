@@ -112,7 +112,7 @@ export const CONFIG = {
     fogNearFrac: 0.06, // linear fog near = far × this
     fogFarMul: 1.0, // linear fog far = max(viewDistance, terrainViewDistance × 0.9) × this (grows with altitude)
     altitudeFog: 0.012, // fog distance gain per metre of camera height
-    maxFar: 14000, // m, camera far plane cap at altitude (env manages camera near/far for visibility)
+    maxFar: 14000, // m, ocean grid radius (must cover the camera rig's largest far plane at altitude)
     envMapSize: 256,
     shadow: {
       extent: 60, // m, half size of the ortho shadow frustum around the focus (grows with camera distance)
@@ -381,8 +381,8 @@ export const CONFIG = {
       parkHold: 0.6, // m/s: below this with no pedal the car holds still (no creeping)
     },
     tyres: {
-      handbrakeRearSide: 0.14, // rear side-grip multiplier while the handbrake is held
-      handbrakeRearGrip: 0.55, // rear friction multiplier while the handbrake is held
+      handbrakeRearSide: 0.08, // rear side-grip multiplier while the handbrake is held
+      handbrakeRearGrip: 0.45, // rear friction multiplier while the handbrake is held
       driftRearSide: 0.5, // rear side grip held while power-sliding (slip > driftSlipDeg, throttle, steering into the turn)
       driftSlipDeg: 9,
       gripDropRate: 10, // 1/s rear grip falls when the handbrake is pulled
@@ -421,7 +421,7 @@ export const CONFIG = {
       pitch: 5,
       roll: 4.5,
       yaw: 3,
-      autoLevel: 4, // pulls toward the landing surface normal for clean landings
+      autoLevel: 5, // pulls toward the landing surface normal for clean landings
       takeoffPitchDamp: 7, // 1/s pitch-rate damping right after leaving a ramp (keeps the ramp angle, no nose dive)
       takeoffTime: 0.35, // s
       damping: 1.4, // 1/s angular velocity damping (pitch/roll) while airborne
@@ -527,7 +527,7 @@ export const CONFIG = {
     glide: {
       liftAtRef: 0.85, // lift as a fraction of weight at refKmh
       refKmh: 250,
-      maxLift: 0.95, // cap (fraction of weight)
+      maxLift: 0.88, // cap (fraction of weight) — always a slow descent
       drag: 0.35, // extra N per (m/s)² per tonne while gliding
     },
     /** Weather & environment effects on the car. */
@@ -801,7 +801,7 @@ export const CONFIG = {
       sizeMin: 8,
       sizeMax: 30,
       materializeR: 170, // m: static crowds appear within this radius (nearest first)
-      midDist: 32, // m: mid mesh closer than this, far mesh beyond
+      midDist: 40, // m: mid mesh closer than this (from the crowd edge), far mesh beyond
       budget: { low: 48, medium: 110, high: 220 }, // max static crowd members at once
       rejoinAfter: 14, // s: a calmed-down member walks back into its crowd (when unseen)
     },
@@ -1124,7 +1124,7 @@ export const CONFIG = {
       thrust: 5933, propV0: 180, thrustLapse: 0, waveDrag: 0, spoolS: 1, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.35, rollRateDeg: 85, yawAccel: 1.6, damping: [0.05, 0.02, 0.04],
       pitchRateDeg: 20, gammaK: 1.1, bankK: 2.2, pitchRateK: 6, rollRateK: 8,
-      rotatePitchDeg: 9, rotateRateDeg: 7, brakeDecel: 4.5, steerDeg: 40, suspension: [0.32, 0.3, 1.1], turbulence: 1.0,
+      rotatePitchDeg: 9, rotateRateDeg: 8, brakeDecel: 4.5, steerDeg: 40, suspension: [0.32, 0.3, 1.1], turbulence: 1.0,
     },
     bizjet: {
       mass: 16000, rotationKmh: 200, stallKmh: 170, topKmh: 850, takeoffRollM: 900, takeoffS: 16, engines: 2, fuelKg: 4000, explosionRadius: 25, glideRatio: 15,
@@ -1134,17 +1134,17 @@ export const CONFIG = {
       thrust: 34900, propV0: 0, thrustLapse: 0.3, waveDrag: 0.156, spoolS: 2.5, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.35, rollRateDeg: 65, yawAccel: 1.0, damping: [0.05, 0.02, 0.04],
       pitchRateDeg: 14, gammaK: 0.9, bankK: 1.8, pitchRateK: 5, rollRateK: 6,
-      rotatePitchDeg: 9, rotateRateDeg: 4, brakeDecel: 4, steerDeg: 45, suspension: [0.42, 0.3, 1.1], turbulence: 0.6,
+      rotatePitchDeg: 9, rotateRateDeg: 5.5, brakeDecel: 4, steerDeg: 45, suspension: [0.42, 0.3, 1.1], turbulence: 0.6,
     },
     airliner: {
       mass: 70000, rotationKmh: 260, stallKmh: 215, topKmh: 880, takeoffRollM: 1500, takeoffS: 22, engines: 2, fuelKg: 18000, explosionRadius: 45, glideRatio: 15,
       cruiseKmh: 520, wingArea: 180, span: 35, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 17.2, cd0: 0.019, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.7, finVolume: 0.075, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 350, flapsLandKmh: 290,
-      thrust: 142000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.169, spoolS: 3.5, idle: 0.06,
+      thrust: 146000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.14, spoolS: 3.5, idle: 0.06,
       inertiaScale: [1, 1, 1], pitchAuthority: 1.3, rollRateDeg: 32, yawAccel: 0.6, damping: [0.06, 0.03, 0.05],
       pitchRateDeg: 8, gammaK: 0.65, bankK: 1.1, pitchRateK: 3.5, rollRateK: 3.5,
-      rotatePitchDeg: 8.5, rotateRateDeg: 3, brakeDecel: 3.5, steerDeg: 50, suspension: [0.55, 0.3, 1.1], turbulence: 0.35,
+      rotatePitchDeg: 8.5, rotateRateDeg: 4.5, brakeDecel: 3.5, steerDeg: 50, suspension: [0.55, 0.3, 1.1], turbulence: 0.35,
     },
     jumbo: {
       mass: 330000, rotationKmh: 295, stallKmh: 245, topKmh: 920, takeoffRollM: 1900, takeoffS: 30, engines: 4, fuelKg: 150000, explosionRadius: 70, glideRatio: 15,
@@ -1154,7 +1154,7 @@ export const CONFIG = {
       thrust: 280000, propV0: 0, thrustLapse: 0.3, waveDrag: 0.185, spoolS: 4, idle: 0.06,
       inertiaScale: [1.15, 1.1, 1.35], pitchAuthority: 1.25, rollRateDeg: 17, yawAccel: 0.35, damping: [0.07, 0.04, 0.06],
       pitchRateDeg: 5, gammaK: 0.45, bankK: 0.7, pitchRateK: 2.5, rollRateK: 2.2,
-      rotatePitchDeg: 8, rotateRateDeg: 2.5, brakeDecel: 3, steerDeg: 55, suspension: [0.7, 0.3, 1.1], turbulence: 0.25,
+      rotatePitchDeg: 8, rotateRateDeg: 3.5, brakeDecel: 3, steerDeg: 55, suspension: [0.7, 0.3, 1.1], turbulence: 0.25,
     },
   },
 
@@ -1178,6 +1178,8 @@ export const CONFIG = {
     impactTransmit: 0.55, // share of the impact deceleration a broken-off piece still received (× exp(-d/R))
     keeperTransmit: 0.6, // same for the surviving body when the contacting part tore off (cartwheel yank)
     blastFx: true, // breakJoints with a 'middle'/'tail' blast spawns the fireball + emits planeExplosion
+    guardGain: 4, // m/s a piece may gain per step without a kick (solver depenetration guard)
+    maxAngvel: 30, // rad/s cap for wreck pieces
     damage: {
       vBreak: 14, // m/s of impact severity that breaks a strength-1 joint at the contact
       v0: 4, // no damage below this impact speed
@@ -1187,7 +1189,7 @@ export const CONFIG = {
       tangentFactor: 0.12, // share of the sliding speed that counts as impact severity
       scrapeV: 420, // sliding wear of the dragging part's joints: rate = v/scrapeV × vBreak per s × hardness
       scrapeFuselage: 0.2, // fuselage-to-fuselage joints wear this much slower
-      waterAccel0: 32, // m/s² of hydrodynamic deceleration before water damages joints
+      waterAccel0: 45, // m/s² of hydrodynamic deceleration before water damages joints
       waterScale: 1.0,
       waterTangent: 0.05,
       selfHardness: 0.5, // wreck vs wreck
@@ -1224,7 +1226,8 @@ export const CONFIG = {
       pressureCd: 1.0, // Newtonian face pressure
       frictionCf: 0.03,
       linDamp: 1.5, // m/s, linear heave damping term
-      openFaceFactor: 1.2,
+      roundedEnd: 0.35, // pressure factor of closed (rounded) fuselage nose / tail-cone faces
+      bowLift: 0.6, // share of a submerged nose's frontal pressure turned into lift (planing bow)
       metalDensity: 2700,
       floodTime: 38, // s for a closed part to flood (open ends ×3.5 faster, fin ×0.28)
       removeDepth: 9, // m below the surface (+ radius) → piece removed
@@ -1328,7 +1331,7 @@ export const CONFIG = {
     bridgeDrop: 25, // m ground below the road → bridge
     tunnelRise: 40, // m ground above the road → tunnel
     galleryChance: 0.4, // chance a steep side-slope stretch gets an avalanche gallery
-    restStopChance: 0.8, // per edge (~one every 4–6 km)
+    restStopChance: 0.9, // per edge (~one every 4–6 km)
     kickerGap: [1500, 3000], // m between highway kickers (seeded)
     megaEvery: 10000, // m average spacing of mega jumps
     // streaming (main thread)

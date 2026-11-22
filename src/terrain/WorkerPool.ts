@@ -33,6 +33,7 @@ export class WorkerPool {
   private nextId = 1;
   private frame = 0;
   private fallback = false;
+  private oneOff = new Map<number, (data: unknown) => void>();
   stats = { done: 0, ms: 0, errors: 0, dropped: 0 };
 
   constructor(private onResult: ResultHandler) {}
@@ -131,7 +132,31 @@ export class WorkerPool {
     return best;
   }
 
+  /** One-off job outside the queue (debug / determinism checks). Resolves with the raw result. */
+  runOnce(msg: JobMsg, worker = 0): Promise<unknown> {
+    const id = this.nextId++;
+    return new Promise((resolve) => {
+      if (!this.workers.length) {
+        const m = msg as Record<string, number> & { type: JobType };
+        const seed = CONFIG.game.seed;
+        if (m.type === 'tile') resolve(buildTile(m.level, m.tx, m.tz, seed));
+        else if (m.type === 'chunk') resolve(buildChunk(m.cx, m.cz, seed));
+        else if (m.type === 'scatter') resolve(buildScatter(m.cx, m.cz, seed));
+        else resolve(null);
+        return;
+      }
+      this.oneOff.set(id, resolve);
+      this.workers[worker % this.workers.length].w.postMessage({ ...msg, id });
+    });
+  }
+
   private handle(wi: number, m: { type: string; id: number; ms?: number; data?: unknown; message?: string }): void {
+    const one = this.oneOff.get(m.id);
+    if (one) {
+      this.oneOff.delete(m.id);
+      one(m.data ?? null);
+      return;
+    }
     const job = this.inFlight.get(m.id);
     if (job) {
       this.inFlight.delete(m.id);

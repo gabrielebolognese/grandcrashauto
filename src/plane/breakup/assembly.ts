@@ -135,6 +135,8 @@ export class Assembly {
   ghostT = 0;
   age = 0;
   removed = false;
+  /** Set when we deliberately kicked this body this step (blast / secondary) → the energy guard lets it pass. */
+  kicked = false;
   /** Spin sign for the severed-wing autorotation helper. */
   spinSign = 1;
 

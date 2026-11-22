@@ -14,6 +14,8 @@ import { H } from './terrainSample';
  *  5. arc-length resampling every ~6 m.
  */
 
+export const planDebug = { on: false, log: [] as string[] };
+
 export interface PlanOut {
   x: Float64Array;
   z: Float64Array;
@@ -211,6 +213,35 @@ export function* planGen(d: EdgeDesc, rng: Rng): Generator<void, PlanOut> {
     }
     hg[Mh] = d.ya;
     hg[K * M + Mh] = d.yb;
+    // straight windows (kickers / mega jumps): stations on straight base stretches keep a constant offset slope
+    const straightBase = new Uint8Array(K + 1);
+    for (let k = 0; k <= K; k++) {
+      const s0 = Math.max(0, ((k - 1) / K) * Lb), s1 = Math.min(Lb, ((k + 1) / K) * Lb);
+      baseAt(s0, tmp);
+      const h0 = tmp[2];
+      baseAt(s1, tmp);
+      straightBase[k] = Math.abs(Math.atan2(Math.sin(tmp[2] - h0), Math.cos(tmp[2] - h0))) < 0.004 ? 1 : 0;
+    }
+    const inWin = new Uint8Array(K + 1);
+    const nWin = Math.max(1, Math.floor(Lb / 1700));
+    for (let w = 0; w < nWin; w++) {
+      const want = 7;
+      const c = Math.round(((w + 0.5) / nWin) * K + rng.range(-2, 2));
+      let best = -1;
+      for (let dk = 0; dk <= K && best < 0; dk++) {
+        for (const sgn of [1, -1]) {
+          const k0 = c + sgn * dk - (want >> 1);
+          if (k0 < 1 || k0 + want > K - 1) continue;
+          let ok = true;
+          for (let k = k0; k <= k0 + want; k++) if (!straightBase[k] || inWin[k]) ok = false;
+          if (ok) {
+            best = k0;
+            break;
+          }
+        }
+      }
+      if (best >= 0) for (let k = best; k <= best + want; k++) inWin[k] = 1;
+    }
     const NSt = M * NS;
     const cost = new Float64Array((K + 1) * NSt).fill(Infinity);
     const back = new Int32Array((K + 1) * NSt).fill(-1);
@@ -223,7 +254,9 @@ export function* planGen(d: EdgeDesc, rng: Rng): Generator<void, PlanOut> {
           if (c0 === Infinity) continue;
           const dm0 = q - T;
           const h0 = hg[k * M + m];
+          const lock = inWin[k] === 1 && inWin[k + 1] === 1 && k > 0 && inWin[k - 1] === 1;
           for (let dm = Math.max(-T, dm0 - 1); dm <= Math.min(T, dm0 + 1); dm++) {
+            if (lock && dm !== dm0) continue;
             const m2 = m + dm;
             if (m2 < 0 || m2 >= M) continue;
             if (k + 1 === K && (m2 !== Mh || dm !== 0)) continue; // arrive tangent to the base
@@ -267,6 +300,7 @@ export function* planGen(d: EdgeDesc, rng: Rng): Generator<void, PlanOut> {
   let result: { P: Float64Array; m: number; h: number; worst: number; windows: number } | null = null;
   for (const scale of [1, 0.55, 0.25, 0]) {
     result = buildAndFair(d, rng, baseAt, Lb, offs, K, scale, lA, lB);
+    if (planDebug.on) planDebug.log.push(d.ref.key + " scale " + scale + " R " + (1 / result.worst).toFixed(0) + " Lb " + Lb.toFixed(0) + " K " + K);
     if (result.worst <= 1 / R || scale === 0) break;
     yield;
   }
@@ -490,11 +524,11 @@ function buildAndFair(
     }
     return { kap, at };
   };
-  let mu = 0.08;
+  const mu = 0.25; // strong data term: the Dubins base is already radius-bounded (weak terms let loops shrink)
   fair(40, mu);
   reparam();
   let cw = curvWorst();
-  for (let round = 0; round < 10 && cw.kap > 1 / R; round++) {
+  for (let round = 0; round < 4 && cw.kap > 1 / R; round++) {
     for (let k = cw.at - 4; k <= cw.at + 4; k++) {
       const wi = winOf[Math.max(0, Math.min(m, k))];
       if (wi >= 0) {
@@ -502,8 +536,7 @@ function buildAndFair(
         for (let kk = k0; kk <= k1; kk++) winOf[kk] = -1;
       }
     }
-    mu *= 0.5;
-    fair(60, mu);
+    fair(40, mu);
     reparam();
     cw = curvWorst();
   }

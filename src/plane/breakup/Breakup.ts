@@ -565,6 +565,7 @@ export class Breakup implements IBreakup {
           continue;
         }
         a.read();
+        if (!a.tracked) this.energyGuard(a);
         a.interp.capture(a.pos, a.quat);
         if (a.cThisStep) {
           this.processContact(rt, a, dt);
@@ -1027,6 +1028,7 @@ export class Breakup implements IBreakup {
       if (a.tracked) {
         a.body.applyImpulse(dv.multiplyScalar(a.mp.mass), true);
       } else {
+        a.kicked = true;
         const v = a.body.linvel();
         a.body.setLinvel({ x: v.x + dv.x, y: v.y + dv.y, z: v.z + dv.z }, true);
         const tumble = cfg.tumble / Math.cbrt(1 + a.mp.mass / 2000);
@@ -1139,6 +1141,7 @@ export class Breakup implements IBreakup {
   }
 
   private kickAsm(a: Assembly, dir: THREE.Vector3, dv: number): void {
+    a.kicked = true;
     const v = a.body.linvel();
     a.body.setLinvel({ x: v.x + dir.x * dv, y: v.y + dir.y * dv, z: v.z + dir.z * dv }, true);
     a.read();
@@ -1732,6 +1735,31 @@ export class Breakup implements IBreakup {
     }
   }
 
+  /**
+   * Crashes only dissipate energy: a piece wedged between other pieces and a wall can get shot out by the solver's
+   * depenetration. Unless we kicked it ourselves this step, its speed may not grow by more than gravity + a margin.
+   */
+  private energyGuard(a: Assembly): void {
+    const cfg = CONFIG.breakup;
+    if (a.kicked) {
+      a.kicked = false;
+      return;
+    }
+    const pre = a.vPre.length();
+    const max = pre + cfg.guardGain;
+    if (a.speed > max && a.speed > 1e-3) {
+      const k = max / a.speed;
+      a.vel.multiplyScalar(k);
+      a.body.setLinvel(a.vel, true);
+      a.speed = max;
+    }
+    const w = a.angvel.length();
+    if (w > cfg.maxAngvel) {
+      a.angvel.multiplyScalar(cfg.maxAngvel / w);
+      a.body.setAngvel(a.angvel, true);
+    }
+  }
+
   private postPiece(rt: PlaneRT, a: Assembly, dt: number): void {
     if (a.tracked) return;
     const cfg = CONFIG.breakup.water;
@@ -2021,6 +2049,7 @@ export class Breakup implements IBreakup {
     for (const p of a.parts) rt.fuel[p] *= 0.6;
     if (!this.asmHasFire(rt, a) && this.asmFuel(rt, a) > 2) this.igniteAsm(rt, a, 0.8, rnd(CONFIG.breakup.fire.coolMin, CONFIG.breakup.fire.coolMax));
     if (!a.tracked) {
+      a.kicked = true;
       const k = Math.min(4, 25000 / a.mp.mass + 0.8);
       a.body.applyImpulse({ x: rnd(-0.5, 0.5) * k * a.mp.mass, y: rnd(0.4, 1) * k * a.mp.mass, z: rnd(-0.5, 0.5) * k * a.mp.mass }, true);
     }
@@ -2117,6 +2146,7 @@ export class Breakup implements IBreakup {
         if (owner && owner !== t) {
           // struts fold & snap: small sideways/backwards kick
           const v = owner.body.linvel();
+          owner.kicked = true;
           owner.body.setLinvel({ x: v.x + rnd(-2, 2), y: v.y + rnd(0.5, 2), z: v.z + rnd(-3, 0) }, true);
         }
       }
