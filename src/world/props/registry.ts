@@ -282,6 +282,17 @@ export function buildRegistry(): void {
     colliders: [{ shape: 'cyl', hx: 0.06, hy: 1.25, hz: 0, cx: 0, cy: 1.25, cz: 0 }],
     variant: vary(SIGN, 1, 1),
   });
+  // Real sign faces (world placement variants: 0 stop, 2 jump warning, 3 parking, 4 roadworks) — see Props RESOLVERS.
+  for (const [name, face] of [['signStop', 'stop'], ['signJump', 'jump'], ['signParking', 'parking'], ['signWorks', 'works']] as const) {
+    defineKind({
+      name, event: 'sign', material: 'prop',
+      lods: [{ geo: Mdl.signFace(face), dist: 45, shadow: false }],
+      impostor: { shape: 'box', sx: 0.72, sy: 0.72, sz: 0.05, oy: 1.71, oz: 0.075 },
+      cull: 110, phys: 'heavy', mass: 25, surface: 'metal', topple: 7, thin: true, radius: 0.36, height: 2.5,
+      colliders: [{ shape: 'cyl', hx: 0.06, hy: 1.25, hz: 0, cx: 0, cy: 1.25, cz: 0 }],
+      variant: vary(SIGN, 1, 1),
+    });
+  }
   defineKind({
     name: 'fuelTruck', event: 'fuelTruck', material: 'prop',
     lods: [{ geo: Mdl.fuelTruck(), dist: 260, shadow: true }],

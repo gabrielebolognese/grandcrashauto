@@ -435,9 +435,11 @@ export function rawHeight(ax: number, az: number, out: TerrainInfo, seed = CONFI
 export function sampleTerrain(ax: number, az: number, out: TerrainInfo, seed = CONFIG.game.seed): number {
   let h = rawHeight(ax, az, out, seed);
   const flat = out.flat;
+  // Ground level of the nearer flat zone: the airport is raised to CONFIG.world.airportElevation (world module).
+  const zoneGround = flat !== out.city ? (CONFIG.world.airportElevation ?? 0) : 0;
   if (flat < 0) {
     // inside the city / airport: below their ground (never rendered; colliders stay under the world's ground)
-    h = (out.zone > 0 && az > BEACH_START_Z ? Math.min(0, cityBeach(ax, az)) : 0) - 1.0;
+    h = (out.zone > 0 && az > BEACH_START_Z ? Math.min(zoneGround, cityBeach(ax, az)) : zoneGround) - 1.0;
     out.h = h;
     return h;
   }
@@ -473,7 +475,7 @@ export function sampleTerrain(ax: number, az: number, out: TerrainInfo, seed = C
   }
   // blend into the flat zones' ground level at their borders
   if (flat < 300) {
-    const edge = out.zone > 0 && az > BEACH_START_Z ? cityBeach(ax, az) : 0;
+    const edge = out.zone > 0 && az > BEACH_START_Z ? cityBeach(ax, az) : zoneGround;
     h = mix(edge, h, sstep(0, 300, flat));
   }
   out.h = h;

@@ -157,7 +157,7 @@ export const CONFIG = {
     },
     bloom: { radius: 0.45 },
     turbo: { blur: 0.075, aberration: 0.0045, rampIn: 0.25, rampOut: 0.7, speedRef: 70 },
-    moon: { color: '#a9bfff', intensity: 0.75, minLight: 0.35, minElevation: 24 },
+    moon: { color: '#a3b8ff', intensity: 0.42, minLight: 0.35, minElevation: 24 },
     weather: {
       initial: 'fewClouds',
       transitionMin: 60, // s (real) auto transitions
@@ -191,16 +191,16 @@ export const CONFIG = {
       {
         el: -18, zenith: '#040a1c', skyMid: '#0b1736', horizon: '#1c2c54', fog: '#0e1730', ground: '#0d111c', glow: '#3d5288',
         glowStrength: 0.2, sunColor: '#ff8a50', sunIntensity: 0, sunDisk: 0, sunSize: 1.8,
-        hemiSky: '#3a4f8c', hemiGround: '#1e1c34', hemiIntensity: 0.5, envIntensity: 0.7, exposure: 1.15,
+        hemiSky: '#3a4f8c', hemiGround: '#1e1c34', hemiIntensity: 0.4, envIntensity: 0.6, exposure: 1.06,
         cloudLit: '#3c4670', cloudShade: '#11162a', waterDeep: '#03142a', waterMid: '#072240', waterShallow: '#103c56',
-        bloomStrength: 0.75, bloomThreshold: 0.85, stars: 1, night: 1,
+        bloomStrength: 0.45, bloomThreshold: 1.1, stars: 1, night: 1,
       },
       {
         el: -7, zenith: '#11285f', skyMid: '#2c4b8c', horizon: '#6d7fb8', fog: '#3f4c7c', ground: '#262b46', glow: '#9a86c8',
         glowStrength: 0.55, sunColor: '#ff7a48', sunIntensity: 0, sunDisk: 0, sunSize: 1.8,
         hemiSky: '#5a6fb0', hemiGround: '#363052', hemiIntensity: 0.7, envIntensity: 0.65, exposure: 1.12,
         cloudLit: '#857eb2', cloudShade: '#2a3052', waterDeep: '#071d3a', waterMid: '#15345c', waterShallow: '#285874',
-        bloomStrength: 0.62, bloomThreshold: 1.0, stars: 0.55, night: 0.85,
+        bloomStrength: 0.42, bloomThreshold: 1.15, stars: 0.55, night: 0.85,
       },
       {
         el: -1.5, zenith: '#2a4590', skyMid: '#8a78b8', horizon: '#ff9e74', fog: '#c4919a', ground: '#5a4c66', glow: '#ff7845',
@@ -496,7 +496,7 @@ export const CONFIG = {
       shakeFreq: 8, // Hz
       wobbleStartKmh: 90,
       wobbleFullKmh: 320,
-      lowGripWild: 1.6, // wobble/kick multiplier per unit of lost grip (rain ≈ ×1.4, snow ≈ ×1.9)
+      lowGripWild: 1.1, // wobble/kick multiplier per unit of lost grip (rain ≈ ×1.3, snow ≈ ×1.6) — softened: snow was 16° slip
       liftOffYaw: 0.3, // rad/s yaw kick when releasing turbo mid-corner
       liftOffRearSide: 0.55, // rear side grip during the lift-off kick
       liftOffTime: 0.45, // s
@@ -782,6 +782,7 @@ export const CONFIG = {
     predictTime: 1.7, // s of swept car path checked
     dangerMargin: 1.2, // m added around the car box for the predicted path
     calmDodgeKmh: 34, // below this car speed people jog out of the way instead of diving
+    freezeMax: 0.4, // max share of people who freeze in front of a very fast car (they get hit)
     hitKmh: 5, // knockdown above this (shove/stumble below)
     hitInflate: 0.45, // m the car box is inflated for pedestrian hits (forgiving)
     hitRadius: 0.34, // m pedestrian cylinder radius for hits

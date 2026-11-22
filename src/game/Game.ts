@@ -187,6 +187,17 @@ export class Game implements GameActions {
     // Compile only what is VISIBLE now (forcing hidden pools/LODs visible made phones and SwiftShader boot take minutes).
     // Hidden effects compile in their own warmup() hooks or on first use. Hard cap: never hold the loading screen long.
     const software = /swiftshader|llvmpipe|software/i.test(ctx.quality.gpuName);
+    // Opt-in hidden warm-up meshes (userData.warmup, or tiny hidden meshes systems add for exactly this purpose).
+    const optIn: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (o.visible || (o as THREE.Light).isLight) return;
+      const n = m.geometry?.attributes?.position?.count ?? Infinity;
+      if (o.userData.warmup || n <= 64 || o.name.includes('warmup')) {
+        optIn.push(o);
+        o.visible = true;
+      }
+    });
     if (!software) {
       ctx.ui.setLoading(0.97, 'Compiling shaders');
       try {
@@ -196,6 +207,7 @@ export class Game implements GameActions {
         reportError('[warmup] shader compile failed', err);
       }
     }
+    for (const o of optIn) o.visible = false;
     // A few hidden frames (the boot overlay covers the canvas) upload the visible buffers/textures + shadow maps.
     try {
       const prev = camera.position.clone();

@@ -17,6 +17,8 @@ import { buildTestLayout } from './testLayout';
 const RESOLVERS: Record<string, (p: PropPlacement, seats: number | undefined) => string> = {
   bench: (p, seats) => ((seats ?? (p.variant % 2 ? 2 : 3)) <= 2 ? 'bench2' : 'bench3'),
   tree: (p) => (p.variant % 4 === 3 ? 'treeCypress' : 'treeRound'),
+  // world sign variants: 0 stop, 2 jump warning, 3 parking, 4 roadworks; anything else = generic direction sign
+  sign: (p) => ({ 0: 'signStop', 2: 'signJump', 3: 'signParking', 4: 'signWorks' } as Record<number, string>)[p.variant] ?? 'sign',
 };
 
 const _v = new THREE.Vector3();

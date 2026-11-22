@@ -501,7 +501,11 @@ export class Audio implements IAudio {
     this.engine.update(now, rdt, st, active, vehicle.build);
     const alive = active && !st.exploded;
     const wx = env?.weather;
-    const interior = this.ctx.cameraRig?.mode === 'hood';
+    // Interior = car hood/bumper view or the plane cockpit (not the wing camera, which `mode` also reports as 'hood').
+    const view = this.ctx.cameraRig?.view;
+    const interior = view
+      ? view === 'hood' || view === 'cockpit' || !!this.ctx.planes?.inCockpitSequence
+      : this.ctx.cameraRig?.mode === 'hood';
     this.veh.update(now, rdt, st, alive, vehicle.build?.model ?? null, {
       snow: wx?.snow ?? 0,
       wet: wx?.wetness ?? 0,

@@ -56,7 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   steeringMode: 'slider',
   leftHanded: false,
   controlsScale: 1,
-  controlsOpacity: 0.55,
+  controlsOpacity: 0.3, // opacity of touch controls while the car is moving (100% when slow)
   steerSensitivity: 1,
   vibration: true,
   flightAssisted: true,

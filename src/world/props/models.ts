@@ -463,6 +463,43 @@ export function sign(): THREE.BufferGeometry {
   return b.build();
 }
 
+/** Road signs with real faces (world placement variants: 0 stop, 2 jump warning, 3 parking, 4 roadworks). */
+export type SignFace = 'stop' | 'jump' | 'parking' | 'works';
+export function signFace(face: SignFace): THREE.BufferGeometry {
+  const b = new GeoBuilder('prop', 0.15, 0.2);
+  b.add(lathe([[0, 0], [0.07, 0], [0.07, 0.05], [0.045, 0.08], [0.04, 2.3], [0.052, 2.32], [0.052, 2.36], [0.03, 2.4], [0.042, 2.45], [0, 2.5]], 8, 40), P.steel, metal);
+  b.add(box(0.08, 0.05, 0.06), P.iron, metal, M(0, 2.12, 0.03));
+  b.add(box(0.08, 0.05, 0.06), P.iron, metal, M(0, 1.78, 0.03));
+  const white = '#f7f5ee';
+  const ngon = (n: number, r: number, rot: number) =>
+    Array.from({ length: n }, (_, i) => [Math.cos(rot + (i / n) * Math.PI * 2) * r, Math.sin(rot + (i / n) * Math.PI * 2) * r]);
+  const tri = (s: number) => [[0, s], [s * 0.94, -s * 0.66], [-s * 0.94, -s * 0.66]];
+  const at = (z: number) => M(0, 1.95, z);
+  if (face === 'stop') {
+    b.add(extrude(ngon(8, 0.38, Math.PI / 8), 0.035, 0.006), white, {}, at(0.075));
+    b.add(extrude(ngon(8, 0.34, Math.PI / 8), 0.037), '#d8332b', {}, at(0.077));
+    b.add(box(0.42, 0.1, 0.04), white, {}, at(0.081));
+  } else if (face === 'jump') {
+    b.add(extrude(tri(0.46), 0.035, 0.006), '#d8332b', {}, at(0.075));
+    b.add(extrude(tri(0.36), 0.037), white, {}, M(0, 1.93, 0.077));
+    b.add(extrude([[-0.2, -0.13], [0.16, -0.13], [0.16, 0.03]], 0.039), '#1d2a44', {}, M(0, 1.93, 0.079)); // ramp
+    b.add(box(0.12, 0.05, 0.04), '#1d2a44', {}, M(0.02, 1.99, 0.081, 0, 0, 0.42)); // car leaving it
+  } else if (face === 'parking') {
+    b.add(extrude(chamferRect(0.56, 0.56, 0.06), 0.035, 0.006), white, {}, at(0.075));
+    b.add(extrude(chamferRect(0.5, 0.5, 0.05), 0.037), '#2a6fd0', {}, at(0.077));
+    b.add(box(0.07, 0.36, 0.04), white, {}, M(-0.08, 1.95, 0.081));
+    b.add(box(0.18, 0.06, 0.04), white, {}, M(0.0, 2.1, 0.081));
+    b.add(box(0.18, 0.06, 0.04), white, {}, M(0.0, 1.97, 0.081));
+    b.add(box(0.06, 0.19, 0.04), white, {}, M(0.08, 2.035, 0.081));
+  } else {
+    b.add(extrude(ngon(4, 0.42, Math.PI / 4).map(([x, y]) => [x, y]), 0.035, 0.006), '#1d2a44', {}, M(0, 1.95, 0.075, 0, 0, Math.PI / 4));
+    b.add(extrude(ngon(4, 0.37, Math.PI / 4), 0.037), '#ff9a2e', {}, M(0, 1.95, 0.077, 0, 0, Math.PI / 4));
+    b.add(box(0.06, 0.4, 0.04), '#1d2a44', {}, M(-0.07, 1.95, 0.081, 0, 0, 0.6));
+    b.add(box(0.06, 0.4, 0.04), '#1d2a44', {}, M(0.09, 1.95, 0.081, 0, 0, 0.6));
+  }
+  return b.build();
+}
+
 // ───────────────────────────── airport: fuel truck ─────────────────────────────
 function wheelSet(b: GeoBuilder, r: number, w: number, at: number[][]): void {
   const tyre = lathe([[r * 0.6, -w / 2], [r * 0.93, -w / 2], [r, -w * 0.35], [r, w * 0.35], [r * 0.93, w / 2], [r * 0.6, w / 2]], 14, 40).rotateZ(Math.PI / 2);
