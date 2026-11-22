@@ -1199,6 +1199,11 @@ export const CONFIG = {
     // Smash: a hard hit into the ground/buildings digs in instead of bouncing and gliding — no rebound, most of the
     // sliding speed is lost (keepTangent hi→lo between minVn and fullVn), the momentum goes into a forward tumble.
     smash: { minVn: 12, fullVn: 45, keepTangentHi: 0.65, keepTangentLo: 0.2, maxRebound: 0.4, tumble: 2.2 },
+    // Splatter (user feedback): fast ground/building hits explode and shatter the piece, scaled by the impact speed
+    // (minVn → fullVn): fireball radius = explosionRadius × radiusMin..radiusMax × cbrt(piece mass share), share of
+    // the piece's joints broken shatterMin..1, outward splatter kick up to kickMax m/s. Never on/under water.
+    fastHitFallback: true, // process fast (CCD) hits that leave no queryable contact
+    splat: { minVn: 30, fullVn: 110, radiusMin: 0.25, radiusMax: 0.9, shatterMin: 0.25, energy: 0.08, kickMax: 22, maxPerPlane: 10, minGap: 0.15 },
     angularDamping: 0.03,
     ghostTime: 0.35, // s without plane-vs-plane collisions for parts torn off a surviving body
     impactTransmit: 0.55, // share of the impact deceleration a broken-off piece still received (× exp(-d/R))

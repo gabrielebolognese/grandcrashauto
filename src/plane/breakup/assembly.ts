@@ -143,6 +143,8 @@ export class Assembly {
   gScale = 1;
   /** s of uninterrupted falling (doomed-fall gravity ramp). */
   fallT = 0;
+  /** Splatter blast to apply when this assembly's pending joints break (cleared every flush). */
+  splatBlast: import('../types').BlastInfo | null = null;
   /** Decaying max of recent speeds (energy guard). */
   recentSpeed = 0;
   readonly recentVel = new THREE.Vector3();

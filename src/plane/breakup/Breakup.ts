@@ -80,6 +80,9 @@ interface PlaneRT {
   fires: FireRef[];
   torn: TornEdge[];
   pendingDamage: number[];
+  /** Splatter explosions so far / time of the last one. */
+  splats: number;
+  lastSplatT: number;
   pendingCtx: SplitCtx | null;
   crashed: boolean;
   outcome: CrashOutcome | null;
@@ -242,6 +245,8 @@ export class Breakup implements IBreakup {
       fires: [],
       torn: [],
       pendingDamage: [],
+      splats: 0,
+      lastSplatT: -99,
       pendingCtx: null,
       crashed: false,
       outcome: null,
@@ -490,6 +495,7 @@ export class Breakup implements IBreakup {
       for (const o of rt.hidden) o.visible = true;
       rt.hidden = [];
       rt.secondaries = [];
+      rt.splats = 0;
     }
     // Registered planes that still have their body are re-tracked fresh; everything else is dropped.
     const keep = this.planes.filter((rt) => rt.registered && rt.plane.body);
@@ -1047,7 +1053,7 @@ export class Breakup implements IBreakup {
     for (const a of involved) {
       const d = a.comW.distanceTo(blast.center) / dRef;
       const raw = (cfg.k * energy) / (a.mp.mass * (1 + d * d));
-      const cap = inFlight ? rnd(cfg.minFrac, cfg.maxFrac) * air : cfg.groundMax;
+      const cap = blast.kind === 'impact' ? CONFIG.breakup.splat.kickMax : inFlight ? rnd(cfg.minFrac, cfg.maxFrac) * air : cfg.groundMax;
       const mag = Math.min(raw, cap);
       const dir = new THREE.Vector3().subVectors(a.comW, blast.center);
       if (dir.lengthSq() < 1e-4) dir.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1));
@@ -1283,7 +1289,15 @@ export class Breakup implements IBreakup {
     a.cMaterial = material;
     const g = Math.abs(CONFIG.physics.gravity) * a.gScale;
     const fresh = a.cGap > 2 || a.cForce > 3 * a.mp.mass * g;
-    if (fresh && this.queryContact(a)) {
+    // Fast hits (CCD) often leave no solver contacts to query after the step — they were silently dropped, so fast
+    // wreckage never "crashed". Fall back to the lowest corner + an estimated normal (lead fix).
+    const queried = fresh && this.queryContact(a);
+    if (fresh && !queried) {
+      this.lowestCorner(rt, a, a.cPart, a.cPoint);
+      if (surface === 'building' && a.vPre.lengthSq() > 1) a.cNormal.copy(a.vPre).normalize().negate();
+      else a.cNormal.copy(UP);
+    }
+    if (fresh && (queried || CONFIG.breakup.fastHitFallback)) {
       // velocity of the contact point before the step
       const r = this.v1.subVectors(a.cPoint, a.comW);
       const vpt = this.v2.crossVectors(a.wPre, r).add(a.vPre);
@@ -1303,11 +1317,8 @@ export class Breakup implements IBreakup {
       if (vn > cfgC.minVn && (rt.t - a.lastImpactT > 0.12 || vn > a.lastImpactVn * 1.5)) {
         this.handleImpact(rt, a, a.cPart, a.cPoint, a.cNormal, vpt, vn, vt, surface, material);
       }
-    } else if (!fresh) {
-      this.lowestCorner(rt, a, a.cPart, a.cPoint);
     } else {
       this.lowestCorner(rt, a, a.cPart, a.cPoint);
-      a.cNormal.copy(UP);
     }
     // sustained contact: sliding (fx + scrape damage + ploughing). The intact plane rolling on its gear is not sliding.
     const pk = rt.s.parts[a.cPart].kind;
@@ -1337,7 +1348,7 @@ export class Breakup implements IBreakup {
    * Hard hit into the ground/a building (user feedback: wrecks bounced and glided): the piece digs in — no rebound,
    * most of the sliding speed is lost, and what's left of the momentum becomes a forward tumble.
    */
-  private smash(a: Assembly, point: THREE.Vector3, normal: THREE.Vector3, vn: number): void {
+  private smash(rt: PlaneRT, a: Assembly, point: THREE.Vector3, normal: THREE.Vector3, vn: number): void {
     const S = CONFIG.breakup.smash;
     try {
       if (!this.ctx.physics.world.bodies.contains(a.body.handle)) return;
@@ -1366,6 +1377,42 @@ export class Breakup implements IBreakup {
     const fx = this.ctx.fx;
     fx.dust(point, Math.min(3, 0.8 + vn / 20), 0xcbb89a);
     fx.debrisBurst?.({ position: point, velocity: v, count: Math.round(4 + 8 * f), size: Math.max(0.3, a.radius * 0.08), kind: 'metal' });
+    this.splat(rt, a, point, normal, vn, v);
+  }
+
+  /** Fast hit: the piece explodes and shatters, both scaled by the impact speed (never on/under water). */
+  private splat(rt: PlaneRT, a: Assembly, point: THREE.Vector3, normal: THREE.Vector3, vn: number, vel: THREE.Vector3): void {
+    const P = CONFIG.breakup.splat;
+    if (vn < P.minVn || this.underwater(point)) return;
+    const s = THREE.MathUtils.clamp((vn - P.minVn) / (P.fullVn - P.minVn), 0, 1);
+    const big = a.tracked || a.piece?.hasCockpit || a.mp.mass > 0.15 * rt.s.mass;
+    // the first big impact already gets the main fuel fireball (ignite) — don't double it
+    const mainIgnition = !rt.ignited && big && this.fuelLeft(rt) > 1;
+    if (!mainIgnition && rt.splats < P.maxPerPlane && rt.t - rt.lastSplatT > P.minGap) {
+      rt.splats++;
+      rt.lastSplatT = rt.t;
+      const massF = Math.max(0.35, Math.cbrt(Math.min(1, a.mp.mass / Math.max(1, rt.s.mass))));
+      const radius = CONFIG.planes[rt.type].explosionRadius * THREE.MathUtils.lerp(P.radiusMin, P.radiusMax, s) * massF;
+      const pos = this.v3.copy(point).addScaledVector(normal, 0.5);
+      this.explosionFx(pos, vel, radius, 'impact', 'ground', rt.splats <= 3);
+      this.evPos.copy(pos);
+      this.evVel.copy(vel);
+      this.ctx.events.emit('planeExplosion', { position: this.evPos, velocity: this.evVel, radius, kind: 'secondary' });
+      this.pushProps(pos, radius * 1.3, 6 + 10 * s);
+      if (!this.asmHasFire(rt, a)) this.igniteAsm(rt, a, 0.6 + 0.4 * s, rnd(15, 35));
+    }
+    // shatter: break the joints nearest the impact first, all of them at full speed
+    const local = this.tDmg.copy(point).sub(a.pos).applyQuaternion(this.q1.copy(a.quat).invert());
+    const own = rt.s.joints.filter((j) => !rt.broken[j.i] && a.has[j.a] && a.has[j.b]);
+    if (!own.length) return;
+    own.sort((x, y) => x.pos.distanceToSquared(local) - y.pos.distanceToSquared(local));
+    const n = Math.ceil(own.length * THREE.MathUtils.lerp(P.shatterMin, 1, s));
+    for (let i = 0; i < n; i++) {
+      const ji = own[i].i;
+      rt.damage[ji] = Math.max(rt.damage[ji], 1);
+      if (!rt.pendingDamage.includes(ji)) rt.pendingDamage.push(ji);
+    }
+    a.splatBlast = { center: point.clone(), energy: P.energy * (0.3 + 0.7 * s), kind: 'impact' };
   }
 
   private handleImpact(
@@ -1386,7 +1433,7 @@ export class Breakup implements IBreakup {
       const sev = vn * hard + vt * hard * cfg.damage.tangentFactor;
       this.accumulateDamage(rt, a, point, sev, true);
     }
-    if (!gearTouch && surface !== 'self' && surface !== 'other' && vn > cfg.smash.minVn) this.smash(a, point, normal, vn);
+    if (!gearTouch && surface !== 'self' && surface !== 'other' && vn > cfg.smash.minVn) this.smash(rt, a, point, normal, vn);
     // classification (intact body, cockpit piece or big pieces)
     let outcome: CrashOutcome | null = null;
     const angle = (Math.atan2(vn, Math.max(0.01, vt)) * 180) / Math.PI;
@@ -1545,8 +1592,10 @@ export class Breakup implements IBreakup {
       const sctx: SplitCtx = fresh
         ? { reason: 'impact', impact: { part: a.cPart, point: a.cPoint.clone(), normal: a.cNormal.clone() } }
         : { reason: a.wet > 0 ? 'water' : 'api' };
+      if (a.splatBlast) sctx.blast = a.splatBlast; // splatter: fragments fly outward
       this.breakInternal(rt, idx, sctx);
     }
+    for (const a of rt.asms) a.splatBlast = null;
   }
 
   // ═══════════════════════════════════ water ═══════════════════════════════════
