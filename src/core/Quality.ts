@@ -94,12 +94,26 @@ export class Quality {
     this.level = s.quality;
     const base = CONFIG.quality.presets[this.level];
     const cap = this.isMobile ? Math.min(base.pixelRatioCap, 1.5) : base.pixelRatioCap;
+    // Phones: keep visible triangles under the ~300k mobile budget (SPEC §4) by trimming distance/density knobs that
+    // every module reads (measured 420k → target < 300k on Medium in the city).
+    const m = this.isMobile ? CONFIG.quality.mobileScale : null;
     this.current = {
       ...base,
       pixelRatioCap: cap,
       shadows: s.shadows,
       bloom: s.bloom,
-      npcCount: Math.round(base.npcCount * s.npcDensity),
+      npcCount: Math.round(base.npcCount * s.npcDensity * (m ? m.npc : 1)),
+      ...(m
+        ? {
+            viewDistance: Math.round(base.viewDistance * m.view),
+            chunkRadius: Math.max(1, Math.round(base.chunkRadius * m.view)),
+            propDensity: base.propDensity * m.density,
+            parkedCarDensity: base.parkedCarDensity * m.density,
+            treeDensity: base.treeDensity * m.trees,
+            terrainViewDistance: Math.round(base.terrainViewDistance * m.view),
+            particleScale: base.particleScale * m.particles,
+          }
+        : {}),
     };
     this.engine.setPixelRatioCap(cap);
     this.dynScale = Math.min(this.dynScale, s.renderScale);

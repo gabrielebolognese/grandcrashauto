@@ -37,6 +37,8 @@ export const CONFIG = {
   // ───────────────────────────── quality (owner: core) ──────────────────────────
   quality: {
     probeSeconds: 3,
+    // Phones: multipliers applied on top of the chosen preset (visible-triangle budget ~300k on mobile).
+    mobileScale: { view: 0.75, density: 0.7, trees: 0.6, npc: 0.75, particles: 0.8 },
     dynRes: { upAfter: 4, downAfter: 1.5, step: 0.1, hysteresis: 0.78 },
     presets: {
       low: {
