@@ -38,7 +38,7 @@ await mkdir(outDir, { recursive: true });
 
 // 0) Machine-wide concurrency limit: many agents share one laptop. At most SMOKE_SLOTS (default 2) build+browser
 //    runs at once; others wait. Lock files carry the owner PID so locks of killed processes are reclaimed.
-const SLOTS = Number(process.env.SMOKE_SLOTS || 2);
+const SLOTS = Number(process.env.SMOKE_SLOTS || 1); // user: keep headless Chrome to ONE instance machine-wide
 let lockPath = null;
 function pidAlive(pid) {
   try {
@@ -132,6 +132,8 @@ const { chromium } = await import('playwright');
 const launchArgs = flag('gpu')
   ? ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=d3d11']
   : ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'];
+// Fewer Chrome processes per browser (lighter on the shared PC).
+launchArgs.push('--renderer-process-limit=1', '--disable-features=site-per-process,IsolateOrigins,Translate,MediaRouter', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-sync');
 const browser = await chromium.launch({ headless: true, args: launchArgs });
 
 const summary = { ok: true, tag, url: '', runs: [] };

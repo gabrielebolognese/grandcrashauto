@@ -457,6 +457,12 @@ export interface IPlaneSystem extends GameSystem {
   retryInAir(): void;
   backToCar(): void;
   skipSequence(): void;
+  /** Quick placement (user request, crash-first design): move the intact plane `forward` m along its heading and `up` m
+   * vertically, keeping velocity/attitude (clamped above the ground). Spammable. */
+  nudge?(forward: number, up: number): void;
+  /** "AIRBORNE" button: from standstill on the ground, put the plane in flight right here (~300 m up, cruise speed,
+   * gear up, engines spooled), facing its current heading. */
+  takeOff?(): void;
 }
 
 // --------------------------- breakup & crash physics (src/plane/breakup) ---------------------------

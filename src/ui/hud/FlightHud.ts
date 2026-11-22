@@ -72,6 +72,8 @@ export class FlightHud {
   private engineBtns: HTMLButtonElement[] = [];
   private engineState: string[] = [];
   private crash: HTMLDivElement;
+  private nudgePad: HTMLDivElement;
+  private airborne: HTMLButtonElement;
   private skip: HTMLButtonElement;
   private oomBanner: HTMLDivElement;
   private oomText: HTMLSpanElement;
@@ -120,9 +122,39 @@ export class FlightHud {
       ctx.input.press('skip');
     });
 
+    // Quick placement (crash-first design): spammable ±100 m nudges + AIRBORNE from standstill.
+    const nb = (label: string, title: string, area: string, f: number, u: number) => {
+      const b = h('button', { class: `nudge-btn touch-ctl n-${area}`, type: 'button', title, 'aria-label': title }, h('span', { text: label }));
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        uiSound('click');
+        ctx.planes.nudge?.(f, u);
+        this.host.vibrate(8);
+      });
+      return b;
+    };
+    this.nudgePad = h(
+      'div',
+      { class: 'fl-nudge', role: 'group', 'aria-label': 'Move plane 100 m' },
+      nb('▲', 'Up 100 m', 'up', 0, 100),
+      nb('◀', 'Back 100 m', 'back', -100, 0),
+      nb('▶', 'Forward 100 m', 'fwd', 100, 0),
+      nb('▼', 'Down 100 m', 'down', 0, -100),
+      h('span', { class: 'n-mid', text: '100m' }),
+    );
+    this.airborne = h('button', { class: 'airborne-btn touch-ctl', type: 'button', 'aria-label': 'Airborne' }, icon('plane'), h('span', { text: 'AIRBORNE' }));
+    this.airborne.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      uiSound('confirm');
+      ctx.planes.takeOff?.();
+      this.host.vibrate(20);
+    });
+
     this.el = h(
       'div',
       { class: 'flight-hud', 'aria-hidden': 'true' },
+      this.nudgePad,
+      this.airborne,
       // User request: keep the plane visible — no instrument tapes / heading / status chips, only alerts.
       h('div', { class: 'fl-top' }, h('div', { class: 'fl-alerts' }, this.oomBanner, this.caution, this.stall)),
       this.engines,
@@ -191,6 +223,8 @@ export class FlightHud {
 
     this.el.classList.toggle('crashed', crashed);
     this.el.classList.toggle('stalling', !!ps.stallWarning);
+    setVisible(this.nudgePad, !crashed && !seq && typeof planes.nudge === 'function');
+    setVisible(this.airborne, !crashed && !!ps.onGround && ps.airspeedKmh < 10 && typeof planes.takeOff === 'function');
     this.drawSpeed(ps.airspeedKmh * k, ps.rotationSpeedKmh * k, ps.stallSpeedKmh * k, !!ps.stallWarning, mph ? 'MPH' : 'KM/H');
     this.drawAlt(ps.altitude, ps.altitude - ps.altitudeAgl, ps.verticalSpeed);
     this.drawHeading(ps.heading);

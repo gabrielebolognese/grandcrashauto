@@ -623,3 +623,30 @@
     font-size: 13px;
   }
 }
+
+/* ── Quick placement (crash-first): spammable ±100 m nudge cross (top-right) + AIRBORNE (top-centre) ── */
+.fl-nudge {
+  position: absolute; right: calc(env(safe-area-inset-right, 0px) + 12px); top: calc(env(safe-area-inset-top, 0px) + 12px);
+  display: grid; grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(3, 34px); gap: 3px;
+  grid-template-areas: ". up ." "back mid fwd" ". down ."; pointer-events: auto;
+}
+.fl-nudge .n-up { grid-area: up; } .fl-nudge .n-down { grid-area: down; }
+.fl-nudge .n-back { grid-area: back; } .fl-nudge .n-fwd { grid-area: fwd; }
+.fl-nudge .n-mid { grid-area: mid; align-self: center; justify-self: center; font: 800 9px/1 var(--font); color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,.5); letter-spacing: .04em; }
+.nudge-btn {
+  appearance: none; border: 0; border-radius: 10px; padding: 0; cursor: pointer;
+  font: 900 13px/1 var(--font); color: var(--c-ink, #1d2a44);
+  background: rgba(255, 250, 240, 0.86); box-shadow: 0 2px 0 rgba(34, 48, 77, 0.22);
+  touch-action: none; -webkit-user-select: none; user-select: none;
+}
+.nudge-btn:active { transform: translateY(1px); background: #fff; }
+.airborne-btn {
+  position: absolute; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 66px); transform: translateX(-50%);
+  display: flex; align-items: center; gap: 6px; padding: 7px 14px; border: 0; border-radius: 999px; cursor: pointer;
+  font: 900 12px/1 var(--font); letter-spacing: .12em; color: #fff; pointer-events: auto;
+  background: linear-gradient(180deg, #5cc8d6, #2aa3c4); box-shadow: 0 3px 0 #146c94, 0 6px 16px rgba(20, 108, 148, .35);
+  animation: airborne-pulse 1.6s ease-in-out infinite;
+}
+.airborne-btn .ic { width: 16px; height: 16px; }
+@keyframes airborne-pulse { 50% { transform: translateX(-50%) scale(1.06); } }

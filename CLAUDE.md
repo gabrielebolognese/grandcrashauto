@@ -13,7 +13,7 @@ conventions, ownership and how to verify your work.
 - `node scripts/smoke.mjs --tag <yourname>` — headless Chromium (SwiftShader) smoke test: builds into a private temp dir,
   loads `?debug&autostart`, drives (W, D, Space), explodes (X), resets (R), screenshots to `.smoke/<tag>/*.png` and prints
   a JSON summary (fps, draw calls, triangles, errors, car position…). **Always use your own `--tag`** (parallel agents).
-  Smoke runs are limited machine-wide to 2 at a time (lock files) — a run may first wait for a slot, so give the Bash
+  Smoke runs are limited machine-wide to 1 at a time (lock files) — a run may first wait for a slot, so give the Bash
   call `timeout: 600000`. The previous session crashed from overload: keep runs purposeful, never in tight loops.
   Options: `--mobile` (adds a 844×390 touch phone run), `--mobile-only`, `--scenario idle|menu|garage|none`,
   `--params "seed=7&foo"`, `--quality low|medium|high`, `--seconds N`, `--script my-scenario.mjs` (see header of smoke.mjs).
