@@ -20,6 +20,7 @@ export default async function (page, h) {
     await h.wait(450);
     await h.game('g.game.requestReset()');
     await h.wait(650);
+    if ((i + 1) % 25 === 0) console.error('[leak] after ' + (i + 1) + ' ' + JSON.stringify(await snap()));
   }
   await h.wait(500);
   const after = await snap();
