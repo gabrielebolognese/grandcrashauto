@@ -1109,7 +1109,7 @@ export const CONFIG = {
         // A burning engine falling off resets the build-up.
         pointsBase: 5, pointsPerEngine: 1, maxSpots: 4 },
     // Crippled fall (user feedback): doomed planes lose lift and gravity ramps up so they accelerate into the ground.
-    fall: { startSinkMs: 4, rampS: 6, liftLoss: 0.85, maxGravityScale: 1.7 },
+    fall: { startSinkMs: 3, rampS: 5, liftLoss: 0.95, maxGravityScale: 2.2 },
     // Plane bodies fly with real gravity (gravityScale = gravity / |physics.gravity|) even though the arcade world uses -14.
     gravity: 9.81,
     ceiling: 3000, // m: soft ceiling, thrust and lift fade above it
@@ -1190,15 +1190,22 @@ export const CONFIG = {
     lowQualityBodyScale: 0.75,
     keepMainFrac: 0.6, // the intact body survives a break if the cockpit/main component keeps ≥ this mass fraction
     debrisFrac: 0.012, // over budget: components lighter than this × plane mass become non-colliding debris
-    friction: 0.55, // metal on asphalt ≈ 0.5 (combined with the ground's friction)
-    restitution: 0.06,
+    friction: 0.85, // metal gouging into the ground (user: wrecks must not glide on after the impact)
+    restitution: 0.0,
+    // Doomed fall (user feedback): falling wreck pieces must keep ACCELERATING — after a short drift their lift/drag
+    // fades and gravity ramps toward maxG (× world gravity) until they hit something.
+    // (delayS of free flight first — gliding halves too — then the ramp; terminal speed maxSpeed via overDrag /s)
+    doomFall: { delayS: 1.2, rampS: 4, aeroLoss: 0.85, maxG: 2.1, maxSpeed: 140, overDrag: 1.5 },
+    // Smash: a hard hit into the ground/buildings digs in instead of bouncing and gliding — no rebound, most of the
+    // sliding speed is lost (keepTangent hi→lo between minVn and fullVn), the momentum goes into a forward tumble.
+    smash: { minVn: 12, fullVn: 45, keepTangentHi: 0.65, keepTangentLo: 0.2, maxRebound: 0.4, tumble: 2.2 },
     angularDamping: 0.03,
     ghostTime: 0.35, // s without plane-vs-plane collisions for parts torn off a surviving body
     impactTransmit: 0.55, // share of the impact deceleration a broken-off piece still received (× exp(-d/R))
     keeperTransmit: 0.6, // same for the surviving body when the contacting part tore off (cartwheel yank)
     blastFx: true, // breakJoints with a 'middle'/'tail' blast spawns the fireball + emits planeExplosion
     guardGain: 4, // m/s a piece may gain per physics step (solver depenetration guard)
-    guardRestitution: 0.12, // max bounce-back speed as a fraction of the recent impact speed
+    guardRestitution: 0.03, // max bounce-back speed as a fraction of the recent impact speed (smash, no bounce)
     focusMinMassFrac: 0.04, // camera focus ignores pieces lighter than this × the biggest piece
     maxAngvel: 30, // rad/s cap for wreck pieces
     damage: {
@@ -1254,6 +1261,7 @@ export const CONFIG = {
       floodTime: 14, // s for a closed part to flood (open ends ×3.5 faster, fin ×0.28) — sinks sooner
       removeDepth: 60, // m below the surface (+ radius) → piece removed (sinks into the abyss first)
       abyssDepth: 4, // m below the surface: stop colliding with the seabed, keep sinking
+      abyssMinWater: 10, // …only over the open ocean with at least this much water (never lakes/shallows)
       noExplosions: true, // user: water crashes break + burn, but never explode
       maxTime: 60, // s in water before flooding is forced
       ditchStallFactor: 1.3, // ditching if slower than this × stall, wings level, nose slightly up

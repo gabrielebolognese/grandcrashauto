@@ -161,6 +161,7 @@ export class Breakup implements IBreakup {
   private v3 = new THREE.Vector3();
   private v4 = new THREE.Vector3();
   private v5 = new THREE.Vector3();
+  private smashT = new THREE.Vector3();
   private q1 = new THREE.Quaternion();
   private sumF = new THREE.Vector3();
   private sumT = new THREE.Vector3();
@@ -543,10 +544,26 @@ export class Breakup implements IBreakup {
         // minor pieces (light, no cockpit) get their air loads at half rate with a doubled step (perf)
         const minor = !a.tracked && a.mp.mass < 0.15 * rt.s.mass && !a.piece?.hasCockpit;
         const k = minor ? 2 : 1;
+        // doomed fall: a free piece falling without touching anything loses its aero and gravity ramps up
+        let doom = 0;
+        if (!a.tracked) {
+          const D = CONFIG.breakup.doomFall;
+          const airborne = !a.sliding && a.wet === 0 && a.cFrames === 0 && rt.t - a.lastImpactT > 0.6;
+          if (airborne) a.fallT += dt;
+          else a.fallT = 0;
+          doom = THREE.MathUtils.smoothstep(a.fallT, D.delayS, D.delayS + D.rampS);
+          if (doom > 0) {
+            const extra = Math.max(0, D.maxG - a.gScale) * doom;
+            this.sumF.y -= a.mp.mass * Math.abs(CONFIG.physics.gravity) * extra;
+          }
+          // terminal speed: past maxSpeed the air finally wins (a smash, not a meteor that tunnels/bounces)
+          if (a.speed > D.maxSpeed) this.sumF.addScaledVector(a.vel, (-(a.speed - D.maxSpeed) * D.overDrag * a.mp.mass) / a.speed);
+        }
         if (!a.tracked && (a.speed > 1.5 || a.angvel.lengthSq() > 1) && (!minor || ((this.stepN + a.id) & 1) === 0)) {
           this.forces.air(rt.s, a, rt.broken, rt.liftK, dt * k);
-          this.sumF.addScaledVector(this.forces.F, k);
-          this.sumT.addScaledVector(this.forces.T, k);
+          const aero = 1 - CONFIG.breakup.doomFall.aeroLoss * doom;
+          this.sumF.addScaledVector(this.forces.F, k * aero);
+          this.sumT.addScaledVector(this.forces.T, k * aero);
           if (a.spinSign !== 0) this.autorotate(rt, a, dt, k);
           if (a.trimTorque > 0) this.trimStep(a, dt * k, k);
         }
@@ -1316,6 +1333,41 @@ export class Breakup implements IBreakup {
     } else a.sliding = false;
   }
 
+  /**
+   * Hard hit into the ground/a building (user feedback: wrecks bounced and glided): the piece digs in — no rebound,
+   * most of the sliding speed is lost, and what's left of the momentum becomes a forward tumble.
+   */
+  private smash(a: Assembly, point: THREE.Vector3, normal: THREE.Vector3, vn: number): void {
+    const S = CONFIG.breakup.smash;
+    try {
+      if (!this.ctx.physics.world.bodies.contains(a.body.handle)) return;
+    } catch {
+      return;
+    }
+    const f = THREE.MathUtils.clamp((vn - S.minVn) / (S.fullVn - S.minVn), 0, 1);
+    const keep = THREE.MathUtils.lerp(S.keepTangentHi, S.keepTangentLo, f);
+    const lv = a.body.linvel();
+    const v = this.v5.set(lv.x, lv.y, lv.z);
+    const vN = v.dot(normal);
+    const vT = this.smashT.copy(v).addScaledVector(normal, -vN);
+    const tLen = vT.length();
+    v.copy(vT).multiplyScalar(keep).addScaledVector(normal, Math.min(Math.max(vN, 0), S.maxRebound));
+    a.body.setLinvel(v, true);
+    a.vel.copy(v);
+    a.speed = v.length();
+    a.fallT = 0;
+    // forward tumble about (normal × travel direction), scaled down for heavy pieces
+    if (tLen > 1) {
+      const axis = vT.multiplyScalar(1 / tLen).cross(normal).multiplyScalar(-1);
+      const w = a.body.angvel();
+      const spin = S.tumble * (0.4 + 0.6 * f) / Math.max(1, Math.cbrt(a.mp.mass / 4000));
+      a.body.setAngvel({ x: w.x * keep + axis.x * spin, y: w.y * keep + axis.y * spin, z: w.z * keep + axis.z * spin }, true);
+    }
+    const fx = this.ctx.fx;
+    fx.dust(point, Math.min(3, 0.8 + vn / 20), 0xcbb89a);
+    fx.debrisBurst?.({ position: point, velocity: v, count: Math.round(4 + 8 * f), size: Math.max(0.3, a.radius * 0.08), kind: 'metal' });
+  }
+
   private handleImpact(
     rt: PlaneRT, a: Assembly, part: number, point: THREE.Vector3, normal: THREE.Vector3, vpt: THREE.Vector3,
     vn: number, vt: number, surface: Surface, material: SurfaceMaterial,
@@ -1334,6 +1386,7 @@ export class Breakup implements IBreakup {
       const sev = vn * hard + vt * hard * cfg.damage.tangentFactor;
       this.accumulateDamage(rt, a, point, sev, true);
     }
+    if (!gearTouch && surface !== 'self' && surface !== 'other' && vn > cfg.smash.minVn) this.smash(a, point, normal, vn);
     // classification (intact body, cockpit piece or big pieces)
     let outcome: CrashOutcome | null = null;
     const angle = (Math.atan2(vn, Math.max(0.01, vt)) * 180) / Math.PI;
@@ -1497,6 +1550,23 @@ export class Breakup implements IBreakup {
   }
 
   // ═══════════════════════════════════ water ═══════════════════════════════════
+
+  private overDeepOcean(x: number, z: number, waterY: number): boolean {
+    let off = 0;
+    try {
+      off = this.ctx.world.oceanDistance?.(x, z) ?? this.ctx.terrain?.oceanDistance?.(x, z) ?? 0;
+    } catch {
+      off = 0;
+    }
+    if (off <= 0) return false;
+    let ground = waterY;
+    try {
+      ground = this.ctx.world.groundHeightAt(x, z);
+    } catch {
+      /* keep */
+    }
+    return waterY - ground > CONFIG.breakup.water.abyssMinWater;
+  }
 
   private waterYFor(a: Assembly, t: number): number | null {
     const dx = a.comW.x - a.waterQx;
@@ -1831,7 +1901,8 @@ export class Breakup implements IBreakup {
         a.bubbleT = rnd(0.25, 0.5);
         this.ctx.fx.bubbles?.(this.v1.set(a.comW.x, a.waterY, a.comW.z), Math.min(4, 0.5 + a.radius * 0.3));
       }
-      if (depth > cfg.abyssDepth && !(a as unknown as { abyss?: boolean }).abyss) {
+      // only the open ocean has an abyss — lakes and shallows keep their bed (pieces must not fall through the ground)
+      if (depth > cfg.abyssDepth && !(a as unknown as { abyss?: boolean }).abyss && this.overDeepOcean(a.comW.x, a.comW.z, a.waterY)) {
         (a as unknown as { abyss?: boolean }).abyss = true;
         const none = groups(0, 0);
         for (const c of a.colliders) if (c) c.setCollisionGroups(none);

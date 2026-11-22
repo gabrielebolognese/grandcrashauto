@@ -141,6 +141,8 @@ export class Assembly {
   ccd = true;
   /** Rapier gravity scale of the body (plane bodies fly with real g in the arcade -14 world). */
   gScale = 1;
+  /** s of uninterrupted falling (doomed-fall gravity ramp). */
+  fallT = 0;
   /** Decaying max of recent speeds (energy guard). */
   recentSpeed = 0;
   readonly recentVel = new THREE.Vector3();
