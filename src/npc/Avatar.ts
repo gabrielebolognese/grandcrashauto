@@ -23,6 +23,7 @@ export class Avatar implements AvatarHandle {
   private fadeRate = 4;
   private m = new THREE.Matrix4();
   private scl = new THREE.Matrix4();
+  private fill = { value: 0 };
 
   constructor(private clips: ClipInfo[], uniforms: NpcUniforms, private app: Appearance) {
     const g = buildHero();
@@ -38,7 +39,18 @@ export class Avatar implements AvatarHandle {
     (col0.array as Float32Array).set([app.skin, app.top, app.bottom, app.shoes]);
     (col1.array as Float32Array).set([app.hair, app.acc, app.inner, app.flags]);
     (extra.array as Float32Array).set([0, 0, app.shape, 0]);
-    const mesh = new THREE.InstancedMesh(g, makeNpcMaterial(uniforms, false), 1);
+    const mat = makeNpcMaterial(uniforms, false);
+    // fill light (cabin lights at night / a little outdoors at night): emissive on top of the pedestrian shading
+    const base = mat.onBeforeCompile;
+    mat.onBeforeCompile = (sh, r) => {
+      base.call(mat, sh, r);
+      sh.uniforms.uAvatarFill = this.fill;
+      sh.fragmentShader = sh.fragmentShader
+        .replace('void main() {', 'uniform float uAvatarFill;\nvoid main() {')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * uAvatarFill;');
+    };
+    mat.customProgramCacheKey = () => 'npc-skin-v2-avatar';
+    const mesh = new THREE.InstancedMesh(g, mat, 1);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.customDepthMaterial = makeNpcDepthMaterial(uniforms, false);
     mesh.castShadow = true;
@@ -82,6 +94,10 @@ export class Avatar implements AvatarHandle {
     this.clipA = id;
     this.tA = 0;
     this.rateA = rate;
+  }
+
+  setFill(level: number): void {
+    this.fill.value = level;
   }
 
   setMatrix(m: THREE.Matrix4): void {

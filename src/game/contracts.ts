@@ -205,6 +205,8 @@ export interface AvatarHandle {
   readonly clipDone: boolean;
   /** World matrix of the feet origin (yaw included; the avatar applies its own body scale). */
   setMatrix(m: THREE.Matrix4): void;
+  /** Emissive fill (0..1): cabin lights at night etc. */
+  setFill?(level: number): void;
   update(dt: number): void;
   dispose(): void;
 }

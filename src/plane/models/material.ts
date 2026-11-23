@@ -29,6 +29,8 @@ export interface PlaneUniforms {
   uRowB: { value: THREE.Vector4 };
   uDoors: { value: THREE.Vector4[] }; // s, y, halfW, halfH
   uWinCol: { value: THREE.Color };
+  /** Cabin lights: 1 = normal, 0..1 = emergency (split / torn open: dimmer + flicker). */
+  uCabin: { value: number };
 }
 
 export interface WindowLayout {
@@ -57,6 +59,7 @@ export function makeUniforms(win: WindowLayout | null): PlaneUniforms {
     uRowB: { value: new THREE.Vector4(0, 1, 0, 0) },
     uDoors: { value: vec4s(8) },
     uWinCol: { value: new THREE.Color(0x1d2a3a) },
+    uCabin: { value: 1 },
   };
   if (win) {
     U.uWin.value.set(win.pitch, win.halfW, win.halfH, win.corner);
@@ -77,6 +80,7 @@ varying vec2 vRM;
 varying float vChar;
 varying vec3 vPPos;
 varying float vInt;
+varying float vCabN;
 uniform vec4 uSurfA[${NSURF}];
 uniform vec4 uSurfP[${NSURF}];
 uniform vec4 uPartOff[${NPART}];
@@ -140,6 +144,9 @@ varying vec2 vRM;
 varying float vChar;
 varying vec3 vPPos;
 varying float vInt;
+varying float vCabN;
+uniform float uCabin;
+uniform vec4 uFlags;
 uniform vec4 uWin;
 uniform vec4 uRowA;
 uniform vec4 uRowB;
@@ -230,6 +237,14 @@ const FRAG_INTERIOR = /* glsl */ `
 if (vInt > 0.5) {
   reflectedLight.directDiffuse *= 0.1;
   reflectedLight.directSpecular *= 0.0;
+  // Cabin lights (no real lights: self-lit like ceiling panels). Always a little, full from dusk on; surfaces facing up
+  // (floor, seat pans) get the most, walls less, the ceiling least. Torn open (uCabin < 1): emergency dim + flicker.
+  float cab = 0.14 + 0.8 * smoothstep(0.12, 0.6, uNight);
+  if (uCabin < 0.999) {
+    float fl = fract(sin(floor(uFlags.z * 11.0) * 12.9898) * 43758.5453);
+    cab *= uCabin * (fl < 0.12 ? 0.25 : 1.0);
+  }
+  totalEmissiveRadiance += diffuseColor.rgb * cab * (0.62 + 0.38 * clamp(vCabN, -1.0, 1.0));
 }
 `;
 
@@ -238,7 +253,7 @@ function patchVertexMain(src: string): string {
     .replace('#include <common>', '#include <common>\n' + VERT_PARS)
     .replace(
       '#include <beginnormal_vertex>',
-      '#include <beginnormal_vertex>\nvec3 plDef = planeDeform(position, objectNormal);\nvWin = aWin;\nvRM = aRM;\nvInt = aFx.z < -0.5 ? 1.0 : 0.0;\n{ int pc = int(aFx.w + 0.5); vChar = uCharV[pc >> 2][pc & 3]; }',
+      '#include <beginnormal_vertex>\nvec3 plDef = planeDeform(position, objectNormal);\nvWin = aWin;\nvRM = aRM;\nvInt = aFx.z < -0.5 ? 1.0 : 0.0;\nvCabN = objectNormal.y;\n{ int pc = int(aFx.w + 0.5); vChar = uCharV[pc >> 2][pc & 3]; }',
     )
     .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = plDef;');
 }

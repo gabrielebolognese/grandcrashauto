@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CONFIG } from '../config';
-import { approach, clamp, dampAngle } from '../core/math';
+import { approach, clamp, dampAngle, smoothstep } from '../core/math';
+import { GLOBAL_UNIFORMS } from '../core/uniforms';
 import type { ControlState } from '../core/Input';
 import type { AvatarHandle, GameContext, IWalker } from '../game/contracts';
 import type { PlaneCabin, PlaneTypeId, PlaneVisual, TrackedPlane } from '../plane/types';
@@ -747,6 +748,9 @@ export class Walker implements IWalker {
     const a = this.avatar;
     if (!a) return;
     a.visible = !this.firstPerson;
+    // lit by the cabin lights inside (match the cabin shader), a faint fill outdoors at night
+    const night = GLOBAL_UNIFORMS.uNight.value;
+    a.setFill?.(this.mode === 'cabin' ? (0.1 + 0.6 * smoothstep(0.12, 0.6, night)) : 0.22 * night);
     let vx: number, vz: number;
     if (this.mode === 'cabin') {
       vx = this.v.x;

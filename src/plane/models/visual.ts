@@ -268,6 +268,7 @@ export class PlaneVisualImpl implements PlaneVisual {
       }
     }
     if (this.tpl.bulkheadJoints.includes(jointId)) this.mats.uniforms.uFlags.value.y = 1;
+    this.mats.uniforms.uCabin.value = 0.6; // emergency lighting once the airframe is torn
     this.broken = true;
     this.applyLod();
   }
@@ -326,6 +327,7 @@ export class PlaneVisualImpl implements PlaneVisual {
     U.uCrush.value.set(0, 0, 0, 0);
     U.uCrushDir.value.w = -1;
     U.uFlags.value.y = 0;
+    U.uCabin.value = 1;
     this.damaged = [false, false, false, false];
     this.broken = false;
     this.applyLod(true);
