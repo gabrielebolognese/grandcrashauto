@@ -15,7 +15,7 @@ import type { NavSource, PedNav } from './nav';
  * hit / scare, or rejoins). 3 draw calls total (mid mesh, far mesh, blob shadows).
  */
 
-export type CrowdKind = 'circle' | 'cluster' | 'arc' | 'queue';
+export type CrowdKind = 'circle' | 'cluster' | 'arc' | 'queue' | 'concert' | 'stage';
 
 export interface CrowdSite {
   id: number;
@@ -28,6 +28,18 @@ export interface CrowdSite {
   seed: number;
   radius: number;
   ambientId: number; // addAmbientSpot id or -1
+  /** Concert tile / stage band: own budget + larger materialize radius. */
+  big: boolean;
+  /** Concert tile half extents (axis-aligned rectangle) and the point everyone faces (the stage). */
+  hw: number;
+  hd: number;
+  tx: number;
+  tz: number;
+  /** Members stand at y (stage deck) instead of the ground; never react (they'd drop through the deck). */
+  fixedY: boolean;
+  noReact: boolean;
+  /** Concert fill order (0 = front barrier … 1 = back): with a small budget the front stays packed. */
+  prio: number;
   // runtime
   on: boolean;
   gen: number;
@@ -73,6 +85,10 @@ export class CrowdManager {
   private sphere = new THREE.Sphere();
   readonly root = new THREE.Group();
   materialized = 0;
+  /** Members of materialized concert sites (separate budget). */
+  materializedBig = 0;
+  /** Concert tiles use the mid mesh only this close (from the tile edge): set per quality by NpcSystem. */
+  bigMidDist = 12;
   rebuilds = 0;
   get blobVisible(): boolean {
     return this.blob.visible;
@@ -85,7 +101,8 @@ export class CrowdManager {
     farGeo: THREE.BufferGeometry,
     private ground: (x: number, z: number) => number,
   ) {
-    this.cap = 240;
+    const C = CONFIG.npc.crowds;
+    this.cap = C.budget.high + C.concert.budget.high + MAXM * 2;
     [midGeo, farGeo].forEach((g, i) => {
       const geo = g; // caller passes dedicated geometries (own instanced attributes)
       const mk = () => {
@@ -128,6 +145,7 @@ export class CrowdManager {
     const radius = kind === 'circle' ? 2.3 + c * 0.075 : kind === 'arc' ? 1.4 + c * 0.16 : 0.9 + Math.sqrt(c) * 0.62;
     const s: CrowdSite = {
       id: ++this.seq, x, y, z, facing, kind, count: c, seed, radius: radius + 0.6, ambientId,
+      big: false, hw: 0, hd: 0, tx: x, tz: z, fixedY: false, noReact: false, prio: 0,
       on: false, gen: 0, lod: 1, vis: false, d: 1e9, spawnT: -100, n: 0,
       mx: new Float32Array(MAXM), my: new Float32Array(MAXM), mz: new Float32Array(MAXM), myaw: new Float32Array(MAXM),
       mclip: new Uint8Array(MAXM), moff: new Float32Array(MAXM), mrate: new Float32Array(MAXM),
@@ -137,10 +155,36 @@ export class CrowdManager {
     return s;
   }
 
+  /** Concert floor tile: a dense axis-aligned block of fans facing (tx, tz). */
+  addConcertTile(x: number, y: number, z: number, hw: number, hd: number, count: number, tx: number, tz: number, seed: number): CrowdSite {
+    const s = this.addSite(x, y, z, 'concert', count, Math.atan2(tx - x, tz - z), seed);
+    s.big = true;
+    s.hw = hw;
+    s.hd = hd;
+    s.tx = tx;
+    s.tz = tz;
+    s.radius = Math.hypot(hw, hd) + 0.4;
+    return s;
+  }
+
+  /** Band on the stage deck (fixed height, facing the crowd). */
+  addStageBand(x: number, y: number, z: number, facing: number, count: number, seed: number): CrowdSite {
+    const s = this.addSite(x, y, z, 'stage', count, facing, seed);
+    s.count = count;
+    s.big = true;
+    s.fixedY = true;
+    s.noReact = true;
+    s.radius = count * 1.7 + 1;
+    return s;
+  }
+
   removeSite(s: CrowdSite): void {
     const i = this.sites.indexOf(s);
     if (i >= 0) this.sites.splice(i, 1);
-    if (s.on) this.materialized -= s.n;
+    if (s.on) {
+      if (s.big) this.materializedBig -= s.n;
+      else this.materialized -= s.n;
+    }
     s.on = false;
     this.dirty = true;
   }
@@ -151,6 +195,8 @@ export class CrowdManager {
     const rng = Rng.from(seed, 0x43524f57);
     const C = CONFIG.npc.crowds;
     const size = () => Math.round(C.sizeMin + (C.sizeMax - C.sizeMin) * Math.pow(rng.next(), 1.6));
+    const cc = data?.concert;
+    const inConcert = (x: number, z: number) => !!cc && x > cc.bounds.minX - 6 && x < cc.bounds.maxX + 6 && z > cc.bounds.minZ - 6 && z < cc.bounds.maxZ + 6;
     if (test) {
       const a = src.wanderAreas[0];
       if (a) this.addSite((a.minX + a.maxX) / 2 + 2, a.y, (a.minZ + a.maxZ) / 2 + 2, 'circle', 18, 0, rng.int(1, 1e6));
@@ -165,13 +211,13 @@ export class CrowdManager {
       const k = Math.min(3, Math.max(1, Math.floor((w * d) / 2500)));
       for (let i = 0; i < k; i++) {
         const x = a.minX + 5 + rng.next() * (w - 10), z = a.minZ + 5 + rng.next() * (d - 10);
-        if (nav.insideBuilding(x, z, 4)) continue;
+        if (nav.insideBuilding(x, z, 4) || inConcert(x, z)) continue;
         const kind: CrowdKind = a.kind === 'plaza' ? (rng.chance(0.5) ? 'circle' : 'cluster') : a.kind === 'beach' ? (rng.chance(0.4) ? 'arc' : 'cluster') : 'cluster';
         this.addSite(x, a.y, z, kind, size(), rng.next() * Math.PI * 2, rng.int(1, 1e6));
       }
     }
     src.groupSpots.forEach((g, i) => {
-      if (rng.next() > 0.18 || nav.insideBuilding(g.x, g.z, 2.5)) return;
+      if (rng.next() > 0.3 || nav.insideBuilding(g.x, g.z, 2.5)) return;
       this.addSite(g.x, g.y, g.z, 'cluster', 8 + rng.int(0, 5), 0, rng.int(1, 1e6) + i);
     });
     src.busStops.forEach((b) => {
@@ -179,6 +225,24 @@ export class CrowdManager {
       const back = 1.6;
       this.addSite(b.p.x - Math.sin(b.yaw) * back, b.p.y, b.p.z - Math.cos(b.yaw) * back, 'queue', 8 + rng.int(0, 3), b.yaw, rng.int(1, 1e6));
     });
+    // findable from the first second: the spots nearest the garage spawn always get a crowd
+    const sp = data?.spawn.position;
+    if (sp) {
+      const cands: { x: number; y: number; z: number; d: number; group: boolean }[] = [];
+      for (const g of src.groupSpots) cands.push({ x: g.x, y: g.y, z: g.z, d: Math.hypot(g.x - sp.x, g.z - sp.z), group: true });
+      for (const b of src.busStops) {
+        const x = b.p.x - Math.sin(b.yaw) * 1.6, z = b.p.z - Math.cos(b.yaw) * 1.6;
+        cands.push({ x, y: b.p.y, z, d: Math.hypot(x - sp.x, z - sp.z), group: false });
+      }
+      cands.sort((a, b) => a.d - b.d);
+      let added = 0;
+      for (const c of cands) {
+        if (added >= 3 || c.d > 260) break;
+        if (c.d < 15 || nav.insideBuilding(c.x, c.z, 2.5) || this.insideAny(c.x, c.z, 8)) continue;
+        this.addSite(c.x, c.y, c.z, c.group && added === 0 ? 'circle' : 'cluster', 16 + rng.int(0, 8), rng.next() * Math.PI * 2, rng.int(1, 1e6));
+        added++;
+      }
+    }
     if (data?.jumpRamp) {
       const r = data.jumpRamp;
       const fx = Math.sin(r.yaw), fz = Math.cos(r.yaw);
@@ -194,6 +258,32 @@ export class CrowdManager {
       const l = Math.hypot(dx, dz) || 1;
       this.addSite(ap.terminal.x + (dx / l) * 14, ap.terminal.y, ap.terminal.z + (dz / l) * 14, 'cluster', 22, 0, rng.int(1, 1e6));
     }
+    if (cc) this.generateConcert(cc);
+  }
+
+  /**
+   * CONCERT: the crowd floor in front of the stage split into tiles (each its own site → per-tile LOD, take-over,
+   * culling), densest at the front barrier, thinning toward the back. Plus the band on the deck.
+   */
+  private generateConcert(cc: NonNullable<CityData['concert']>): void {
+    const P = CONFIG.npc.crowds.concert;
+    const rng = Rng.from(CONFIG.game.seed, 0x434f4e43);
+    const f = cc.floor;
+    const fx = Math.sin(cc.stage.yaw), fz = Math.cos(cc.stage.yaw);
+    const tx = cc.stage.x + fx * cc.stage.d * 0.5, tz = cc.stage.z + fz * cc.stage.d * 0.5; // stage front centre
+    const nx = Math.max(1, Math.round((f.maxX - f.minX) / P.tile)), nz = Math.max(1, Math.round((f.maxZ - f.minZ) / P.tile));
+    const tw = (f.maxX - f.minX) / nx, td = (f.maxZ - f.minZ) / nz;
+    const depth = Math.abs(fx) > Math.abs(fz) ? f.maxX - f.minX : f.maxZ - f.minZ;
+    for (let ix = 0; ix < nx; ix++)
+      for (let iz = 0; iz < nz; iz++) {
+        const x = f.minX + (ix + 0.5) * tw, z = f.minZ + (iz + 0.5) * td;
+        // distance from the stage front along the stage axis → density
+        const back = THREE.MathUtils.clamp(((x - tx) * fx + (z - tz) * fz) / depth, 0, 1);
+        const per = (tw * td) / THREE.MathUtils.lerp(P.areaFront, P.areaBack, back);
+        if (rng.next() < back * 0.12) continue; // a few gaps at the back
+        this.addConcertTile(x, f.y, z, tw / 2, td / 2, Math.min(MAXM - 2, Math.round(per * (0.85 + rng.next() * 0.3))), tx, tz, rng.int(1, 1e6)).prio = back;
+      }
+    this.addStageBand(cc.stage.x + fx * cc.stage.d * 0.12, cc.stage.top, cc.stage.z + fz * cc.stage.d * 0.12, cc.stage.yaw, 4, rng.int(1, 1e6)).prio = -1;
   }
 
   insideAny(x: number, z: number, pad: number): CrowdSite | null {
@@ -219,14 +309,14 @@ export class CrowdManager {
   // ───────────── materialization ─────────────
   private materialize(s: CrowdSite, time: number, inView: boolean, density: number, isBlocked: (x: number, z: number) => boolean): void {
     const rng = Rng.from(s.seed, s.id, 0x4d454d);
-    const count = Math.max(4, Math.round(s.count * density));
+    const count = s.kind === 'stage' ? s.count : Math.max(4, Math.round(s.count * (s.big ? Math.max(0.6, density) : density)));
     let n = 0;
     const tryAdd = (x: number, z: number, yaw: number, clip: number) => {
       if (n >= count || isBlocked(x, z)) return;
       for (let j = 0; j < n; j++) if ((s.mx[j] - x) ** 2 + (s.mz[j] - z) ** 2 < 0.4) return;
       s.mx[n] = x;
       s.mz[n] = z;
-      s.my[n] = this.ground(x, z);
+      s.my[n] = s.fixedY ? s.y : this.ground(x, z);
       if (!Number.isFinite(s.my[n])) s.my[n] = s.y;
       s.myaw[n] = yaw;
       s.mclip[n] = clip;
@@ -238,7 +328,26 @@ export class CrowdManager {
       n++;
     };
     const pick = (opts: number[], w: number[]) => rng.weighted(opts, w);
-    if (s.kind === 'circle') {
+    if (s.kind === 'concert') {
+      // packed fans, everyone facing the stage, bouncing / cheering / arms up
+      const cols = Math.max(1, Math.round(Math.sqrt((count * s.hw) / Math.max(0.5, s.hd))));
+      const rows = Math.ceil(count / cols);
+      for (let r = 0; r < rows && n < count; r++)
+        for (let c = 0; c < cols && n < count; c++) {
+          const x = s.x - s.hw + ((c + 0.5 + rng.range(-0.3, 0.3)) / cols) * 2 * s.hw;
+          const z = s.z - s.hd + ((r + 0.5 + rng.range(-0.3, 0.3)) / rows) * 2 * s.hd;
+          tryAdd(x, z, Math.atan2(s.tx - x, s.tz - z) + rng.range(-0.35, 0.35), pick([CLIP.jump, CLIP.cheer, CLIP.sway, CLIP.clap, CLIP.idle], [34, 26, 18, 14, 8]));
+        }
+    } else if (s.kind === 'stage') {
+      // the band: a line across the deck facing the crowd
+      const fx = Math.sin(s.facing), fz = Math.cos(s.facing);
+      for (let i = 0; i < count; i++) {
+        const lat = (i - (count - 1) / 2) * 3.4;
+        const lead = i === Math.floor(count / 2);
+        const fwd = lead ? 1.6 : 0; // the singer steps forward
+        tryAdd(s.x - fz * lat + fx * fwd, s.z + fx * lat + fz * fwd, s.facing, lead ? CLIP.cheer : pick([CLIP.jump, CLIP.sway, CLIP.cheer], [40, 30, 30]));
+      }
+    } else if (s.kind === 'circle') {
       // audience around a street performer
       tryAdd(s.x, s.z, rng.next() * Math.PI * 2, CLIP.cheer);
       const R = s.radius - 0.6;
@@ -286,14 +395,16 @@ export class CrowdManager {
     s.on = true;
     s.gen++;
     s.spawnT = inView ? time : time - 10;
-    this.materialized += n;
+    if (s.big) this.materializedBig += n;
+    else this.materialized += n;
     this.dirty = true;
   }
 
   private dematerialize(s: CrowdSite): void {
     if (!s.on) return;
     s.on = false;
-    this.materialized -= s.n;
+    if (s.big) this.materializedBig -= s.n;
+    else this.materialized -= s.n;
     s.n = 0;
     s.app.length = 0;
     this.dirty = true;
@@ -303,33 +414,43 @@ export class CrowdManager {
    * Per frame: cheap site-level work only (≈ a dozen sphere tests). Instance buffers are rebuilt only when the
    * visible set / LOD / membership changes.
    */
-  update(focus: THREE.Vector3, camPos: THREE.Vector3, frustum: THREE.Frustum, time: number, budget: number, density: number, farSpawn: number, allowPop: boolean, isBlocked: (x: number, z: number) => boolean): void {
+  update(focus: THREE.Vector3, camPos: THREE.Vector3, frustum: THREE.Frustum, time: number, budget: number, bigBudget: number, density: number, farSpawn: number, isBlocked: (x: number, z: number) => boolean): void {
     const C = CONFIG.npc.crowds;
     const R = C.materializeR;
+    const RB = C.concert.materializeR;
     // dematerialize far sites, materialize near ones (nearest first, within the member budget)
     for (const s of this.sites) {
       const d2 = (s.x - focus.x) ** 2 + (s.z - focus.z) ** 2;
-      if (s.on && d2 > (R + 25) ** 2) {
+      if (s.on && d2 > ((s.big ? RB : R) + 25) ** 2) {
         this.sphere.set(this.tmp.set(s.x, s.y + 1, s.z), s.radius + 1);
         const camD = Math.hypot(s.x - camPos.x, s.z - camPos.z);
         if (!frustum.intersectsSphere(this.sphere) || camD > farSpawn + 40) this.dematerialize(s);
       }
     }
-    let best: CrowdSite | null = null;
-    let bestD = Infinity;
-    for (const s of this.sites) {
-      if (s.on) continue;
-      const d2 = (s.x - focus.x) ** 2 + (s.z - focus.z) ** 2;
-      if (d2 > R * R || d2 >= bestD) continue;
-      if (this.materialized + s.count > budget) continue;
-      best = s;
-      bestD = d2;
-    }
-    if (best) {
-      this.sphere.set(this.tmp.set(best.x, best.y + 1, best.z), best.radius + 2 + Math.sqrt(bestD) * 0.4);
-      const inView = frustum.intersectsSphere(this.sphere);
-      const camD = Math.hypot(best.x - camPos.x, best.z - camPos.z);
-      if (!inView || allowPop || camD > farSpawn) this.materialize(best, time, inView, density, isBlocked);
+    // nearest unmaterialized site within its radius + budget (one mini crowd, a few concert tiles per frame).
+    // In-view sites materialize too: members dither-fade in (spawnT), so nothing pops. (Before: a close in-view
+    // crowd was skipped but still picked as "nearest" every frame, so it blocked every other crowd forever.)
+    for (let k = 0; k < 1 + C.concert.perFrame; k++) {
+      const big = k > 0;
+      let best: CrowdSite | null = null;
+      let bestD = Infinity;
+      for (const s of this.sites) {
+        if (s.on || s.big !== big) continue;
+        const d2 = (s.x - focus.x) ** 2 + (s.z - focus.z) ** 2;
+        const r = big ? RB : R;
+        const key = big ? s.prio : d2; // concert: front tiles first
+        if (d2 > r * r || key >= bestD) continue;
+        if (big ? this.materializedBig + s.count > bigBudget : this.materialized + s.count > budget) continue;
+        best = s;
+        bestD = key;
+      }
+      if (!best) {
+        if (big) break;
+        continue;
+      }
+      this.sphere.set(this.tmp.set(best.x, best.y + 1, best.z), best.radius + 2);
+      const inView = frustum.intersectsSphere(this.sphere) && Math.hypot(best.x - camPos.x, best.z - camPos.z) < farSpawn * 2.5;
+      this.materialize(best, time, inView, density, isBlocked);
     }
     // visibility + LOD per site
     for (const s of this.sites) {
@@ -338,7 +459,7 @@ export class CrowdManager {
       s.d = d;
       this.sphere.set(this.tmp.set(s.x, s.y + 1, s.z), s.radius + 1.2 + d * 0.12);
       const vis = frustum.intersectsSphere(this.sphere);
-      const lod = d - s.radius < C.midDist ? 0 : 1;
+      const lod = d - s.radius < (s.big ? this.bigMidDist : C.midDist) ? 0 : 1;
       if (vis !== s.vis || (vis && lod !== s.lod)) {
         s.vis = vis;
         s.lod = lod;

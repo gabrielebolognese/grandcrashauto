@@ -267,6 +267,8 @@ export class NpcSystem implements INpcSystem {
       ev.on('qualityChanged', () => this.applyQuality()),
       ev.on('horn', (e) => e.on && this.onHorn(e.position)),
       ev.on('explosion', (e) => this.onExplosion(e.position, e.radius, e.force)),
+      // plane fireballs scatter crowds too (e.g. a jet into the concert)
+      ev.on('planeExplosion', (e) => this.onExplosion(e.position, e.radius, e.kind === 'secondary' ? 1 : 1.6)),
       ev.on('carReset', () => {
         this.fillT = 0.5;
       }),
@@ -1281,7 +1283,7 @@ export class NpcSystem implements INpcSystem {
     // static crowd members right in front of the car step aside too (taken over, staggered)
     if (c.active) {
       for (const site of this.crowd.sites) {
-        if (!site.on || (site.x - c.x) ** 2 + (site.z - c.z) ** 2 > (site.radius + 16) ** 2) continue;
+        if (!site.on || site.noReact || (site.x - c.x) ** 2 + (site.z - c.z) ** 2 > (site.radius + 16) ** 2) continue;
         for (let i = 0; i < site.n; i++) {
           if (!site.alive[i] || site.pend[i]) continue;
           const dx = site.mx[i] - c.x, dz = site.mz[i] - c.z;
@@ -1298,6 +1300,38 @@ export class NpcSystem implements INpcSystem {
       this.hornT = 1;
       this.ctx.events.emit('npcStartled', { position: pos, count, scream: false });
     }
+  }
+
+  private updateCrowds(): void {
+    const lvl = this.ctx.quality.level;
+    const C = CONFIG.npc.crowds;
+    const budget = (C.budget as Record<string, number>)[lvl] ?? 100;
+    const mob = this.ctx.quality.isMobile ? C.concert.mobile : 1;
+    const big = Math.round(((C.concert.budget as Record<string, number>)[lvl] ?? 300) * mob);
+    this.crowd.bigMidDist = ((C.concert.midDist as Record<string, number>)[lvl] ?? 12) * mob;
+    this.crowd.update(this.focus, this.camPos, this.frustum, this.animTime, budget, big, this.densityNow, this.farSpawnNow, this.blockedFn);
+  }
+
+  private crowdSpotList: { x: number; z: number; count: number; concert: boolean }[] = [];
+  private spotsKey = '';
+  crowdSpots(): readonly { x: number; z: number; count: number; concert: boolean }[] {
+    const sites = this.crowd?.sites ?? [];
+    const key = sites.length + ':' + (sites[0]?.x ?? 0).toFixed(1) + ':' + (sites[0]?.z ?? 0).toFixed(1);
+    if (key === this.spotsKey) return this.crowdSpotList;
+    this.spotsKey = key;
+    this.crowdSpotList = [];
+    let cx = 0, cz = 0, cn = 0, tiles = 0;
+    for (const s of sites) {
+      if (s.kind === 'stage') continue;
+      if (s.kind === 'concert') {
+        cx += s.x * s.count;
+        cz += s.z * s.count;
+        cn += s.count;
+        tiles++;
+      } else this.crowdSpotList.push({ x: s.x, z: s.z, count: s.count, concert: false });
+    }
+    if (tiles) this.crowdSpotList.push({ x: cx / cn, z: cz / cn, count: cn, concert: true });
+    return this.crowdSpotList;
   }
 
   private onExplosion(pos: THREE.Vector3, radius: number, force: number): void {
@@ -1333,7 +1367,7 @@ export class NpcSystem implements INpcSystem {
       }
     }
     for (const site of this.crowd.sites) {
-      if (!site.on) continue;
+      if (!site.on || site.noReact) continue;
       if (Math.hypot(site.x - pos.x, site.z - pos.z) > flee + site.radius) continue;
       for (let i = 0; i < site.n; i++) if (site.alive[i] && !site.pend[i]) blast(site.mx[i], site.mz[i], -1, site, i);
     }
@@ -1445,7 +1479,7 @@ export class NpcSystem implements INpcSystem {
       startled++;
     }
     for (const site of this.crowd.sites) {
-      if (!site.on) continue;
+      if (!site.on || site.noReact) continue;
       const sr = site.radius + reach;
       if ((site.x - c.x) ** 2 + (site.z - c.z) ** 2 > sr * sr) continue;
       for (let i = 0; i < site.n; i++) {
@@ -1729,7 +1763,7 @@ export class NpcSystem implements INpcSystem {
     }
     // static crowd members in the swept box → taken over by the dynamic system and knocked / shoved
     for (const site of this.crowd.sites) {
-      if (!site.on) continue;
+      if (!site.on || site.noReact) continue;
       const sr = site.radius + reach;
       if ((site.x - t.x) ** 2 + (site.z - t.z) ** 2 > sr * sr) continue;
       for (let i = 0; i < site.n; i++) {
@@ -1861,15 +1895,10 @@ export class NpcSystem implements INpcSystem {
     if (hide !== this.hidden) {
       this.hidden = !!hide;
       this.root.visible = !this.hidden;
-      this.crowd.root.visible = !this.hidden;
       if (this.hidden) for (const n of this.npcs) if (n.active) this.despawn(n);
       else this.fillT = 0.8;
     }
     this.debug.hidden = this.hidden;
-    if (this.hidden) {
-      this.debug.active = this.activeCount;
-      return;
-    }
 
     // camera frustum (from last frame's camera; inflated margins cover the 1-frame lag)
     const cam = ctx.engine.camera;
@@ -1877,6 +1906,14 @@ export class NpcSystem implements INpcSystem {
     this.camPos.setFromMatrixPosition(cam.matrixWorld);
     this.projScreen.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projScreen);
+    if (this.hidden) {
+      // flying high: the static crowds (zero CPU per frame) stay — the concert is visible from the air
+      this.animTime += dt;
+      this.uniforms.uNpcTime.value = this.animTime;
+      this.updateCrowds();
+      this.debug.active = this.activeCount;
+      return;
+    }
 
     this.updateCar();
     this.updateEnvironment();
@@ -1898,9 +1935,7 @@ export class NpcSystem implements INpcSystem {
     }
     this.processPending(dt);
     // static mini crowds: site-level bookkeeping only (instance data rewritten only on change)
-    const lvl = ctx.quality.level;
-    const budget = (CONFIG.npc.crowds.budget as Record<string, number>)[lvl] ?? 100;
-    this.crowd.update(this.focus, this.camPos, this.frustum, this.animTime, budget, this.densityNow, this.farSpawnNow, this.fillT > 0, this.blockedFn);
+    this.updateCrowds();
 
     this.rebuildHash();
     this.dangerScan();

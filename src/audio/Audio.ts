@@ -6,6 +6,7 @@ import type { GameContext, IAudio } from '../game/contracts';
 import type { CarModelId } from '../vehicle/CarBuild';
 import type { DistrictId } from '../world/types';
 import { Ambience } from './Ambience';
+import { ConcertSound } from './ConcertSound';
 import { Baker } from './Baker';
 import { emptyBank, toBuffer, type BakeKind, type SfxBank } from './bakes';
 import { EngineSound } from './EngineSound';
@@ -52,6 +53,8 @@ export class Audio implements IAudio {
   private engine: EngineSound | null = null;
   private veh: VehicleSounds | null = null;
   private amb: Ambience | null = null;
+  private concert: ConcertSound | null = null;
+  private stageV = new THREE.Vector3();
   private plane: PlaneSounds | null = null;
   private weather: WeatherSounds | null = null;
   private readonly listener = new Listener();
@@ -217,6 +220,7 @@ export class Audio implements IAudio {
       this.engine = new EngineSound(ac, this.mixer, this.sfx, this.listener, this.bank, this.baker);
       this.veh = new VehicleSounds(ac, this.mixer, this.sfx, this.listener, this.bank);
       this.amb = new Ambience(ac, this.mixer, this.sfx, this.listener, this.bank);
+      this.concert = new ConcertSound(ac, this.mixer, this.listener, this.bank);
       this.plane = new PlaneSounds(ac, this.mixer, this.sfx, this.listener, this.bank);
       this.weather = new WeatherSounds(ac, this.mixer, this.sfx, this.bank);
       const low = this.ctx.quality.level === 'low' || this.ctx.quality.isMobile;
@@ -594,6 +598,13 @@ export class Audio implements IAudio {
       rain: wx?.rain ?? 0,
       altitude: alt,
     });
+    // the beach concert (heard from afar: find it by ear)
+    const cc = this.ctx.world?.data?.concert;
+    if (this.concert && cc) {
+      const s = cc.stage;
+      this.stageV.set(s.x + Math.sin(s.yaw) * s.d * 0.5, s.top + 4, s.z + Math.cos(s.yaw) * s.d * 0.5);
+      this.concert.update(this.stageV, this.state === 'driving' || this.state === 'menu' || this.state === 'title');
+    }
     this.pool.update(now);
   }
 

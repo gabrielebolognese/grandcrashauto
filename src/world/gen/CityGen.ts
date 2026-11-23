@@ -444,6 +444,7 @@ export function generateCity(seed: number): { layout: CityLayout; hf: HeightFiel
     ctx.space.add(b.x, b.z, Math.max(1, r - 0.5));
   }
   stuntRamps(ctx);
+  concertGrounds(ctx);
   furnish(ctx, bout.yardSpots);
   ped.finalize();
   data.ped.nodes = ped.nodes;
@@ -460,6 +461,12 @@ export function generateCity(seed: number): { layout: CityLayout; hf: HeightFiel
     { id: 'highway', name: 'Highway Interchange', pose: pose(L.HW.xEdge - L.HW.laneW / 2, L.HW.gradeY, -120, 0) },
     { id: 'jump', name: 'Big Jump', pose: { position: { ...data.jumpRamp!.position }, yaw: data.jumpRamp!.yaw } },
   ];
+  if (data.concert) {
+    // on the sand behind the crowd, facing the stage (city POI → always teleportable)
+    const c = data.concert;
+    const px = c.floor.maxX + 9, pz = c.stage.z;
+    data.pois.push({ id: 'concert', name: 'Concert', pose: pose(px, L.beachHeight(px, pz) + 0.3, pz, c.stage.yaw + Math.PI) });
+  }
 
   // ───────────────────────────── district grid ─────────────────────────────
   const dg = data.districtGridSize;
@@ -470,6 +477,41 @@ export function generateCity(seed: number): { layout: CityLayout; hf: HeightFiel
       data.districtGrid.push(districtAtPoint(layout, hf, blockIslands, x, z));
     }
   return { layout, hf, ctx };
+}
+
+/**
+ * The beach CONCERT at the west end of the beach: a stage facing east along the sand (deck, LED wall, truss roof,
+ * speaker stacks, crowd barrier — all solid), the crowd floor in front of it (NPC module fills it, the stage
+ * renderer adds the screen / lights / banner, audio plays the show).
+ */
+function concertGrounds(ctx: GenCtx): void {
+  const { layout, data } = ctx;
+  const zc = (L.BEACH_START_Z + L.SHORE_Z) / 2;
+  const yaw = Math.PI / 2; // faces +X
+  const st = { x: -366, w: 22, d: 12, base: -0.5, top: 1.8 };
+  const x0 = st.x - st.d / 2, x1 = st.x + st.d / 2;
+  const z0 = zc - st.w / 2, z1 = zc + st.w / 2;
+  const box = (cx: number, cy: number, cz: number, w: number, h: number, d: number, col: number, mat: number) =>
+    layout.solids.push({ cx, cy, cz, w, h, d, yaw: 0, col, mat, collide: true });
+  box(st.x, st.base, zc, st.d, st.top - st.base, st.w, 0x3a3d4c, Mat.Plain); // deck
+  box(x1 - 0.15, st.top - 0.02, zc, 0.3, 0.06, st.w, 0xffd166, Mat.Paint); // deck edge stripe
+  box(x0 - 0.6, st.base, zc, 1.2, 13.5 - st.base, st.w + 4, 0x2a2c3a, Mat.Plain); // back wall (LED screen frame)
+  for (const px of [x0 - 0.1, x1 + 0.5]) for (const pz of [z0 - 1.1, z1 + 1.1]) box(px, st.base, pz, 0.9, 14 - st.base, 0.9, 0xd9dde6, Mat.Metal); // truss towers
+  box(st.x - 0.1, 14, zc, st.d + 2.2, 1.6, st.w + 3.4, 0xff7a6b, Mat.Paint); // roof
+  for (const pz of [z0 - 3.4, z1 + 3.4]) {
+    box(x1 - 1.6, st.base, pz, 3.2, 9 - st.base, 3.2, 0x23252e, Mat.Plain); // speaker stack
+    box(x1 - 1.6, 9, pz, 3.4, 0.4, 3.4, 0x5cc8d6, Mat.Paint);
+  }
+  box(x1 + 3.2, -0.4, zc, 0.35, 1.5, st.w + 6, 0xdfe3ea, Mat.Metal); // crowd barrier
+  const floor = { minX: x1 + 4.6, maxX: x1 + 4.6 + 62, minZ: L.BEACH_START_Z + 2.2, maxZ: L.SHORE_Z - 2.4, y: L.SAND_TOP * 0.5 };
+  data.concert = {
+    stage: { x: st.x, y: 0, z: zc, yaw, w: st.w, d: st.d, top: st.top },
+    screen: { x: x0 + 0.02, y: 8, z: zc, w: 19, h: 8.6 },
+    floor,
+    bounds: { minX: x0 - 2, maxX: floor.maxX, minZ: L.BEACH_START_Z, maxZ: L.SHORE_Z },
+  };
+  // keep furniture / random spots off the grounds
+  for (let x = x0 - 2; x <= floor.maxX + 20; x += 6) for (let z = L.BEACH_START_Z + 2; z <= L.SHORE_Z; z += 6) ctx.space.add(x, z, 3.5);
 }
 
 /** A few hand-placed stunt kickers around the city (wedge solids + raster heights + warning signs). */

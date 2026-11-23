@@ -10,6 +10,7 @@ import { HeightField, SURF } from './HeightField';
 import { ChunkBuilder, keyOf } from './render/ChunkBuilder';
 import { BuildingRenderer } from './render/Buildings';
 import { AirportRenderer } from './render/AirportRenderer';
+import { ConcertStage } from './render/ConcertStage';
 import { buildHighwayMeshes } from './render/HighwayMesh';
 import { createGroundMaterial } from './render/materials';
 import { WorldPhysics } from './WorldPhysics';
@@ -41,6 +42,7 @@ export class World implements IWorld {
   private queue: string[] = [];
   private buildings!: BuildingRenderer;
   private airport: AirportRenderer | null = null;
+  private concert: ConcertStage | null = null;
   private lodMesh!: THREE.Mesh;
   private lodRanges!: Map<string, [number, number]>;
   private lodIndex!: Uint32Array;
@@ -105,6 +107,10 @@ export class World implements IWorld {
     if (layout.airport) {
       this.airport = new AirportRenderer(layout.airport, this.groundMat, this.buildings.facade, this.buildings.roofMat);
       this.root.add(this.airport.group);
+    }
+    if (this.data.concert) {
+      this.concert = new ConcertStage(this.data.concert);
+      this.root.add(this.concert.group);
     }
 
     // ground chunks + LOD layer
@@ -294,6 +300,7 @@ export class World implements IWorld {
     }
     this.applyStreamingChanges();
     this.airport?.update(this.focusAbs.x, this.focusAbs.z, this.ctx.engine.size.height);
+    this.concert?.update(this.ctx.engine.camera.position);
   }
 
   // ───────────────────────────── queries ─────────────────────────────
@@ -460,6 +467,7 @@ export class World implements IWorld {
   }
 
   dispose(): void {
+    this.concert?.dispose();
     this.ctx.engine.scene.remove(this.root);
     for (const m of this.loaded.values()) m?.geometry.dispose();
     this.lodMesh.geometry.dispose();

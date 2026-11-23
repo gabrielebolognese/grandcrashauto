@@ -183,6 +183,8 @@ export interface INpcSystem extends GameSystem {
   /** Part 3: register a small ambient spot (rest stop, viewpoint) where a few NPCs idle/wander; returns an id. */
   addAmbientSpot?(spot: { position: THREE.Vector3; radius: number; count: number; benches?: { p: THREE.Vector3; yaw: number }[] }): number;
   removeAmbientSpot?(id: number): void;
+  /** Crowd sites for the map / minimap (LOCAL x/z; one entry per mini crowd, the concert as a single entry). */
+  crowdSpots?(): readonly { x: number; z: number; count: number; concert: boolean }[];
 }
 
 // ─────────────────────────── car models (src/vehicle/models) ─────────────────────

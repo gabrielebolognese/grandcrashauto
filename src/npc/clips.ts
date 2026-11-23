@@ -42,6 +42,8 @@ export const CLIP = {
   flinch: 24,
   cheer: 25,
   clap: 26,
+  jump: 27,
+  sway: 28,
 } as const;
 export type ClipId = (typeof CLIP)[keyof typeof CLIP];
 
@@ -908,6 +910,34 @@ function clap(t: number, p: Pose): void {
   p.set(BONE.Head, -2 + 2 * sin(TAU * 3 * t), 0, 0);
 }
 
+/** Concert: bouncing on the beat (120 bpm) with a fist pump — feet planted in the dip, off the ground at the top. */
+function jump(t: number, p: Pose): void {
+  const ph = TAU * 2 * t;
+  stand(p);
+  const up = pos(sin(ph));
+  const dip = pos(-sin(ph));
+  p.root[1] = HIP_H - 0.08 * dip + 0.14 * up;
+  p.set(BONE.Pelvis, 6 * dip).set(BONE.Spine, 4 * dip).set(BONE.Head, -8 + 10 * dip);
+  p.set(BONE.UArmR, -118 - 52 * up, 0, -12).set(BONE.LArmR, -34 + 26 * up);
+  p.set(BONE.UArmL, -24 - 14 * up, 0, 20).set(BONE.LArmL, -70);
+  p.ankle(0, AY + 0.12 * up, -0.004).ankle(1, AY + 0.12 * up, -0.004);
+  solveLegIK(p);
+}
+
+/** Concert: both arms up, swaying side to side. */
+function sway(t: number, p: Pose): void {
+  const s = sin((TAU * t) / 2);
+  stand(p);
+  p.root[0] = 0.03 * s;
+  p.root[1] = HIP_H - 0.01 - 0.01 * Math.abs(s);
+  p.set(BONE.Pelvis, 0, 0, 4 * s).set(BONE.Spine, 0, 0, 5 * s).set(BONE.Chest, -4, 0, 5 * s);
+  p.set(BONE.UArmL, -164, 0, 16 + 14 * s).set(BONE.LArmL, -10);
+  p.set(BONE.UArmR, -164, 0, -16 + 14 * s).set(BONE.LArmR, -10);
+  p.set(BONE.Head, -10, 0, 7 * s);
+  p.ankle(0, AY, -0.004).ankle(1, AY, -0.004);
+  solveLegIK(p);
+}
+
 function buildFlinch(): PoseFn {
   return keyed([
     { t: 0, build: (p) => standAt(p, 0) },
@@ -970,6 +1000,8 @@ function defs(): ClipDef[] {
     { id: CLIP.flinch, name: 'flinch', duration: 0.7, loop: false, fps: 30, fn: buildFlinch() },
     { id: CLIP.cheer, name: 'cheer', duration: 2, loop: true, fps: 24, fn: cheer },
     { id: CLIP.clap, name: 'clap', duration: 1, loop: true, fps: 24, fn: clap },
+    { id: CLIP.jump, name: 'jump', duration: 1, loop: true, fps: 24, fn: jump },
+    { id: CLIP.sway, name: 'sway', duration: 2, loop: true, fps: 20, fn: sway },
   ];
 }
 

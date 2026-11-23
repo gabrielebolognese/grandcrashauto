@@ -804,12 +804,16 @@ export const CONFIG = {
     rainDensity: 0.35, // density multiplier in heavy rain / storm
     mix: { walker: 0.5, group: 0.15, bench: 0.13, bus: 0.08, wander: 0.14 },
     crowds: {
-      sizeMin: 8,
+      sizeMin: 10,
       sizeMax: 30,
-      materializeR: 170, // m: static crowds appear within this radius (nearest first)
+      materializeR: 260, // m: static crowds appear within this radius (nearest first; far LOD is cheap)
       midDist: 40, // m: mid mesh closer than this (from the crowd edge), far mesh beyond
-      budget: { low: 48, medium: 110, high: 220 }, // max static crowd members at once
+      budget: { low: 70, medium: 150, high: 260 }, // max static crowd members at once (concert: own budget)
       rejoinAfter: 14, // s: a calmed-down member walks back into its crowd (when unseen)
+      // The beach CONCERT (CityData.concert): the floor in front of the stage is split into ~tile-m blocks, packed
+      // areaFront m² per fan at the barrier → areaBack at the back; own member budget, seen from much farther.
+      // midDist: concert tiles switch to the detailed mid mesh only this close (1780 vs 288 tris per fan); phones ×mobile.
+      concert: { tile: 7.5, areaFront: 1.2, areaBack: 1.9, materializeR: 520, perFrame: 4, budget: { low: 420, medium: 950, high: 1150 }, midDist: { low: 4, medium: 12, high: 22 }, mobile: 0.5 },
     },
     testWorld: 'auto', // 'auto' = temporary ped graph when the world has none (also ?npctest)
   },
@@ -895,6 +899,8 @@ export const CONFIG = {
     masterGain: 0.9,
     volumeCurve: 1.7,
     busGain: { engine: 0.85, sfx: 0.85, ambience: 0.65, ui: 0.5 },
+    // beach concert live music (ambience bus): level at the stage, 1 / (1 + (d / refDist)^1.5) falloff, silent past maxDist
+    concert: { level: 0.6, refDist: 45, maxDist: 850 },
     compressor: { threshold: -18, knee: 12, ratio: 3.5, attack: 0.004, release: 0.22 },
     limiter: { threshold: -2.5, knee: 0, ratio: 20, attack: 0.001, release: 0.09 },
     reverb: { seconds: 2.6, secondsLow: 1.4, lowDecay: 0.62, highDecay: 0.22, returnGain: 0.55, earlyTaps: 7 },

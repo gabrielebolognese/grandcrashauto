@@ -125,6 +125,7 @@ export class MapRenderer {
     this.drawAirport();
     this.drawGraphHighways();
     this.drawRoute();
+    this.drawCrowds();
     this.drawPois();
     this.drawPlayer();
   }
@@ -506,6 +507,35 @@ export class MapRenderer {
       g.beginPath();
       g.arc(x, y, 2.2, 0, Math.PI * 2);
       g.fill();
+    }
+  }
+
+  /** Mini crowds as lilac people badges (the concert has its own POI pin). */
+  private drawCrowds(): void {
+    const spots = this.ctx.npcs?.crowdSpots?.();
+    if (!spots?.length) return;
+    const g = this.g;
+    const o = this.ctx.origin.offset;
+    const ppm = this.view.ppm;
+    const r = ppm > 0.6 ? 9 : ppm > 0.15 ? 7 : 4.5;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    for (const s of spots) {
+      if (s.concert) continue;
+      const x = this.sx(s.x + o.x);
+      const y = this.sy(s.z + o.z);
+      if (x < -20 || y < -20 || x > this.W + 20 || y > this.H + 20) continue;
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fillStyle = '#9b7fe0';
+      g.fill();
+      g.lineWidth = 2;
+      g.strokeStyle = '#fff';
+      g.stroke();
+      if (r >= 7) {
+        g.font = `${Math.round(r * 1.1)}px ${FONT}`;
+        g.fillText('👥', x, y + 0.5);
+      }
     }
   }
 

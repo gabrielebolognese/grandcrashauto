@@ -60,6 +60,12 @@ export function shiftCityData(d: CityData, dx: number, dz: number): void {
     rect(d.airport.bounds);
   }
   if (d.pois) for (const p of d.pois) pose(p.pose);
+  if (d.concert) {
+    v(d.concert.stage);
+    v(d.concert.screen);
+    rect(d.concert.floor);
+    rect(d.concert.bounds);
+  }
   rect(d.island);
   // districtGrid is indexed in ABSOLUTE space: world.districtAt() must add ctx.origin.offset before indexing.
 }

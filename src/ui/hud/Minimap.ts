@@ -454,6 +454,12 @@ export class Minimap {
     if (gp) this.marker(gp.x + this.ox - ax, gp.z + this.oz - az, rot, scale, W, '#ff7a6b', 'G', !plane);
     if (d.jumpRamp && !plane) this.marker(d.jumpRamp.position.x + this.ox - ax, d.jumpRamp.position.z + this.oz - az, rot, scale, W, '#ffcf5a', '▲', false);
     if (d.airport) this.marker(d.airport.terminal.x + this.ox - ax, d.airport.terminal.z + this.oz - az, rot, scale, W, '#5a6fd8', '✈', true);
+    // crowds: mini crowds as lilac dots, the concert as a rim-clamped ♪ (always points the way)
+    const spots = ctx.npcs?.crowdSpots?.();
+    if (spots) for (const s of spots) {
+      if (s.concert) this.marker(s.x + this.ox - ax, s.z + this.oz - az, rot, scale, W, '#e0367a', '♪', true);
+      else if (!plane) this.dot(s.x + this.ox - ax, s.z + this.oz - az, rot, scale, W, '#9b7fe0');
+    }
     const dest = ctx.nav?.destination?.pose?.position;
     if (dest) this.marker(dest.x + this.ox - ax, dest.z + this.oz - az, rot, scale, W, '#2aa3c4', '★', true);
 
@@ -543,6 +549,24 @@ export class Minimap {
   /** Call on 'originShift' — the route polyline cache is rebuilt from the shifted local points. */
   onOriginShift(): void {
     this.routeRef = null;
+  }
+
+  private dot(dx: number, dz: number, rot: number, scale: number, W: number, color: string): void {
+    const c = Math.cos(rot);
+    const sn = Math.sin(rot);
+    const x = (dx * c - dz * sn) * scale;
+    const y = (dx * sn + dz * c) * scale;
+    if (Math.hypot(x, y) > W / 2 - 10 * this.dpr) return;
+    const g = this.g;
+    g.setTransform(this.dpr, 0, 0, this.dpr, W / 2 + x, W / 2 + y);
+    g.beginPath();
+    g.arc(0, 0, 4.5, 0, Math.PI * 2);
+    g.fillStyle = color;
+    g.fill();
+    g.lineWidth = 1.5;
+    g.strokeStyle = '#fff';
+    g.stroke();
+    g.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   private marker(dx: number, dz: number, rot: number, scale: number, W: number, color: string, label: string, clampToRim = true): void {

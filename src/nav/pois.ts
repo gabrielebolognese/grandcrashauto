@@ -15,6 +15,7 @@ export interface NavPoi extends PointOfInterest {
 }
 
 const ICON_BY_KEY: [RegExp, string][] = [
+  [/concert|stage|festival/, '🎤'],
   [/airport|apron|terminal/, '✈️'],
   [/garage/, '🔧'],
   [/beach|shore/, '🏖️'],

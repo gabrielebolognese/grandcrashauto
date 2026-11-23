@@ -172,6 +172,18 @@ export interface AirportData {
   elevation: number; // airport ground height (m)
 }
 
+/** Beach concert grounds (LOCAL coordinates, shifted with the floating origin). */
+export interface ConcertData {
+  /** Deck footprint centre (x, z), sand level y, deck top height, facing yaw (toward the crowd), w across × d deep. */
+  stage: { x: number; y: number; z: number; yaw: number; w: number; d: number; top: number };
+  /** LED screen centre + size (faces along the stage yaw). */
+  screen: { x: number; y: number; z: number; w: number; h: number };
+  /** Axis-aligned crowd floor at height y. */
+  floor: { minX: number; maxX: number; minZ: number; maxZ: number; y: number };
+  /** The whole grounds incl. stage + speakers (random crowds / props keep out). */
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+}
+
 export interface CityData {
   seed: number;
   size: number;
@@ -195,6 +207,8 @@ export interface CityData {
   jumpRamp: Pose | null;
   /** Part 2: the airport (optional until the world module builds it). */
   airport?: AirportData;
+  /** The beach concert (stage + crowd floor): NPC crowd, stage renderer, music, map POI. */
+  concert?: ConcertData;
   /** Part 2: points of interest for the map / directions (on-road poses). */
   pois?: { id: string; name: string; pose: Pose }[];
   /** Part 2: island land bounds (the ocean surrounds it). */
