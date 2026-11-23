@@ -84,7 +84,7 @@ export class Props implements IProps {
     const ev = ctx.events;
     this.offs.push(
       ev.on('explosion', (e) => this.phys?.explode(e.position, e.radius, e.force ?? 1, this.focus)),
-      ev.on('planeExplosion', (e) => this.phys?.explode(e.position, e.radius, Math.min(3, Math.max(1, e.radius / 18)), this.focus)),
+      ev.on('planeExplosion', (e) => !e.replay && this.phys?.explode(e.position, e.radius, Math.min(3, Math.max(1, e.radius / 18)), this.focus)),
       ev.on('originShift', (e) => this.onOriginShift(e.delta.x, e.delta.z)),
       ev.on('qualityChanged', () => this.applyDensity()),
     );

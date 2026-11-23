@@ -1,4 +1,5 @@
 import { CONFIG } from '../../config';
+import type { PlaneTypeId } from '../../plane/types';
 import { h, setVisible } from '../dom';
 import type { Screen, UIHost } from '../host';
 import { button } from '../widgets';
@@ -15,6 +16,16 @@ export class MainMenu implements Screen {
     const { ctx } = host;
     const play = button('Play', { variant: 'primary', icon: 'play', cls: 'mm-play', sound: 'confirm', onClick: () => ctx.game.play() });
     this.garageBtn = button('Garage', { icon: 'garage', cls: 'mm-garage', sub: 'Paint · wheels · tuning', onClick: () => ctx.game.openGarage() });
+    // Click and fly (user request): straight into the air, no driving / boarding / teleport.
+    const fly = h('div', { class: 'mm-fly' }, h('div', { class: 'mm-fly-title', text: 'FLY NOW' }));
+    const row = h('div', { class: 'mm-fly-row' });
+    const planes: [PlaneTypeId, string, string][] = [['prop', '🛩️', 'Prop'], ['bizjet', '🛩️', 'Jet'], ['airliner', '✈️', 'Airliner'], ['jumbo', '✈️', 'Jumbo']];
+    for (const [t, em, name] of planes) {
+      const b = h('button', { type: 'button', 'aria-label': `Fly the ${name}` }, h('span', { class: 'em', text: em }), h('span', { text: name }));
+      b.addEventListener('click', () => ctx.game.quickFly?.(t));
+      row.append(b);
+    }
+    fly.append(row);
     const settings = button('Settings', { icon: 'settings', cls: 'mm-small', onClick: () => host.openSettings() });
     const credits = button('Credits', { icon: 'star', cls: 'mm-small', onClick: () => host.openCredits() });
     this.stats = h('div', { class: 'mm-stats' });
@@ -27,7 +38,7 @@ export class MainMenu implements Screen {
         'div',
         { class: 'mm-col' },
         logo('logo-menu'),
-        h('nav', { class: 'mm-buttons', 'aria-label': 'Main menu' }, play, this.garageBtn, h('div', { class: 'mm-row' }, settings, credits)),
+        h('nav', { class: 'mm-buttons', 'aria-label': 'Main menu' }, play, fly, this.garageBtn, h('div', { class: 'mm-row' }, settings, credits)),
         this.hint,
       ),
       h('div', { class: 'mm-foot' }, this.stats, h('span', { class: 'chip', text: `v${CONFIG.game.version} · seed ${CONFIG.game.seed}` })),

@@ -25,6 +25,7 @@ import { TitleScreen } from './screens/TitleScreen';
 import { Tilt } from './touch/Tilt';
 import { TouchControls } from './touch/TouchControls';
 import { FlightControls } from './touch/FlightControls';
+import { WalkControls } from './touch/WalkControls';
 import { FlightHud } from './hud/FlightHud';
 import { Stunts } from './hud/Stunts';
 import { setWidgetSound } from './widgets';
@@ -54,6 +55,7 @@ export class UI implements IUI, UIHost {
   private touch!: TouchControls;
   private flightCtl!: FlightControls;
   private flightHud!: FlightHud;
+  private walkCtl!: WalkControls;
   private stunts!: Stunts;
   private fader!: Fader;
   private rotate!: RotateOverlay;
@@ -106,6 +108,7 @@ export class UI implements IUI, UIHost {
     this.touch = new TouchControls(this);
     this.flightCtl = new FlightControls(this);
     this.flightHud = new FlightHud(this);
+    this.walkCtl = new WalkControls(this);
     this.stunts = new Stunts(this);
     this.title = new TitleScreen(this, () => this.startFromTitle());
     this.menu = new MainMenu(this);
@@ -119,6 +122,7 @@ export class UI implements IUI, UIHost {
       this.flightHud.overlay,
       this.stunts.lines,
       this.hud.el,
+      this.walkCtl.el,
       this.flightHud.el,
       this.stunts.el,
       this.flightCtl.el,
@@ -391,6 +395,7 @@ export class UI implements IUI, UIHost {
       this.touch.update(dt);
       this.flightHud.update(dt);
       this.flightCtl.update(dt);
+      this.walkCtl.update();
       this.stunts.update();
     } else if (st === 'paused') {
       // The nav Map screen can open from the pause menu: get out of its way while it is up.
@@ -409,7 +414,11 @@ export class UI implements IUI, UIHost {
     const planes = this.ctx.planes;
     this.touch.setVisible(driving && !plane && touch);
     this.flightHud.setVisible(plane);
-    this.flightCtl.setVisible(plane && touch && !planes?.crashed && !planes?.inCockpitSequence);
+    const walking = plane && !!this.ctx.walker?.active;
+    const replay = !!this.ctx.replay?.active;
+    this.flightCtl.setVisible(plane && touch && !planes?.crashed && !planes?.inCockpitSequence && !walking && !replay);
+    this.walkCtl.setVisible(walking && !replay);
+    this.root.classList.toggle('replaying', replay);
     this.stunts.setVisible(driving && !plane);
   }
 

@@ -65,6 +65,10 @@ export interface GameContext {
   planes: IPlaneSystem;
   breakup: IBreakup;
   nav: INav;
+  /** The player on foot (cabin walking, falling, landing). */
+  walker: IWalker;
+  /** Crash replay with many cameras. */
+  replay: IReplay;
   /** Part 3: floating origin (absolute = local + origin.offset), endless terrain, highway network. */
   origin: Origin;
   terrain: ITerrain;
@@ -78,6 +82,8 @@ export interface GameActions {
   readonly state: GameState;
   /** From title screen / menu: start driving with the saved current car. */
   play(): void;
+  /** Menu "click and fly": start playing straight in the air in this plane. */
+  quickFly?(type: PlaneTypeId): void;
   openGarage(): void;
   /** Leave garage and drive the given build (garage "Drive" button). */
   driveFromGarage(build: CarBuild): void;
@@ -185,6 +191,59 @@ export interface INpcSystem extends GameSystem {
   removeAmbientSpot?(id: number): void;
   /** Crowd sites for the map / minimap (LOCAL x/z; one entry per mini crowd, the concert as a single entry). */
   crowdSpots?(): readonly { x: number; z: number; count: number; concert: boolean }[];
+  /** The player's on-foot character (same skinned mesh as the pedestrians). The caller adds .object to the scene. */
+  createAvatar?(): AvatarHandle | null;
+}
+
+/** A single directly-driven pedestrian-style character (the player on foot). */
+export interface AvatarHandle {
+  readonly object: THREE.Object3D;
+  visible: boolean;
+  /** Clip name from the pedestrian set: idle, walk, run, sit, tumble, fallBack, lieBack, getUpBack, flinch, cheer… */
+  play(clip: string, fade?: number, rate?: number, restart?: boolean): void;
+  /** The current non-looping clip has finished. */
+  readonly clipDone: boolean;
+  /** World matrix of the feet origin (yaw included; the avatar applies its own body scale). */
+  setMatrix(m: THREE.Matrix4): void;
+  update(dt: number): void;
+  dispose(): void;
+}
+
+/** Crash replay (src/replay): records the flown plane, plays the crash back from many cameras (sim frozen). */
+export interface IReplay extends GameSystem {
+  readonly active: boolean;
+  readonly canReplay: boolean;
+  readonly camName: string;
+  /** Playback speed this frame (slow motion around explosions / impacts). */
+  readonly speed: number;
+  start(): void;
+  stop(): void;
+  restart(): void;
+  nextCam(): void;
+  /** Per frame while replaying (Game calls it instead of the simulation). */
+  play(realDt: number): void;
+}
+
+/** The player on foot (walking in plane cabins, falling out, landing): owner core/lead (src/walk). */
+export interface IWalker extends GameSystem {
+  readonly active: boolean;
+  readonly mode: 'off' | 'cabin' | 'fall' | 'ground';
+  readonly firstPerson: boolean;
+  /** Where the character is (streaming / shadow focus) while active, else null. */
+  readonly focus: THREE.Vector3 | null;
+  readonly seated: boolean;
+  /** Context actions for the UI. */
+  readonly canTakeControls: boolean;
+  readonly canStepOut: boolean;
+  canStart(): boolean;
+  start(): boolean;
+  stop(): void;
+  /** F: take the controls back (near the cockpit) / step out of a stopped wreck. */
+  interact(): void;
+  toggleView(): void;
+  lookOutWindow(): void;
+  /** On the ground after falling out: a new plane in the air right here / back to the car. */
+  flyAgain(): void;
 }
 
 // ─────────────────────────── car models (src/vehicle/models) ─────────────────────
@@ -471,6 +530,23 @@ export interface IPlaneSystem extends GameSystem {
   readonly canCycleTarget?: boolean;
   /** Fire build-up from re-pressing a burning engine's button (null when nothing to show). */
   readonly fireMeter?: { points: number; needed: number } | null;
+  /** Menu "click and fly": straight into the air in this plane, no boarding. */
+  quickFly?(type: PlaneTypeId, at?: { x: number; z: number; dirX: number; dirZ: number }): void;
+  /** Swap to another plane type mid-air (same place, heading; cruise speed). */
+  switchType?(type: PlaneTypeId): void;
+  /** Current plane type (null when not flying). */
+  readonly currentType?: PlaneTypeId | null;
+  /** The tracked plane (broken joints) while flying / riding the wreck. */
+  readonly currentTracked?: TrackedPlane | null;
+  /**
+   * Wing break buttons (user request): 'far' tears the wingtip off (hard to control, still flies); 'half' tears the
+   * wing in half — control fades over ~30 s into a full stall and an unrecoverable spin.
+   */
+  breakWing?(side: 'L' | 'R', mode: 'far' | 'half'): void;
+  /** Current wing failure (HUD), or null. */
+  readonly wingFailure?: { side: 'L' | 'R'; mode: 'far' | 'half'; t: number } | null;
+  /** The pilot is walking in the cabin: neutral stick + assisted flight (autopilot). Set by the walker. */
+  walking?: boolean;
 }
 
 // --------------------------- breakup & crash physics (src/plane/breakup) ---------------------------

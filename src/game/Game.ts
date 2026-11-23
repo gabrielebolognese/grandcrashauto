@@ -11,12 +11,15 @@ import { SettingsStore } from '../core/Settings';
 import { installDebugOverlay, reportError } from '../core/debugOverlay';
 import type { CarBuild } from '../vehicle/CarBuild';
 import type { Pose } from '../world/types';
+import type { PlaneTypeId } from '../plane/types';
 import type { GameActions, GameContext, GameSystem, PlayerMode } from './contracts';
 
 import { World } from '../world/World';
 import { Environment } from '../world/env/Environment';
 import { Props } from '../world/props/Props';
 import { NpcSystem } from '../npc/NpcSystem';
+import { Walker } from '../walk/Walker';
+import { Replay } from '../replay/Replay';
 import { CarFactory } from '../vehicle/models/CarFactory';
 import { PlayerVehicle } from '../vehicle/PlayerVehicle';
 import { CameraRig } from '../camera/CameraRig';
@@ -90,6 +93,8 @@ export class Game implements GameActions {
     ctx.breakup = new Breakup(ctx);
     ctx.nav = new Nav(ctx);
     ctx.cameraRig = new CameraRig(ctx);
+    ctx.walker = new Walker(ctx);
+    ctx.replay = new Replay(ctx);
     ctx.fx = new Fx(ctx);
     ctx.audio = new Audio(ctx);
     ctx.garage = new Garage(ctx);
@@ -98,7 +103,8 @@ export class Game implements GameActions {
     // navigation, then the camera that follows them, then fx/audio.
     this.simSystems = [
       ctx.env, ctx.world, ctx.terrain, ctx.highways, ctx.props, ctx.npcs, ctx.vehicle, ctx.planes, ctx.breakup, ctx.nav,
-      ctx.cameraRig, ctx.fx, ctx.audio,
+      ctx.cameraRig, ctx.walker, ctx.fx, ctx.audio, // walker after the rig: it drives the camera while on foot
+      ctx.replay, // last: records the frame as rendered
     ];
 
     if (debug) (window as any).__game = { game: this, ctx, CONFIG };
@@ -130,6 +136,8 @@ export class Game implements GameActions {
       [ctx.breakup, 'Briefing the crash team'],
       [ctx.nav, 'Calibrating GPS'],
       [ctx.cameraRig, 'Framing the shot'],
+      [ctx.walker, 'Stretching legs'],
+      [ctx.replay, 'Loading the tape'],
       [ctx.fx, 'Loading effects'],
       [ctx.audio, 'Tuning the engine'],
       [ctx.garage, 'Opening the garage'],
@@ -262,7 +270,7 @@ export class Game implements GameActions {
 
   // ─────────────────────────────── loop ───────────────────────────────
   private fixed(dt: number): void {
-    if (!this.simulating) return;
+    if (!this.simulating || this.ctx.replay.active) return; // replay: the world is frozen
     for (const s of this.simSystems) if (s.fixedUpdate) this.guard(s, 'fixedUpdate', () => s.fixedUpdate!(dt));
     try {
       this.ctx.physics.step();
@@ -276,6 +284,7 @@ export class Game implements GameActions {
     const { ctx } = this;
     ctx.input.enabled = this.state === 'driving';
     ctx.input.mode = this.mode;
+    ctx.input.walking = this.mode === 'plane' && ctx.walker.active;
     ctx.input.sensitivity = ctx.settings.values.steerSensitivity;
     ctx.input.invertPitch = ctx.settings.values.invertPitch;
     ctx.input.update(realDt);
@@ -284,7 +293,9 @@ export class Game implements GameActions {
 
     // Streaming / shadow focus follows what the player controls (car or plane/wreck), else the camera.
     const target = this.mode === 'plane' ? ctx.planes.cameraTarget?.object : null;
-    if (target) target.getWorldPosition(this.focus);
+    const onFoot = ctx.walker.focus;
+    if (onFoot) this.focus.copy(onFoot);
+    else if (target) target.getWorldPosition(this.focus);
     else if (ctx.vehicle.active && ctx.vehicle.object) this.focus.copy(ctx.vehicle.state.position);
     else this.focus.copy(ctx.engine.camera.position);
     // Floating origin: re-centre the world when the focus wanders > ~2 km from the local origin.
@@ -294,7 +305,14 @@ export class Game implements GameActions {
     ctx.highways.setFocus?.(this.focus);
     ctx.env.setShadowFocus(this.focus);
 
-    if (this.simulating) {
+    if (this.simulating && ctx.replay.active) {
+      // crash replay: frozen simulation; world streaming, effects and sound keep running, the replay poses + films
+      const sp = ctx.replay.speed;
+      for (const s of [ctx.env, ctx.world, ctx.terrain, ctx.highways] as GameSystem[]) if (s.update) this.guard(s, 'update', () => s.update!(realDt, alpha));
+      this.guard(ctx.replay, 'play', () => ctx.replay.play(realDt));
+      this.guard(ctx.fx, 'update', () => ctx.fx.update?.(realDt * sp, alpha));
+      this.guard(ctx.audio, 'update', () => ctx.audio.update?.(realDt * sp, alpha));
+    } else if (this.simulating) {
       for (const s of this.simSystems) if (s.update) this.guard(s, 'update', () => s.update!(dt, alpha));
     } else {
       // Paused / garage: keep audio (ducking, UI sounds) alive.
@@ -306,15 +324,30 @@ export class Game implements GameActions {
   }
 
   private handleTriggers(): void {
-    const { input, vehicle, planes, cameraRig, events, nav } = this.ctx;
+    const { input, vehicle, planes, cameraRig, events, nav, walker, replay } = this.ctx;
+    if (this.state === 'driving' && replay.active) {
+      if (input.consume('camera') || input.consume('switchTarget')) replay.nextCam();
+      if (input.consume('reset')) replay.restart();
+      if (input.consume('skip') || input.consume('pause') || input.consume('explode')) replay.stop();
+      input.clearTriggers();
+      return;
+    }
     if (this.state === 'driving') {
       if (input.consume('pause')) this.pause();
       if (input.consume('map')) nav.openMap();
-      if (input.consume('camera')) cameraRig.cycleMode();
+      if (input.consume('camera')) {
+        if (walker.active) walker.toggleView();
+        else cameraRig.cycleMode();
+      }
       if (this.mode === 'plane') {
         if (input.consume('explode')) this.explodeOrReset();
         if (input.consume('reset')) this.requestReset();
-        if (input.consume('interact')) planes.exit();
+        if (input.consume('interact')) {
+          // on foot: take the controls back / step out; flying: get up and walk the cabin (exit on the ground)
+          if (walker.active) walker.interact();
+          else if (!planes.exit()) walker.start();
+        }
+        if (input.consume('window')) walker.lookOutWindow();
         if (input.consume('explodeMiddle')) planes.explodeMiddle();
         if (input.consume('explodeTail')) planes.explodeTail();
         for (let i = 1; i <= 4; i++) if (input.consume(`engine${i}` as 'engine1')) planes.explodeEngine(i);
@@ -330,7 +363,7 @@ export class Game implements GameActions {
           if (planes.boardCandidate) planes.board();
           else if (vehicle.state.upsideDown) vehicle.flip();
         }
-        for (const a of ['gear', 'engine1', 'engine2', 'engine3', 'engine4', 'explodeMiddle', 'explodeTail', 'skip', 'switchTarget'] as const) input.consume(a);
+        for (const a of ['gear', 'engine1', 'engine2', 'engine3', 'engine4', 'explodeMiddle', 'explodeTail', 'skip', 'switchTarget', 'window'] as const) input.consume(a);
         const horn = input.state.horn && vehicle.active;
         if (horn !== this.hornWasOn) {
           this.hornWasOn = horn;
@@ -433,6 +466,14 @@ export class Game implements GameActions {
       ctx.cameraRig.snap();
     }
     this.setState('driving');
+  }
+
+  /** Menu "click and fly": start playing straight in the air in this plane (no driving, boarding or teleport). */
+  quickFly(type: PlaneTypeId): void {
+    const { ctx } = this;
+    this.play();
+    if (this.state !== 'driving') return;
+    ctx.planes.quickFly?.(type);
   }
 
   /** Leave plane control cleanly (menus / garage). */

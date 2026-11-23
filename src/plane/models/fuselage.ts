@@ -304,7 +304,9 @@ export function loftFuselage(b: GeoBuilder, P: FusProfile, L: FusLivery, za: num
       if (reg.rect && reg.rect.kind === 'glass') return null;
       const h = hOfTheta(tc, nAt(zc));
       if (reg.rect) return { key: 900 + reg.key, color: reg.rect.color ?? [0.08, 0.085, 0.09], mat: MATTE };
-      return { key: Math.round(h * 20) + 40, color: inner.color(h, zc), mat: MATTE };
+      // cabins (opts.win): window coordinates on the inner shell → the material cuts the windows open
+      const win = opts.win ? (ii: number, jj: number) => [zs[ii], Pg[ii][jj].y] as const : undefined;
+      return { key: Math.round(h * 20) + 40, color: inner.color(h, zc), mat: MATTE, win };
     }, { flip: true, offset: -inner.offset });
     return;
   }

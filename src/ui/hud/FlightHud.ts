@@ -1,6 +1,6 @@
 import './flight.css';
 import { MPH } from '../../core/math';
-import type { PlaneEngineStatus } from '../../plane/types';
+import { PLANE_TYPES, type PlaneEngineStatus, type PlaneTypeId } from '../../plane/types';
 import { h, setText, setVisible } from '../dom';
 import type { UIHost } from '../host';
 import { icon, type IconName } from '../icons';
@@ -77,6 +77,16 @@ export class FlightHud {
   private nudgePad: HTMLDivElement;
   private airborne: HTMLButtonElement;
   private switchPart: HTMLButtonElement;
+  private dock: HTMLDivElement;
+  private planeBtn: HTMLButtonElement;
+  private walkBtn: HTMLButtonElement;
+  private replayBtn: HTMLButtonElement;
+  private wingsBtn: HTMLButtonElement;
+  private wingsPanel: HTMLDivElement;
+  private replayBar: HTMLDivElement;
+  private replayCam: HTMLSpanElement;
+  private picker: HTMLDivElement;
+  private pickerBtns: { t: PlaneTypeId; b: HTMLButtonElement }[] = [];
   private skip: HTMLButtonElement;
   private oomBanner: HTMLDivElement;
   private oomText: HTMLSpanElement;
@@ -118,6 +128,7 @@ export class FlightHud {
         choice('car', 'Back to car', 'Drive again', '', () => ctx.planes.backToCar()),
         choice('reset', 'Respawn plane', 'On its stand', 'primary', () => ctx.planes.respawnPlane()),
         choice('plane', 'Retry in air', 'At 500 m', '', () => ctx.planes.retryInAir()),
+        choice('camera', 'Replay', 'More cameras', 'replay', () => ctx.replay.start()),
       ),
     );
     this.skip = h('button', { class: 'skip-btn touch-ctl', type: 'button' }, h('span', { text: 'Skip' }), icon('skip'), h('kbd', { class: 'pb-key', text: 'Enter' }));
@@ -161,10 +172,85 @@ export class FlightHud {
       ctx.planes.cycleTarget?.();
     });
 
+    // Dock: switch plane mid-air (picker) + get up and walk the cabin
+    const NAMES: Record<PlaneTypeId, string> = { prop: 'Prop', bizjet: 'Jet', airliner: 'Airliner', jumbo: 'Jumbo' };
+    this.picker = h('div', { class: 'fl-picker' });
+    for (const t of PLANE_TYPES) {
+      const b = h('button', { type: 'button', text: NAMES[t] });
+      b.addEventListener('click', () => {
+        uiSound('confirm');
+        this.picker.classList.remove('open');
+        ctx.planes.switchType?.(t);
+      });
+      this.pickerBtns.push({ t, b });
+      this.picker.append(b);
+    }
+    this.planeBtn = h('button', { class: 'fl-dock-btn', type: 'button', 'aria-label': 'Switch plane' }, icon('plane'), h('span', { text: 'PLANE' }));
+    this.planeBtn.addEventListener('click', () => {
+      uiSound('click');
+      this.picker.classList.toggle('open');
+    });
+    this.walkBtn = h('button', { class: 'fl-dock-btn fl-walk', type: 'button', 'aria-label': 'Walk the cabin' }, h('span', { text: '🚶 WALK' }), h('kbd', { text: 'F' }));
+    this.walkBtn.addEventListener('click', () => {
+      uiSound('confirm');
+      ctx.walker.start();
+    });
+    this.replayBtn = h('button', { class: 'fl-dock-btn fl-replay', type: 'button', 'aria-label': 'Replay the crash' }, h('span', { text: '🎬 REPLAY' }));
+    this.replayBtn.addEventListener('click', () => {
+      uiSound('confirm');
+      ctx.replay.start();
+    });
+    // Wing break buttons: per wing, break FAR (wingtip: hard to fly) or HALF (fades into a stall + spin in 30 s)
+    this.wingsPanel = h('div', { class: 'fl-wings' });
+    for (const side of ['L', 'R'] as const) {
+      const row = h('div', { class: 'fw-row' }, h('span', { class: 'fw-lbl', text: side === 'L' ? 'LEFT WING' : 'RIGHT WING' }));
+      for (const mode of ['far', 'half'] as const) {
+        const b = h('button', { type: 'button', class: `fw-${mode}`, title: mode === 'far' ? 'Tear the wingtip off: hard to control, still flies' : 'Tear the wing in half: stall and spin within 30 s', text: mode === 'far' ? 'BREAK FAR' : 'BREAK HALF' });
+        b.addEventListener('click', () => {
+          uiSound('confirm');
+          ctx.planes.breakWing?.(side, mode);
+          this.wingsPanel.classList.remove('open');
+        });
+        row.append(b);
+      }
+      this.wingsPanel.append(row);
+    }
+    this.wingsBtn = h('button', { class: 'fl-dock-btn fl-wingbtn', type: 'button', 'aria-label': 'Break a wing' }, h('span', { text: '✂ WINGS' }));
+    this.wingsBtn.addEventListener('click', () => {
+      uiSound('click');
+      this.wingsPanel.classList.toggle('open');
+    });
+    this.dock = h(
+      'div',
+      { class: 'fl-dock' },
+      h('div', { style: 'display:flex;gap:6px;align-items:center' }, this.picker, this.planeBtn),
+      h('div', { style: 'display:flex;gap:6px;align-items:flex-start' }, this.wingsPanel, this.wingsBtn),
+      this.walkBtn,
+      this.replayBtn,
+    );
+    // replay bar (while replaying)
+    const rb = (label: string, cls: string, fn: () => void) => {
+      const b = h('button', { class: `rp-btn ${cls}`, type: 'button', text: label });
+      b.addEventListener('click', () => {
+        uiSound('click');
+        fn();
+      });
+      return b;
+    };
+    this.replayCam = h('span', { class: 'rp-cam' });
+    this.replayBar = h(
+      'div',
+      { class: 'replay-bar' },
+      h('div', { class: 'rp-top' }, h('span', { class: 'rp-rec', text: '● REPLAY' }), this.replayCam),
+      h('div', { class: 'rp-btns' }, rb('🎥 NEXT CAM', 'rp-next', () => ctx.replay.nextCam()), rb('⟲ RESTART', '', () => ctx.replay.restart()), rb('✕ EXIT', 'rp-exit', () => ctx.replay.stop())),
+    );
+
     this.el = h(
       'div',
       { class: 'flight-hud', 'aria-hidden': 'true' },
       this.nudgePad,
+      this.dock,
+      this.replayBar,
       this.airborne,
       this.switchPart,
       // User request: keep the plane visible — no instrument tapes / heading / status chips, only alerts.
@@ -236,8 +322,19 @@ export class FlightHud {
 
     this.el.classList.toggle('crashed', crashed);
     this.el.classList.toggle('stalling', !!ps.stallWarning);
-    setVisible(this.nudgePad, !crashed && !seq && typeof planes.nudge === 'function');
-    setVisible(this.airborne, !crashed && !!ps.onGround && ps.airspeedKmh < 10 && typeof planes.takeOff === 'function');
+    const walking = !!ctx.walker?.active;
+    setVisible(this.nudgePad, !crashed && !seq && !walking && typeof planes.nudge === 'function');
+    setVisible(this.airborne, !crashed && !walking && !!ps.onGround && ps.airspeedKmh < 10 && typeof planes.takeOff === 'function');
+    setVisible(this.planeBtn, !seq && typeof planes.switchType === 'function');
+    setVisible(this.walkBtn, !walking && !!ctx.walker?.canStart());
+    setVisible(this.wingsBtn, !crashed && !seq && typeof planes.breakWing === 'function' && !!planes.currentTracked?.body);
+    if (crashed) this.wingsPanel.classList.remove('open');
+    const rp = ctx.replay;
+    setVisible(this.replayBtn, !!rp?.canReplay);
+    setVisible(this.replayBar, !!rp?.active);
+    this.el.classList.toggle('replaying', !!rp?.active);
+    if (rp?.active) setText(this.replayCam, `CAM · ${rp.camName}${rp.speed < 0.9 ? ' · SLOW-MO' : ''}`);
+    for (const pb of this.pickerBtns) pb.b.classList.toggle('cur', planes.currentType === pb.t);
     setVisible(this.switchPart, !!planes.canCycleTarget);
     const fm = planes.fireMeter ?? null;
     const fmKey = fm ? fm.points + '/' + fm.needed : '';

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { PlanePartKind, PlaneTypeId, PlaneBreakModes } from '../types';
+import type { PlanePartKind, PlaneTypeId, PlaneBreakModes, PlaneCabin } from '../types';
 import { CONFIG } from '../../config';
 import { GeoBuilder, PAINT, METAL, MATTE, DARK, VAR, type RGB, rgb, v3, mix } from './builder';
 import { getDesign, type Design, type WingDef, type FanDef, type PropDef } from './designs';
@@ -84,6 +84,7 @@ export interface PlaneTemplate {
   win: WindowLayout | null;
   instrument: { part: string; position: THREE.Vector3; quaternion: THREE.Quaternion; width: number; height: number; geo: THREE.PlaneGeometry };
   propDisc: { part: string; position: THREE.Vector3; radius: number; geo: THREE.BufferGeometry } | null;
+  cabin: PlaneCabin | null;
   tris: [number, number, number];
   buildMs: number;
 }
@@ -546,11 +547,13 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
   }
 
   // ------------------------------------------------------------------------------------------- interiors
+  const seatsD: { x: number; y: number; z: number }[] = [];
   for (const n of ['fuselageFwd', 'fuselageCenter', 'fuselageRear']) {
     const pb = parts.get(n)!;
     pb.interior = new GeoBuilder();
-    buildInterior(pb.interior, D, zr[n][0], zr[n][1], true);
+    buildInterior(pb.interior, D, zr[n][0], zr[n][1], true, { seatsOut: seatsD, front: n === 'fuselageFwd', rear: n === 'fuselageRear' });
   }
+  const cabin = type === 'prop' ? null : buildCabin(D, zr, com, seatsD);
 
   // ------------------------------------------------------------------------------------------- part templates
   const partList: PartTpl[] = [];
@@ -814,7 +817,43 @@ export function buildTemplate(type: PlaneTypeId): PlaneTemplate {
     type, design: D, parts: partList, joints, merged: mergedGeo, glowAll, surfaces, engines, gear: gearInfo, breakModes,
     bulkheadJoints: D.openCabin ? ['fuselageCenter|fuselageRear'] : ['fuselageFwd|fuselageCenter', 'cockpit|fuselageFwd'],
     mass: totalMass, inertia, dims: { length: D.length, span: D.span, height: D.height }, boardPoint: board, cockpitEye: eye, wingCam,
-    win: D.win, instrument, propDisc, tris, buildMs: performance.now() - t0,
+    win: D.win, instrument, propDisc, cabin, tris, buildMs: performance.now() - t0,
+  };
+}
+
+/** Walkable cabin data in ROOT space (design − centre of mass): floor, half-width / ceiling samples, seats, aisles. */
+function buildCabin(D: Design, zr: Record<string, [number, number]>, com: THREE.Vector3, seatsD: { x: number; y: number; z: number }[]): PlaneCabin {
+  const P = D.profile;
+  const fy = D.floorY;
+  const zRear = zr.fuselageRear[0], zFront = zr.fuselageFwd[1];
+  const step = 0.25;
+  const n = Math.max(2, Math.ceil((zFront - zRear) / step) + 1);
+  const halfW = new Float32Array(n), ceil = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const z = zRear + i * step;
+    const w = Math.min(widthAt(P, z, fy + 0.05), widthAt(P, z, fy + 1.3));
+    halfW[i] = Math.max(0.3, w - 0.12);
+    const pa = profileAt(P, z);
+    let c = pa.mid + pa.top * 0.8;
+    if (D.upperFloorY !== undefined && z > 12.5 && z < 26) c = Math.min(c, D.upperFloorY - 0.06);
+    ceil[i] = c - com.y;
+  }
+  // aisles: gaps between seat blocks (x of the seat columns, sorted)
+  const xs = [...new Set(seatsD.map((s) => Math.round(s.x * 100) / 100))].sort((a, b) => a - b);
+  const aisles: number[] = [];
+  for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] > 0.62) aisles.push((xs[i] + xs[i - 1]) / 2 - com.x);
+  if (!aisles.length) aisles.push(0);
+  return {
+    floorY: fy - com.y,
+    sections: (['fuselageFwd', 'fuselageCenter', 'fuselageRear'] as const).map((p) => ({ part: p, z0: zr[p][0] - com.z, z1: zr[p][1] - com.z })),
+    frontZ: zFront - com.z,
+    rearZ: zRear - com.z,
+    step,
+    halfW,
+    ceil,
+    seats: seatsD.map((s) => ({ x: s.x - com.x, y: s.y - com.y, z: s.z - com.z })),
+    pitch: D.seatPitch,
+    aisles,
   };
 }
 

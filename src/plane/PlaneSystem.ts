@@ -72,6 +72,8 @@ const ZERO = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _v3 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const KMH = 3.6;
 
@@ -363,7 +365,7 @@ export class PlaneSystem implements IPlaneSystem {
   }
 
   // ─────────────────────────────── flight start / end ───────────────────────────────
-  private startFlight(type: PlaneTypeId, where: SpawnWhere): void {
+  private startFlight(type: PlaneTypeId, where: SpawnWhere, pose?: { pos: THREE.Vector3; dir: THREE.Vector3; speed?: number }): void {
     const { ctx } = this;
     const rec = this.parked.get(type);
     if (!rec) return;
@@ -403,6 +405,14 @@ export class PlaneSystem implements IPlaneSystem {
         pos.copy(rw.start).addScaledVector(rw.dir, visual.dims.length * 0.5 + 25);
         yaw = Math.atan2(rw.dir.x, rw.dir.z);
         pos.y = this.groundAt(pos.x, pos.z, rw.start.y + 60, rw.start.y) + rest;
+      } else if (pose) {
+        air = true;
+        pos.copy(pose.pos);
+        const d = _v.copy(pose.dir).setY(0);
+        if (d.lengthSq() < 1e-6) d.set(0, 0, 1);
+        d.normalize();
+        yaw = Math.atan2(d.x, d.z);
+        vel.copy(d).multiplyScalar(pose.speed ?? cfg.cruiseKmh / KMH);
       } else {
         air = true;
         const dir = rw ? rw.dir : new THREE.Vector3(-1, 0, 0);
@@ -478,6 +488,7 @@ export class PlaneSystem implements IPlaneSystem {
     this.engulfStage = 0;
     this.firePoints = 0;
     this.fireSpotParts.clear();
+    this.wingFail = null;
     this.breakNextT = Infinity;
     this.breakInterval = 0;
     this.breakCount = 0;
@@ -500,7 +511,7 @@ export class PlaneSystem implements IPlaneSystem {
     this.lodLevel = -1;
     if (air) {
       // Cruise power: enough thrust for level flight at the spawn speed.
-      const thr = this.levelThrottle(cfg.cruiseKmh / KMH);
+      const thr = this.levelThrottle(vel.length() > 1 ? vel.length() : cfg.cruiseKmh / KMH);
       this.throttle = thr;
       for (const e of this.engines) e.st.spool = thr;
     }
@@ -706,6 +717,175 @@ export class PlaneSystem implements IPlaneSystem {
     if (far) this.fadeThen(doExit);
     else doExit();
     return true;
+  }
+
+  /** The pilot is walking in the cabin (set by the walker): neutral stick + assisted flight = autopilot. */
+  walking = false;
+  /** Wing break button failure (null = none). */
+  private wingFail: { side: 'L' | 'R'; mode: 'far' | 'half'; t: number; stage: number } | null = null;
+
+  get wingFailure(): { side: 'L' | 'R'; mode: 'far' | 'half'; t: number } | null {
+    return this.active ? this.wingFail : null;
+  }
+
+  /**
+   * Wing break buttons (user request). far = the outermost joint (wingtip): asymmetric lift + weakened assist, the
+   * plane stays flyable. half = the inner joint (the outer half of the wing, 2/3 of the span on the big jets): control
+   * fades over CONFIG.planes.wingBreak.spinAfterS into a full stall and an unrecoverable spin.
+   */
+  breakWing(side: 'L' | 'R', mode: 'far' | 'half'): void {
+    const { ctx } = this;
+    const visual = this.visual;
+    const tracked = this.tracked;
+    const body = this.body;
+    if (!this.active || !body || !visual || !tracked || this.crashed) return;
+    const segs = [1, 2, 3].map((k) => `wing${side}${k}`).filter((n) => !!visual.partByName[n]);
+    if (segs.length < 2) return;
+    const far = `${segs[segs.length - 2]}|${segs[segs.length - 1]}`;
+    const half = `${segs[0]}|${segs[1]}`;
+    const id = mode === 'far' ? far : half;
+    const joint = visual.joints.find((j) => j.id === id);
+    if (!joint) return;
+    const done = tracked.brokenJoints.has(id) || (mode === 'far' && tracked.brokenJoints.has(half));
+    if (!done) {
+      const c = this.worldPoint(joint.position, new THREE.Vector3());
+      const v = body.linvel();
+      ctx.fx.sparks(c, _v.set(0, 1, 0), 1.6);
+      ctx.fx.debrisBurst?.({ position: c, velocity: _v2.set(v.x, v.y, v.z), count: 16, size: 0.6, kind: 'panel' });
+      ctx.events.emit('planeBreak', { position: c, velocity: _v2.clone(), pieces: 1, intensity: 1 });
+      ctx.events.emit('vibrate', { pattern: [70, 30, 110] });
+      try {
+        ctx.breakup.breakJoints(tracked, [id]);
+      } catch (err) {
+        reportError('[planes] breakWing failed', err);
+      }
+      if (!this.body) return;
+    }
+    const name = side === 'L' ? 'Left' : 'Right';
+    const prev = this.wingFail;
+    if (mode === 'half' && (!prev || prev.mode === 'far')) {
+      this.wingFail = { side, mode: 'half', t: 0, stage: 0 };
+      ctx.events.emit('masterCaution', { text: `${name.toUpperCase()} WING FAILURE`, level: 'warning' });
+      ctx.events.emit('toast', { text: `⚠ ${name} wing torn in half — spin in ${CONFIG.planes.wingBreak.spinAfterS} s`, ms: 2400 });
+    } else if (!prev) {
+      this.wingFail = { side, mode: 'far', t: 0, stage: 0 };
+      ctx.events.emit('masterCaution', { text: `${name.toUpperCase()} WINGTIP LOST`, level: 'caution' });
+      ctx.events.emit('toast', { text: `✂ ${name} wingtip gone — hold it level!`, ms: 2000 });
+    }
+  }
+
+  /** Wing failure effects on the flight inputs (before the flight model step). Returns lift scale multiplier. */
+  private wingFailInputs(dt: number, fi: { pitch: number; roll: number; yaw: number; assistFactor: number; rollAssist: number; controlScale: THREE.Vector3 }): number {
+    const w = this.wingFail;
+    if (!w) return 1;
+    const B = CONFIG.planes.wingBreak;
+    w.t += dt;
+    if (w.mode === 'far') {
+      fi.rollAssist *= B.farRollAssist;
+      fi.assistFactor *= B.farAssist;
+      return 0.92;
+    }
+    const f = clamp(w.t / B.spinAfterS, 0, 1);
+    if (w.stage === 0 && f > 0.5) {
+      w.stage = 1;
+      this.ctx.events.emit('masterCaution', { text: 'CONTROLS FAILING', level: 'warning' });
+    }
+    if (w.stage === 1 && f >= 1) {
+      w.stage = 2;
+      this.ctx.events.emit('masterCaution', { text: 'STALL — SPIN', level: 'warning' });
+      this.ctx.events.emit('vibrate', { pattern: [120, 60, 120, 60, 200] });
+    }
+    const keep = 1 - f;
+    fi.assistFactor *= keep;
+    fi.rollAssist *= keep * 0.5;
+    fi.controlScale.multiplyScalar(1 - B.controlLoss * f);
+    if (f >= 1) {
+      fi.pitch = fi.roll = fi.yaw = 0;
+      return B.spin.lift;
+    }
+    return 1 - B.liftLoss * f;
+  }
+
+  /** Wing failure torques (after the flight model step): the broken side drops / drags, then the forced spin. */
+  private wingFailTorque(dt: number, body: RAPIER_T.RigidBody): void {
+    const w = this.wingFail;
+    const model = this.model;
+    if (!w || !model || this.onGround) return;
+    const B = CONFIG.planes.wingBreak;
+    const I = model.inertia;
+    const s = w.side === 'L' ? 1 : -1; // L = +X wing: it drops (negative roll about +Z), the nose yaws toward it (+Y)
+    const r = body.rotation();
+    _q.set(r.x, r.y, r.z, r.w);
+    const tau = _v.set(0, 0, 0);
+    if (w.mode === 'far') {
+      if (Math.random() < B.farJolt * dt * 10) tau.set((Math.random() - 0.5) * 0.6 * I.x, 0, -s * Math.random() * 0.8 * I.z);
+    } else {
+      const f = clamp(w.t / B.spinAfterS, 0, 1);
+      if (f < 1) {
+        // the torn side pulls harder and harder while a fading stabiliser fights it: hard → harder → impossible
+        const pull = B.rollStart + (B.rollEnd - B.rollStart) * f;
+        const hold = 1 - f * f; // holds on for most of the 30 s, then lets go
+        const left = _v2.set(1, 0, 0).applyQuaternion(_q);
+        const roll = Math.asin(clamp(left.y, -1, 1)); // + = left wing up (rotation about +Z)
+        const av = body.angvel();
+        const wz = _v3.set(av.x, av.y, av.z).applyQuaternion(_q2.copy(_q).invert()).z;
+        tau.set(0, s * B.yawPull * (0.5 + f) * I.y, (-s * pull - (B.holdBank * roll + B.holdRate * wz) * hold) * I.z);
+      } else {
+        // full stall: drive the body rates toward an autorotating spin
+        const av = body.angvel();
+        const wl = _v2.set(av.x, av.y, av.z).applyQuaternion(_q2.copy(_q).invert());
+        const S = B.spin;
+        tau.set((S.pitch - wl.x) * I.x * S.gain, (s * S.yaw - wl.y) * I.y * S.gain, (-s * S.roll - wl.z) * I.z * S.gain);
+      }
+    }
+    if (tau.lengthSq() === 0) return;
+    tau.applyQuaternion(_q).multiplyScalar(dt);
+    body.applyTorqueImpulse({ x: tau.x, y: tau.y, z: tau.z }, true);
+  }
+
+  get currentType(): PlaneTypeId | null {
+    return this.active ? this.type : null;
+  }
+
+  get currentTracked(): TrackedPlane | null {
+    return this.tracked;
+  }
+
+  /**
+   * Menu "click and fly" (user request): straight into the air in this plane — no driving to the airport, no boarding.
+   * Scenic start: east of the city at ~380 m, heading west along the coast (city, beach, concert ahead).
+   */
+  quickFly(type: PlaneTypeId, at?: { x: number; z: number; dirX: number; dirZ: number }): void {
+    const { ctx } = this;
+    const o = ctx.origin.offset;
+    const Q = CONFIG.planes.quickFly;
+    const x = at ? at.x : Q.x - o.x, z = at ? at.z : Q.z - o.z;
+    const g = Math.max(0, this.groundAt(x, z, 2000));
+    ctx.fx.clearAll();
+    this.startFlight(type, 'air', { pos: new THREE.Vector3(x, g + Q.agl, z), dir: new THREE.Vector3(at ? at.dirX : Q.dirX, 0, at ? at.dirZ : Q.dirZ) });
+  }
+
+  /** Swap planes mid-air (user request): same spot and heading, the new plane at its cruise speed. */
+  switchType(type: PlaneTypeId): void {
+    const { ctx } = this;
+    if (!this.active || this.busy) return;
+    const p = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    if (this.body) {
+      const t = this.body.translation();
+      p.set(t.x, t.y, t.z);
+      this.headingDir(dir);
+    } else {
+      const obj = this.cameraTarget?.object;
+      if (obj) obj.getWorldPosition(p);
+      else if (this.visual) p.copy(this.visual.root.position);
+      this.headingDir(dir);
+    }
+    const g = Math.max(0, this.groundAt(p.x, p.z, p.y + 100));
+    p.y = Math.max(p.y, g + (this.crashed || !this.body ? 400 : 150));
+    ctx.fx.clearAll();
+    this.startFlight(type, 'air', { pos: p, dir });
+    ctx.events.emit('toast', { text: `✈ ${this.visual?.name ?? type}`, ms: 1400 });
   }
 
   respawnPlane(): void {
@@ -1158,7 +1338,7 @@ export class PlaneSystem implements IPlaneSystem {
     const gs = Math.hypot(lv.x, lv.z);
     const inp = ctx.input.state;
     const controllable = !this.crashed && ctx.game.mode === 'plane' && ctx.game.state === 'driving';
-    const assisted = ctx.settings.values.flightAssisted !== false;
+    const assisted = this.walking || ctx.settings.values.flightAssisted !== false;
 
     // Throttle.
     if (controllable) {
@@ -1407,7 +1587,9 @@ export class PlaneSystem implements IPlaneSystem {
     fi.tailTime = this.tailT;
     fi.controlScale.set(0.3 + 0.7 * ht, fin, this.tailLost ? 0.6 + 0.3 * ht : 1);
     fi.rotationHelp = true;
+    fi.liftScale *= this.wingFailInputs(dt, fi);
     model.step(dt, body, fi);
+    this.wingFailTorque(dt, body);
 
     // Fallbacks when nobody else classified the crash: under water, or falling out of the world.
     const water = this.waterAt(t.x, t.z);
@@ -1644,7 +1826,14 @@ export class PlaneSystem implements IPlaneSystem {
 
   private applyLod(visual: PlaneVisual, cam: THREE.Vector3, rec?: Parked): void {
     const L = Math.max(8, visual.dims.length);
-    const d = cam.distanceTo(visual.root.position);
+    let d = cam.distanceTo(visual.root.position);
+    // split: the pieces fly away from the old root — use the nearest part (cockpit view / walking inside a piece)
+    if (!rec && !this.body) {
+      for (const p of visual.parts) {
+        p.object.getWorldPosition(_v);
+        d = Math.min(d, cam.distanceTo(_v));
+      }
+    }
     const lod = CONFIG.planes.lod;
     const level: 0 | 1 | 2 = d < L * lod.high || d < 60 ? 0 : d < L * lod.medium ? 1 : 2;
     if (rec) {

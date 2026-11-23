@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type {
-  BreakJoint, PlaneBreakModes, PlaneEngineInfo, PlaneGearInfo, PlaneInstruments, PlanePartInfo, PlaneTypeId, PlaneVisual,
+  BreakJoint, PlaneBreakModes, PlaneCabin, PlaneEngineInfo, PlaneGearInfo, PlaneInstruments, PlanePartInfo, PlaneTypeId, PlaneVisual,
 } from '../types';
 import { CONFIG } from '../../config';
 import type { PlaneTemplate, SurfRec } from './template';
@@ -42,6 +42,7 @@ export class PlaneVisualImpl implements PlaneVisual {
   readonly cockpitEye: THREE.Vector3;
   readonly wingCam: { position: THREE.Vector3; target: THREE.Vector3 };
   readonly name: string;
+  readonly cabin: PlaneCabin | null;
   readonly livery: string;
 
   private mats: PlaneMaterials;
@@ -79,6 +80,7 @@ export class PlaneVisualImpl implements PlaneVisual {
     this.type = tpl.type;
     this.name = D.name;
     this.livery = D.livery;
+    this.cabin = tpl.cabin;
     this.root.name = `plane-${tpl.type}`;
     this.mass = tpl.mass;
     this.inertia = tpl.inertia.clone();
@@ -245,6 +247,13 @@ export class PlaneVisualImpl implements PlaneVisual {
     this.instrDirty = true;
   }
 
+  /** Walking inside: every cabin interior visible (else only torn-open ones / the prop's open cabin). */
+  private interiorsOn = false;
+  setInteriorVisible(on: boolean): void {
+    this.interiorsOn = on;
+    for (const r of this.rt) if (r.interior) r.interior.visible = on || r.capsShown > 0 || !!r.tpl.interiorAlways;
+  }
+
   showBreak(jointId: string): void {
     const j = this.joints.find((x) => x.id === jointId);
     if (!j) return;
@@ -305,7 +314,7 @@ export class PlaneVisualImpl implements PlaneVisual {
       o.scale.copy(orig.scale);
       o.visible = true;
       r.capsShown = 0;
-      if (r.interior) r.interior.visible = !!r.tpl.interiorAlways;
+      if (r.interior) r.interior.visible = this.interiorsOn || !!r.tpl.interiorAlways;
     }
     for (const j of this.joints) {
       if (j.capA) j.capA.visible = false;

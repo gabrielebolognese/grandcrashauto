@@ -14,6 +14,7 @@ import { PedNav, type AvoidOut, type NearestHit, type NavSource } from './nav';
 import { HIP_H, LIE_H } from './rig';
 import { buildTestWorld, type TestWorld } from './testWorld';
 import { CrowdManager, type CrowdMemberRef, type CrowdSite } from './crowds';
+import { Avatar } from './Avatar';
 
 /**
  * Pedestrian crowd (spec §8): pooled NPCs with a per-NPC state machine on the ped graph, groups, benches, bus stops,
@@ -268,7 +269,7 @@ export class NpcSystem implements INpcSystem {
       ev.on('horn', (e) => e.on && this.onHorn(e.position)),
       ev.on('explosion', (e) => this.onExplosion(e.position, e.radius, e.force)),
       // plane fireballs scatter crowds too (e.g. a jet into the concert)
-      ev.on('planeExplosion', (e) => this.onExplosion(e.position, e.radius, e.kind === 'secondary' ? 1 : 1.6)),
+      ev.on('planeExplosion', (e) => !e.replay && this.onExplosion(e.position, e.radius, e.kind === 'secondary' ? 1 : 1.6)),
       ev.on('carReset', () => {
         this.fillT = 0.5;
       }),
@@ -1310,6 +1311,17 @@ export class NpcSystem implements INpcSystem {
     const big = Math.round(((C.concert.budget as Record<string, number>)[lvl] ?? 300) * mob);
     this.crowd.bigMidDist = ((C.concert.midDist as Record<string, number>)[lvl] ?? 12) * mob;
     this.crowd.update(this.focus, this.camPos, this.frustum, this.animTime, budget, big, this.densityNow, this.farSpawnNow, this.blockedFn);
+  }
+
+  createAvatar(): Avatar | null {
+    if (!this.uniforms || !this.clips.length) return null;
+    const app = randomAppearance(Rng.from(CONFIG.game.seed, 0x504c4159));
+    // the player: coral top, navy trousers, white trainers (reads well in a crowd and in a cabin)
+    app.top = 0xff7a6b;
+    app.bottom = 0x2e3f5c;
+    app.shoes = 0xf2f0ea;
+    app.scale = 1;
+    return new Avatar(this.clips, this.uniforms, app);
   }
 
   private crowdSpotList: { x: number; z: number; count: number; concert: boolean }[] = [];

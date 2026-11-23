@@ -765,6 +765,22 @@ export const CONFIG = {
     rimLight: 1.7,
   },
 
+  // ───────────────────────────── crash replay (owner: src/replay) ──────────────────
+  // seconds recorded (hz samples/s), playback starts leadIn s before the first big moment, slow motion (slowSpeed)
+  // within slowWindow s of explosions / impacts, the auto-director cuts every shotSeconds.
+  replay: { seconds: 14, hz: 30, leadIn: 3.5, slowSpeed: 0.3, slowWindow: 1.4, shotSeconds: 2.8 },
+
+  // ───────────────────────────── on foot (owner: src/walk) ─────────────────────
+  // Walking in plane cabins / falling out / on the ground. splitCoupling: share of a SPLIT piece's acceleration you
+  // feel (the rest: you fall faster than the wreck — cinematic); minFallG: a split/diving plane never lets you float
+  // up (min downward pull, × g). suction: m/s² pull toward a torn-open end at speed (within suctionRange m).
+  walk: {
+    walk: 1.6, run: 3.6, accel: 12, jump: 3.4, eye: 1.62, sitEye: 1.16, friction: 0.85, minSupport: 2.5,
+    splitCoupling: 0.35, minFallG: 0.35, maxFrameAccel: 60, suction: 14, suctionRange: 9, maxSpeed: 26,
+    airDrag: 0.0036, skydiveSteer: 4, hardLanding: 9, lookSens: 0.0024, touchLook: 1.9,
+    tpDist: 2.4, tpDistWorld: 4.2, fovFP: 74, fovTP: 66,
+  },
+
   // ───────────────────────────── pedestrians (owner: src/npc) ───────────────────
   npc: {
     poolSize: 240, // max simultaneous dynamic NPCs (incl. crowd members taken over after a hit / scare)
@@ -1116,6 +1132,17 @@ export const CONFIG = {
         pointsBase: 5, pointsPerEngine: 1, maxSpots: 4 },
     // Crippled fall (user feedback): doomed planes lose lift and gravity ramps up so they accelerate into the ground.
     fall: { startSinkMs: 3, rampS: 5, liftLoss: 0.95, maxGravityScale: 2.2 },
+    // Wing break buttons. far: roll-assist / assist kept at these shares (hard to fly, still flies) + light jolts.
+    // half: over spinAfterS seconds the assist, control authority and lift fade while a roll/yaw pull toward the broken
+    // side grows (rad/s² from rollStart to rollEnd), then a full stall: forced spin (local rad/s: pitch-down, yaw, roll).
+    wingBreak: {
+      farRollAssist: 0.45, farAssist: 0.75, farJolt: 0.25,
+      // holdBank / holdRate: a stabiliser that fights the torn wing at first and fades to nothing at spinAfterS
+      spinAfterS: 30, rollStart: 0.15, rollEnd: 2.6, yawPull: 0.3, liftLoss: 0.55, controlLoss: 0.85, holdBank: 6.5, holdRate: 4.5,
+      spin: { pitch: 0.35, yaw: 1.1, roll: 2.1, gain: 2.5, lift: 0.12 },
+    },
+    // Menu "click and fly" start (absolute x/z, height above ground, heading): east of the city, west along the coast.
+    quickFly: { x: 1500, z: 170, agl: 380, dirX: -1, dirZ: 0 },
     // Plane bodies fly with real gravity (gravityScale = gravity / |physics.gravity|) even though the arcade world uses -14.
     gravity: 9.81,
     ceiling: 3000, // m: soft ceiling, thrust and lift fade above it

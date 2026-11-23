@@ -9,7 +9,10 @@ import type { Design } from './designs';
  * bright window panes, dark cargo hold), cabin floor, rows of empty seats, overhead bins, ceiling light strip; the
  * jumbo also gets its upper deck. Darkens with depth from the open ends so the cavity reads as a cavity.
  */
-export function buildInterior(b: GeoBuilder, D: Design, za: number, zb: number, cabin: boolean): void {
+export function buildInterior(
+  b: GeoBuilder, D: Design, za: number, zb: number, cabin: boolean,
+  opts: { seatsOut?: { x: number; y: number; z: number }[]; front?: boolean; rear?: boolean } = {},
+): void {
   const P = D.profile;
   const R = Math.max(0.5, P.w((P.zNose + P.zTail) / 2));
   const I = D.colors.interior;
@@ -18,7 +21,7 @@ export function buildInterior(b: GeoBuilder, D: Design, za: number, zb: number, 
   b.sway = -1;
   const glass = D.liv.rects.filter((r) => r.kind === 'glass' && r.z1 > za && r.z0 < zb);
   loftFuselage(b, P, { bounds: [], colors: [[1, 1, 1]], rects: glass }, za, zb, {
-    ringSeg: cabin ? 28 : 16, step: R * (glass.length ? 0.15 : 0.6), exact: glass.length > 0, win: false,
+    ringSeg: cabin ? 28 : 16, step: R * (glass.length ? 0.15 : 0.6), exact: glass.length > 0, win: cabin && !!D.win,
     inner: {
       offset: Math.max(0.03, R * 0.04),
       zFront: zb + 1,
@@ -49,24 +52,11 @@ export function buildInterior(b: GeoBuilder, D: Design, za: number, zb: number, 
     const aw = R * 0.12;
     b.fquadF(v3(aw, floorY + 0.004, z0), v3(-aw, floorY + 0.004, z0), v3(-aw, floorY + 0.004, z1), v3(aw, floorY + 0.004, z1), v3(0, 1, 0));
   }
-  // window panes on the inner wall (bright sky)
+  // windows: the shell itself is cut open by the material (vWin), so you can look outside from the cabin
   const W = D.win;
-  if (W) {
-    for (const row of W.rows) {
-      for (let s = row.sMin; s <= row.sMax + 1e-3; s += W.pitch) {
-        if (s < za + 0.1 || s > zb - 0.1) continue;
-        if (W.doors.some((d) => Math.abs(s - d.s) < d.halfW + W.pitch * 0.55 && Math.abs(row.y - d.y) < d.halfH)) continue;
-        const x = widthAt(P, s, row.y) - Math.max(0.035, R * 0.045);
-        if (x < 0.2) continue;
-        for (const sx of [1, -1]) {
-          b.set({ color: rgb(0xcfe8f8), mat: PAINT });
-          const hw = W.halfW;
-          const hh = W.halfH;
-          b.fquadF(v3(sx * x, row.y - hh, s - hw), v3(sx * x, row.y - hh, s + hw), v3(sx * x, row.y + hh, s + hw), v3(sx * x, row.y + hh, s - hw), v3(-sx, 0, 0));
-        }
-      }
-    }
-  }
+  // end walls: rear pressure bulkhead / front wall with the cockpit door (walkable cabin ends)
+  if (opts.rear) bulkhead(b, D, za + 0.02, 1, I.wall, null);
+  if (opts.front) bulkhead(b, D, zb - 0.02, -1, I.wall, mix(I.wall, [0.25, 0.27, 0.32], 0.6));
   // seats
   const seatCols = seatColumns(D, R);
   const pitch = D.seatPitch;
@@ -78,6 +68,7 @@ export function buildInterior(b: GeoBuilder, D: Design, za: number, zb: number, 
     for (const x of seatCols) {
       if (Math.abs(x) > widthAt(P, z, floorY + 0.5) - 0.28) continue;
       seat(b, x, floorY, z, I.seat, I.seatAccent, (r + Math.round(x * 3)) % 7 === 0);
+      opts.seatsOut?.push({ x, y: floorY, z });
     }
   }
   // jumbo upper deck
@@ -112,6 +103,30 @@ export function buildInterior(b: GeoBuilder, D: Design, za: number, zb: number, 
     b.fquadF(v3(R * 0.05, cy, za + 0.05), v3(-R * 0.05, cy, za + 0.05), v3(-R * 0.05, cy, zb - 0.05), v3(R * 0.05, cy, zb - 0.05), v3(0, -1, 0));
   }
   b.sway = 0;
+}
+
+/** Flat end wall of the cabin at z (facing +1 = toward +Z), following the inner profile; optional door panel. */
+function bulkhead(b: GeoBuilder, D: Design, z: number, facing: number, col: RGB, door: RGB | null): void {
+  const P = D.profile;
+  const pa = profileAt(P, z);
+  const R = Math.max(0.5, P.w((P.zNose + P.zTail) / 2));
+  const off = Math.max(0.05, R * 0.06);
+  const y0 = pa.mid - pa.bot * 0.97, y1 = pa.mid + pa.top * 0.97;
+  const n = 14;
+  const nrm = v3(0, 0, facing);
+  b.set({ color: col, mat: MATTE });
+  for (let k = 0; k < n; k++) {
+    const ya = y0 + ((y1 - y0) * k) / n, yb = y0 + ((y1 - y0) * (k + 1)) / n;
+    const xa = Math.max(0.02, widthAt(P, z, ya) - off), xb = Math.max(0.02, widthAt(P, z, yb) - off);
+    b.fquadF(v3(xa, ya, z), v3(-xa, ya, z), v3(-xb, yb, z), v3(xb, yb, z), nrm);
+  }
+  if (door) {
+    const fy = D.floorY, dz = z + facing * 0.012;
+    b.set({ color: door, mat: PAINT });
+    b.fquadF(v3(0.42, fy, dz), v3(-0.42, fy, dz), v3(-0.42, fy + 1.9, dz), v3(0.42, fy + 1.9, dz), nrm);
+    b.set({ color: [0.85, 0.8, 0.6], mat: PAINT });
+    b.fquadF(v3(-0.28, fy + 0.98, dz + facing * 0.004), v3(-0.34, fy + 0.98, dz + facing * 0.004), v3(-0.34, fy + 1.04, dz + facing * 0.004), v3(-0.28, fy + 1.04, dz + facing * 0.004), nrm);
+  }
 }
 
 function seatColumns(D: Design, R: number): number[] {

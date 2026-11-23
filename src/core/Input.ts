@@ -20,7 +20,7 @@ import { approach, clamp } from './math';
 export type TriggerAction =
   | 'explode' | 'reset' | 'camera' | 'pause' | 'flip' | 'fullscreen'
   | 'interact' | 'map' | 'gear' | 'engine1' | 'engine2' | 'engine3' | 'engine4' | 'explodeMiddle' | 'explodeTail' | 'skip'
-  | 'barrelLeft' | 'barrelRight' | 'lights' | 'switchTarget';
+  | 'barrelLeft' | 'barrelRight' | 'lights' | 'switchTarget' | 'window';
 export type InputDevice = 'keyboard' | 'touch' | 'gamepad';
 export type InputMode = 'car' | 'plane';
 
@@ -40,11 +40,20 @@ export interface ControlState {
   throttleAxis: number; // -1..1 throttle change rate request (keys/gamepad triggers)
   throttleSet: number; // 0..1 absolute throttle from the touch slider, or -1 when not set
   planeBrake: boolean;
+  // on foot (walking in a plane cabin / on the ground): Input.walking
+  moveX: number; // -1..1 strafe right +
+  moveY: number; // -1..1 forward +
+  run: boolean;
+  jump: boolean;
+  grab: boolean; // hold: grab / sit in the nearest seat
+  lookX: number; // look delta this frame (px-equivalent), + = turn right
+  lookY: number; // + = look down
 }
 
 const zero = (): ControlState => ({
   throttle: 0, brake: 0, steer: 0, handbrake: false, horn: false, lookBack: false, turbo: false,
   pitch: 0, roll: 0, yaw: 0, throttleAxis: 0, throttleSet: -1, planeBrake: false,
+  moveX: 0, moveY: 0, run: false, jump: false, grab: false, lookX: 0, lookY: 0,
 });
 
 export class Input {
@@ -59,6 +68,10 @@ export class Input {
   /** When false, state reads as zero (menus, garage). Triggers still queue. */
   enabled = true;
   mode: InputMode = 'car';
+  /** Plane mode, on foot (set by Game while the walker is active): flight fields read zero, walk fields filled. */
+  walking = false;
+  private lookAccX = 0;
+  private lookAccY = 0;
   lastDevice: InputDevice = 'keyboard';
 
   private keys = new Set<string>();
@@ -74,6 +87,17 @@ export class Input {
     window.addEventListener('keyup', (e) => this.onKey(e, false));
     window.addEventListener('blur', () => this.keys.clear());
     window.addEventListener('touchstart', () => (this.lastDevice = 'touch'), { passive: true, capture: true });
+    // mouse look while walking (pointer locked by the walk controls)
+    document.addEventListener('mousemove', (e) => {
+      if (this.walking && document.pointerLockElement) this.addLook(e.movementX, e.movementY);
+    });
+  }
+
+  /** Look deltas (pixels) from the mouse / touch look surface; consumed once per frame into state.lookX/Y. */
+  addLook(dx: number, dy: number): void {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+    this.lookAccX += dx;
+    this.lookAccY += dy;
   }
 
   press(a: TriggerAction): void {
@@ -115,7 +139,7 @@ export class Input {
         case 'Digit3': case 'Numpad3': if (plane) this.press('engine3'); break;
         case 'Digit4': case 'Numpad4': if (plane) this.press('engine4'); break;
         case 'Enter': this.press('skip'); break;
-        case 'KeyQ': if (!plane) this.press('barrelLeft'); break;
+        case 'KeyQ': if (!plane) this.press('barrelLeft'); else if (this.walking) this.press('window'); break;
         case 'KeyE': if (!plane) this.press('barrelRight'); break;
         case 'KeyL': if (!plane) this.press('lights'); break;
         case 'KeyV': if (plane) this.press('switchTarget'); break;
@@ -153,6 +177,29 @@ export class Input {
       return;
     }
     const pick = (...v: number[]) => v.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0);
+    // look (consumed every frame, even when idle)
+    s.lookX = this.lookAccX + t.lookX + p.lookX * dt * 900;
+    s.lookY = this.lookAccY + t.lookY + p.lookY * dt * 700;
+    this.lookAccX = this.lookAccY = 0;
+    t.lookX = t.lookY = 0;
+    if (this.mode === 'plane' && this.walking) {
+      s.throttle = s.brake = s.steer = 0;
+      s.handbrake = true;
+      s.horn = s.lookBack = s.turbo = false;
+      s.pitch = s.roll = s.yaw = s.throttleAxis = 0;
+      s.throttleSet = -1;
+      s.planeBrake = false;
+      const kx = (right ? 1 : 0) - (left ? 1 : 0);
+      const ky = (up ? 1 : 0) - (down ? 1 : 0);
+      s.moveX = clamp(pick(kx, p.moveX, t.moveX), -1, 1);
+      s.moveY = clamp(pick(ky, p.moveY, t.moveY), -1, 1);
+      s.run = k.has('ShiftLeft') || k.has('ShiftRight') || t.run || p.run;
+      s.jump = k.has('Space') || t.jump || p.jump;
+      s.grab = k.has('KeyE') || t.grab || p.grab;
+      return;
+    }
+    s.moveX = s.moveY = 0;
+    s.run = s.jump = s.grab = false;
 
     if (this.mode === 'car') {
       s.throttle = Math.max(up ? 1 : 0, t.throttle, p.throttle);
@@ -217,8 +264,18 @@ export class Input {
     p.yaw = (btn(5) ? 1 : 0) - (btn(4) ? 1 : 0);
     p.throttleAxis = val(7) - val(6);
     p.planeBrake = plane && btn(0);
+    // on foot: left stick walk, right stick look, A jump, RB grab, L3 run
+    p.moveX = axis(0);
+    p.moveY = -axis(1);
+    p.lookX = axis(2);
+    p.lookY = axis(3);
+    p.jump = this.walking && btn(0);
+    p.grab = this.walking && (btn(5) || btn(1));
+    p.run = this.walking && btn(10);
 
-    const edges: [number, TriggerAction][] = plane
+    const edges: [number, TriggerAction][] = plane && this.walking
+      ? [[3, 'camera'], [9, 'pause'], [2, 'interact'], [4, 'window'], [8, 'reset']]
+      : plane
       ? [[3, 'explode'], [1, 'reset'], [8, 'reset'], [11, 'camera'], [9, 'pause'], [2, 'gear'], [10, 'interact'],
          [14, 'engine1'], [12, 'engine2'], [13, 'engine3'], [15, 'engine4']]
       : [[3, 'explode'], [1, 'reset'], [8, 'reset'], [11, 'camera'], [9, 'pause'], [12, 'interact'], [4, 'barrelLeft'], [5, 'barrelRight'], [14, 'lights']];

@@ -88,6 +88,27 @@ export interface PlaneInstruments {
   flicker: number; // 0..1 (failing electrics)
 }
 
+/**
+ * Walkable cabin (root space at rest): the main-deck floor of the fuselage sections, sampled half-width / ceiling,
+ * seats and aisles. Sections are listed nose → tail; a section's part object carries it (and its interior mesh).
+ */
+export interface PlaneCabin {
+  floorY: number;
+  sections: { part: string; z0: number; z1: number }[];
+  /** Cabin front wall (cockpit door) and rear pressure bulkhead, root z. */
+  frontZ: number;
+  rearZ: number;
+  /** Samples every `step` m from z = rearZ: walkable half-width at standing height, ceiling height (root y). */
+  step: number;
+  halfW: Float32Array;
+  ceil: Float32Array;
+  /** Seat pan centres (root space, at floor level), facing +Z. */
+  seats: { x: number; y: number; z: number }[];
+  /** Seat pitch (m) and aisle centre lines (root x). */
+  pitch: number;
+  aisles: number[];
+}
+
 /** Procedural plane visual built by the planemodels module. */
 export interface PlaneVisual {
   readonly type: PlaneTypeId;
@@ -107,6 +128,10 @@ export interface PlaneVisual {
   readonly cockpitEye: THREE.Vector3;
   readonly wingCam: { position: THREE.Vector3; target: THREE.Vector3 };
   readonly name: string; // fictional model name
+  /** Walkable cabin data (null for the small prop plane). */
+  readonly cabin?: PlaneCabin | null;
+  /** Show every cabin interior (walking inside), or back to "only when torn open". */
+  setInteriorVisible?(on: boolean): void;
   readonly livery: string; // fictional operator name
   /** Control surfaces / gear / props animation. Values in -1..1 (flaps & gear 0..1). propAngle per engine (rad). */
   setControls(c: { aileron: number; elevator: number; rudder: number; flaps: number; gear: number; propAngle?: number[] }): void;

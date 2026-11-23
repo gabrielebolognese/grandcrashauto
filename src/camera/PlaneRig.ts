@@ -138,10 +138,10 @@ export class PlaneRig {
     const ev = this.ctx.events;
     const plane = () => this.ctx.game?.mode === 'plane';
     ev.on('planeSpawned', () => this.reset());
-    ev.on('planeExplosion', (e) => plane() && this.onExplosion(e.position, e.velocity, e.radius, e.kind));
-    ev.on('engineExplode', (e) => plane() && this.shakeAt(e.position, CONFIG.camera.planeEngineShake, 350, 3));
+    ev.on('planeExplosion', (e) => !e.replay && plane() && this.onExplosion(e.position, e.velocity, e.radius, e.kind));
+    ev.on('engineExplode', (e) => !e.replay && plane() && this.shakeAt(e.position, CONFIG.camera.planeEngineShake, 350, 3));
     ev.on('planeBreak', (e) => plane() && this.shakeAt(e.position, 0.25 + 0.6 * clamp(e.intensity, 0, 1), 400, 0));
-    ev.on('planeImpact', (e) => plane() && this.onImpact(e.position, e.velocity, e.outcome, e.energy));
+    ev.on('planeImpact', (e) => !e.replay && plane() && this.onImpact(e.position, e.velocity, e.outcome, e.energy));
     ev.on('touchdown', (e) => {
       if (!plane()) return;
       if (e.hard) this.shakeAt(e.position, 0.45, 300, 0);
@@ -209,7 +209,7 @@ export class PlaneRig {
     for (let k = 0; k < 4; k++) {
       i = (i + 1) % 4;
       const v = order[i];
-      if (v === 'cockpit' && !this.eye) continue;
+      if (v === 'cockpit' && !this.eye && !this.ctx.planes?.visual?.partByName.cockpit) continue;
       if (v === 'wing' && !this.wing) continue;
       this.setView(v);
       break;
@@ -288,6 +288,22 @@ export class PlaneRig {
     // The chase always runs (home for every phase blend).
     this.updateChase(dt);
     let out: CamPose = this.chasePose;
+    const lock = this.cockpitLock();
+    if (lock) {
+      // User request: the cockpit view never disappears — split, explosion, structural failure, impact: you stay in
+      // the cockpit (riding whatever piece it's on). No scripted cine / crash / wreck shots while locked.
+      if (this.phase !== 'normal') this.phase = 'normal';
+      this.pendingCrash = null;
+      lock.obj.matrixWorld.decompose(_v2, _qf, _s);
+      this.raw.pos.copy(lock.eye).applyMatrix4(lock.obj.matrixWorld);
+      this.raw.quat.copy(_qf).multiply(_q.setFromAxisAngle(AXIS_Y, Math.PI));
+      this.raw.quat.multiply(_q.setFromAxisAngle(AXIS_Y, this.lookYaw)).multiply(_q.setFromAxisAngle(AXIS_X, this.lookPitch));
+      this.raw.fov = c.planeCockpitFov;
+      this.near = 0.08;
+      if (this.blendT < this.blendDur) this.blendT = this.blendDur;
+      this.pose.copy(this.raw);
+      return;
+    }
     switch (this.phase) {
       case 'cine':
         this.updateCine(dt);
@@ -319,6 +335,21 @@ export class PlaneRig {
     } else {
       this.pose.copy(out);
     }
+  }
+
+  private lockEye = new THREE.Vector3();
+  /** The cockpit view the player chose, pinned to the cockpit PART (wherever it ends up), or null. */
+  private cockpitLock(): { obj: THREE.Object3D; eye: THREE.Vector3 } | null {
+    if (this.view !== 'cockpit') return null;
+    const vis = this.ctx.planes?.visual;
+    const part = vis?.partByName.cockpit ?? vis?.partByName.nose;
+    if (!vis || !part || !this.ctx.planes?.active) return null;
+    let p: THREE.Object3D | null = part.object;
+    while (p && p !== this.ctx.engine.scene) p = p.parent;
+    if (!p) return null;
+    part.object.updateWorldMatrix(true, false);
+    this.lockEye.copy(vis.cockpitEye).sub(part.com); // root space → part-local
+    return { obj: part.object, eye: this.lockEye };
   }
 
   private effectiveView(): PlaneView {
@@ -559,6 +590,7 @@ export class PlaneRig {
   }
 
   private startCine(pos: THREE.Vector3, vel: THREE.Vector3, radius: number): void {
+    if (this.cockpitLock()) return; // staying in the cockpit
     const c = CONFIG.camera;
     this.cineT = 0;
     this.cineDur = c.planeCineDuration;
@@ -623,6 +655,7 @@ export class PlaneRig {
   }
 
   private startCrash(pos: THREE.Vector3, vel: THREE.Vector3, outcome: CrashOutcome, cut: boolean): void {
+    if (this.cockpitLock()) return; // staying in the cockpit
     const c = CONFIG.camera;
     const hs = Math.hypot(vel.x, vel.z);
     const water = outcome === 'waterCrash' || outcome === 'ditching';

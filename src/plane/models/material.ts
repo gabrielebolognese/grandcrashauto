@@ -204,6 +204,7 @@ if (vWin.y < 50.0) {
   lineM *= 1.0 - smoothstep(0.03, 0.09, aa);
   diffuseColor.rgb *= 1.0 - 0.45 * lineM;
   diffuseColor.rgb = mix(diffuseColor.rgb, uWinCol, plWinM);
+  if (vInt > 0.5 && plWinM > 0.5) discard; // cabin shell: real window openings
 }
 if (vChar > 0.002) {
   float nz = plNoise(vPPos * 0.9) * 0.6 + plNoise(vPPos * 3.7) * 0.4;
