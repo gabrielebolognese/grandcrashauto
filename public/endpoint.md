@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 8 · 2026-11-24
+Endpoint version: 9 · 2026-11-24
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -106,7 +106,9 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
   - **Nuke turret:** 2 nukes side by side. Everything flying within about 1.8 km of the hit goes, and the trees below are flattened.
 
   **How to shoot:** on the map, tap a plane, then SHOOT. The map zooms out and the turrets glow with a line to the target; **tap a turret on the map** and you are in its control room, looking from behind it.
-  - Aim with drag, A/D/W or the arrows, and press S to fire. **No lock is needed.**
+  - Aim with drag, A/D/W or the arrows, or press **AUTO LOCK (L)** to swing onto the target. Press S to fire. **No lock is needed.**
+  - While you are in the control room your own plane waits in the air exactly where it was, and carries on when you press BACK.
+  - Missiles carry a bright exhaust flare, so they are easy to follow, especially at night.
   - Aimed at the red marker, it locks and **always hits**; the same keys then pick where (nose, tail, a wing, an engine).
   - Without a lock the missile flies straight and the keys steer it. Its seeker locks on if the plane comes in front of it.
   - Each S fires again. BACK returns to your car or plane while the missiles keep going.
@@ -455,6 +457,12 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v9 · 2026-11-24:** missiles smoother.
+  - Firing no longer lags: the world keeps streaming around the turret instead of chasing the missile, trails are lighter, and each missile is one mesh.
+  - New AUTO LOCK button (L); it also locks missiles already flying blind.
+  - Your plane is paused while you are in a control room.
+  - Missiles glow (exhaust flare), much brighter at night.
 
 - **v8 · 2026-11-24:** shooting reworked.
   - The launchers are now **turrets** in the mountains only: Twin (2 side by side), Quad (4 in a square), Octo (8 in 4×2) and Nuke (2 nukes). There are no trucks, silos or city launchers any more.

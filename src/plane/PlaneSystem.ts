@@ -1214,6 +1214,25 @@ export class PlaneSystem implements IPlaneSystem {
     }
   }
 
+  private frozenAt: { lv: { x: number; y: number; z: number }; av: { x: number; y: number; z: number } } | null = null;
+  /** Hold your plane still (missile control room) and give it back its exact motion afterwards. */
+  freeze(on: boolean): void {
+    const b = this.body;
+    if (on && !this.frozenAt && b && this.active && !this.crashed) {
+      const lv = b.linvel(), av = b.angvel();
+      this.frozenAt = { lv: { x: lv.x, y: lv.y, z: lv.z }, av: { x: av.x, y: av.y, z: av.z } };
+      b.setEnabled(false);
+    } else if (!on && this.frozenAt) {
+      const f = this.frozenAt;
+      this.frozenAt = null;
+      if (b && this.ctx.physics.world.bodies.contains(b.handle)) {
+        b.setEnabled(true);
+        b.setLinvel(f.lv, true);
+        b.setAngvel(f.av, true);
+      }
+    }
+  }
+
   /** Ram autopilot target provider (missiles system: a sky plane's intercept point). */
   ramTarget: (() => THREE.Vector3 | null) | null = null;
 
@@ -1525,6 +1544,7 @@ export class PlaneSystem implements IPlaneSystem {
 
   // ─────────────────────────────── fixed step ───────────────────────────────
   fixedUpdate(dt: number): void {
+    if (this.frozenAt) return; // in a missile control room: your plane waits where it is
     this.simTime += dt;
     const body = this.body;
     const model = this.model;

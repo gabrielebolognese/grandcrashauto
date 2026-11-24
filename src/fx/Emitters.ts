@@ -38,6 +38,10 @@ export class FireEmitter {
   born = 0;
   /** Crash replay: the plane part (and offset in it) this fire follows while the replayed parts are posed. */
   rTarget: THREE.Object3D | null = null;
+  /** Spawn cap per frame for this emitter (0 = CONFIG.fx.fire.maxPerFrame): missiles use a small one. */
+  cap = 0;
+  /** Smoke lifetime multiplier (missiles: short trails). */
+  lifeK = 1;
   readonly rOffset = new THREE.Vector3();
   private accF = 0;
   private accS = 0;
@@ -129,7 +133,7 @@ export class FireEmitter {
     const moveBoost = 1 + speed / (5 * S); // distance-based emission so fast trails stay continuous
     const q = kit.q;
     const lv = this.level;
-    const maxN = cfg.maxPerFrame;
+    const maxN = this.cap > 0 ? this.cap : cfg.maxPerFrame;
     const dx = this.cur.x - this.prev.x;
     const dy = this.cur.y - this.prev.y;
     const dz = this.cur.z - this.prev.z;
@@ -199,7 +203,7 @@ export class FireEmitter {
       s.vy = this.vel.y * cfg.inheritSmoke + rnd(1.4, 2.6) * sq;
       s.vz = this.vel.z * cfg.inheritSmoke + rndS() * 0.4;
       s.air(0.9 + speed * 0.02, wind, 0.9 * sq);
-      s.life = rnd(cfg.smokeLife[0], cfg.smokeLife[1]) * (0.8 + 0.2 * sq) * (speed > 30 ? 1.6 : 1);
+      s.life = rnd(cfg.smokeLife[0], cfg.smokeLife[1]) * (0.8 + 0.2 * sq) * (speed > 30 ? 1.6 : 1) * this.lifeK;
       s.size0 = rnd(0.7, 1.1) * S;
       s.size1 = rnd(cfg.smokeSize[0], cfg.smokeSize[1]) * S;
       s.rot = rnd(0, 6.28);
@@ -214,7 +218,7 @@ export class FireEmitter {
 
     // embers
     this.accE += cfg.emberRate * this.fire * lv * q * dt;
-    n = Math.min(8, Math.floor(this.accE));
+    n = Math.min(this.cap > 0 ? 1 : 8, Math.floor(this.accE));
     this.accE -= n;
     for (let i = 0; i < n; i++) {
       const f = (i + Math.random()) / n;

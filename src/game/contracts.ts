@@ -516,7 +516,7 @@ export interface IFx extends GameSystem {
    */
   explosionEx?(o: { position: THREE.Vector3; velocity?: THREE.Vector3; radius: number; kind?: 'car' | 'engine' | 'plane' | 'secondary' | 'impact'; nearSurface?: 'ground' | 'water' | null; light?: boolean }): void;
   /** World-space fire+smoke trail on a moving object (burning engine/tail/wreck): flames stretched by airflow, smoke ribbon left in the sky. */
-  attachTrail?(target: THREE.Object3D, localOffset: THREE.Vector3, o: { fire: number; smoke: number; size: number }): TrailHandle;
+  attachTrail?(target: THREE.Object3D, localOffset: THREE.Vector3, o: { fire: number; smoke: number; size: number; cap?: number }): TrailHandle;
   /** Water impact: spray plume (height ~ speed squared), splash ring, foam. */
   splash?(o: { position: THREE.Vector3; velocity: THREE.Vector3; size: number }): void;
   /** Continuous spray sheet behind a skimming object (call every frame while skimming). */

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type RAPIER_T from '@dimforge/rapier3d-compat';
 import { G, RAPIER, groups } from '../core/Physics';
 import type { GameContext } from '../game/contracts';
@@ -32,49 +33,46 @@ const mat = (c: number, metal = 0.3) => {
   return m;
 };
 
-const geoCache = new Map<string, THREE.BufferGeometry[]>();
-function missileGeos(t: LauncherType): THREE.BufferGeometry[] {
+const geoCache = new Map<string, THREE.BufferGeometry>();
+let missileMat: THREE.MeshStandardMaterial | null = null;
+/** ONE merged, vertex-coloured geometry per missile kind (body, nose, band, fins, hazard stripes): 1 draw call. */
+function missileGeo(t: LauncherType): THREE.BufferGeometry {
   let g = geoCache.get(t.kind);
   if (g) return g;
   const L = t.missileLen, R = t.missileR;
-  g = [
-    new THREE.CylinderGeometry(R, R, L * 0.78, 12).rotateX(Math.PI / 2),
-    new THREE.ConeGeometry(R, L * 0.22, 12).rotateX(Math.PI / 2),
-    new THREE.CylinderGeometry(R * 1.02, R * 1.02, L * 0.06, 12).rotateX(Math.PI / 2),
-    new THREE.BoxGeometry(R * 0.12, R * 1.8, L * 0.14),
-    new THREE.CylinderGeometry(R * 1.01, R * 1.01, L * 0.03, 12).rotateX(Math.PI / 2),
-  ];
+  const parts: THREE.BufferGeometry[] = [];
+  const add = (geo: THREE.BufferGeometry, col: number, m: THREE.Matrix4) => {
+    const p = geo.toNonIndexed().applyMatrix4(m);
+    p.deleteAttribute('uv');
+    const c = new THREE.Color(col);
+    const arr = new Float32Array(p.attributes.position.count * 3);
+    for (let i = 0; i < arr.length; i += 3) c.toArray(arr, i);
+    p.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    parts.push(p);
+    geo.dispose();
+  };
+  const at = (x: number, y: number, z: number, rz = 0) => new THREE.Matrix4().makeRotationZ(rz).setPosition(x, y, z);
+  add(new THREE.CylinderGeometry(R, R, L * 0.78, 12).rotateX(Math.PI / 2), t.missile, at(0, 0, -L * 0.05));
+  add(new THREE.ConeGeometry(R, L * 0.22, 12).rotateX(Math.PI / 2), t.tip, at(0, 0, L * 0.45));
+  add(new THREE.CylinderGeometry(R * 1.02, R * 1.02, L * 0.06, 12).rotateX(Math.PI / 2), t.tip, at(0, 0, L * 0.2));
+  for (let k = 0; k < 4; k++) {
+    const a = (k * Math.PI) / 2 + Math.PI / 4;
+    add(new THREE.BoxGeometry(R * 0.12, R * 1.8, L * 0.14), t.tip, at(Math.cos(a) * R * 1.3, Math.sin(a) * R * 1.3, -L * 0.36, a - Math.PI / 2));
+  }
+  if (t.warhead === 'nuke') for (let k = 0; k < 3; k++) add(new THREE.CylinderGeometry(R * 1.01, R * 1.01, L * 0.03, 12).rotateX(Math.PI / 2), 0x1c1c1c, at(0, 0, L * (0.05 - k * 0.08)));
+  g = mergeGeometries(parts)!;
+  for (const p of parts) p.dispose();
   geoCache.set(t.kind, g);
   return g;
 }
 
-/** A missile model (nose +Z), shared geometry per kind (loaded in the turrets and flying). */
+/** A missile model (nose +Z): one mesh, shared geometry per kind (loaded in the turrets and flying). */
 export function missileModel(t: LauncherType): THREE.Group {
+  if (!missileMat) missileMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.1, emissive: 0x222222 });
   const g = new THREE.Group();
-  const L = t.missileLen, R = t.missileR;
-  const G = missileGeos(t);
-  const body = new THREE.Mesh(G[0], mat(t.missile, 0.1));
-  body.position.z = -L * 0.05;
-  const nose = new THREE.Mesh(G[1], mat(t.tip, 0.1));
-  nose.position.z = L * 0.45;
-  const band = new THREE.Mesh(G[2], mat(t.tip, 0.1));
-  band.position.z = L * 0.2;
-  g.add(body, nose, band);
-  for (let k = 0; k < 4; k++) {
-    const fin = new THREE.Mesh(G[3], mat(t.tip, 0.1));
-    const a = (k * Math.PI) / 2 + Math.PI / 4;
-    fin.position.set(Math.cos(a) * R * 1.3, Math.sin(a) * R * 1.3, -L * 0.36);
-    fin.rotation.z = a - Math.PI / 2;
-    g.add(fin);
-  }
-  if (t.warhead === 'nuke') {
-    for (let k = 0; k < 3; k++) {
-      const s = new THREE.Mesh(G[4], mat(0x1c1c1c, 0.1));
-      s.position.z = L * (0.05 - k * 0.08);
-      g.add(s);
-    }
-  }
-  for (const c of g.children) (c as THREE.Mesh).castShadow = true;
+  const m = new THREE.Mesh(missileGeo(t), missileMat);
+  m.castShadow = true;
+  g.add(m);
   return g;
 }
 

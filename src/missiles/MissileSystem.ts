@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import './missiles.css';
 import { CONFIG } from '../config';
 import { clamp } from '../core/math';
+import { GLOBAL_UNIFORMS } from '../core/uniforms';
 import type { GameContext, IMissiles, LauncherInfo, SkyPlaneInfo, TrailHandle } from '../game/contracts';
 import type { TrackedPlane } from '../plane/types';
 import { AirTraffic, type SkyPlane } from './AirTraffic';
@@ -92,6 +93,8 @@ export class MissileSystem implements IMissiles {
   private msgT = 0;
   private ramId: number | null = null;
   private flashT = 0;
+  private focusV = new THREE.Vector3();
+  private flareMat: THREE.SpriteMaterial | null = null;
 
   constructor(private ctx: GameContext) {
     this.traffic = new AirTraffic(ctx);
@@ -169,9 +172,8 @@ export class MissileSystem implements IMissiles {
   get focus(): THREE.Vector3 | null {
     const c = this.control;
     if (!c) return null;
-    if (c.phase === 'missile' && c.first && !c.first.done) return c.first.pos;
-    if (c.phase === 'impact') return c.target.pos;
-    return this.launchers.pivot(c.launcher, _v3);
+    // the world keeps streaming around the turret: chasing a 600 m/s missile / a far crash re-streamed terrain every frame
+    return this.launchers.pivot(c.launcher, this.focusV);
   }
 
   enterControl(launcherId: string, planeId: number): string {
@@ -191,6 +193,7 @@ export class MissileSystem implements IMissiles {
     l.aimPitch = clamp(Math.atan2(_v2.y, Math.hypot(_v2.x, _v2.z)) - 0.08, 0.05, 1.45);
     this.inputWasEnabled = ctx.input.enabled;
     ctx.input.enabled = false;
+    if (ctx.game.mode === 'plane') (ctx.planes as { freeze?: (on: boolean) => void }).freeze?.(true);
     this.camSet = false;
     this.showHud(true);
     ctx.events.emit('toast', { text: `🎯 ${l.name}: aim at the ${p.name.split(' · ')[0]}, press S to fire`, ms: 2600 });
@@ -204,6 +207,7 @@ export class MissileSystem implements IMissiles {
     for (const m of this.missiles) m.controlled = false;
     this.control = null;
     ctx.input.enabled = this.inputWasEnabled;
+    (ctx.planes as { freeze?: (on: boolean) => void }).freeze?.(false);
     this.showHud(false);
     const cam = ctx.engine.camera;
     cam.fov = 60;
@@ -295,6 +299,19 @@ export class MissileSystem implements IMissiles {
     return 'nuke launched';
   }
 
+  /** AUTO LOCK (button / L): the turret swings onto the target, and any missile flying blind locks on now. */
+  autoLock(): string {
+    const c = this.control;
+    if (!c) return '';
+    this.autoAim();
+    let n = 0;
+    for (const m of this.missiles) if (!m.done && !m.target && !m.ground && m.seek === c.target) {
+      m.target = c.target;
+      n++;
+    }
+    return n ? `locked ${n} missile${n > 1 ? 's' : ''} in flight` : 'LOCKED — S fires, it will hit';
+  }
+
   /** Point the control room's launcher straight at its target (agent / scripted shots). */
   autoAim(): void {
     const c = this.control;
@@ -346,9 +363,35 @@ export class MissileSystem implements IMissiles {
   private ignite(m: Missile): void {
     const { ctx } = this;
     const t = m.type;
-    m.trail = ctx.fx.attachTrail?.(m.obj, new THREE.Vector3(0, 0, -t.missileLen * 0.5), { fire: 0.75, smoke: 1, size: Math.max(0.3, t.missileR * 2.4) }) ?? null;
+    m.trail = ctx.fx.attachTrail?.(m.obj, new THREE.Vector3(0, 0, -t.missileLen * 0.5), { fire: 0.7, smoke: 0.5, size: Math.max(0.3, t.missileR * 2.2), cap: 2 }) ?? null;
+    m.obj.add(this.flare(t));
     ctx.fx.smoke(m.pos, t.warhead === 'nuke' ? 3 : 1.2);
     ctx.fx.flash?.(m.pos.x, m.pos.y, m.pos.z, 30, 6, 40);
+  }
+
+  /** The exhaust flare: an additive glow at the tail, always a few pixels big, brighter at night (user request). */
+  private flare(t: LauncherType): THREE.Sprite {
+    if (!this.flareMat) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 64;
+      const g = cv.getContext('2d')!;
+      const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grd.addColorStop(0, 'rgba(255,255,240,1)');
+      grd.addColorStop(0.25, 'rgba(255,214,120,0.9)');
+      grd.addColorStop(0.6, 'rgba(255,120,40,0.35)');
+      grd.addColorStop(1, 'rgba(255,80,20,0)');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, 64, 64);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.flareMat = new THREE.SpriteMaterial({ map: tex, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true, toneMapped: false });
+    }
+    const s = new THREE.Sprite(this.flareMat);
+    s.name = 'missile-flare';
+    s.position.z = -t.missileLen * 0.55;
+    s.renderOrder = 6;
+    s.userData.base = Math.max(1.2, t.missileR * 6);
+    return s;
   }
 
   // ───────────────────────────── target geometry ─────────────────────────────
@@ -616,6 +659,7 @@ export class MissileSystem implements IMissiles {
     if (k === 'KeyS') this.say(this.fire());
     else if (k === 'Space') this.say(this.fire(0, { all: true }));
     else if (k === 'KeyF') this.toggleSpread();
+    else if (k === 'KeyL') this.say(this.autoLock());
     else if (k === 'KeyB' || k === 'Escape') this.exitControl();
     else if (k === 'KeyC' && this.ctx.replay.canReplay) this.ctx.replay.start();
     else return;
@@ -643,10 +687,18 @@ export class MissileSystem implements IMissiles {
     if (ctx.game.state !== 'driving') return;
     this.launchers.update(dt);
     this.traffic.update(dt, alpha);
+    const cam = ctx.engine.camera.position;
+    const night = GLOBAL_UNIFORMS.uNight.value;
     for (const m of this.missiles) {
       if (m.done) continue;
       m.obj.position.lerpVectors(m.prev, m.pos, alpha);
       m.obj.quaternion.setFromUnitVectors(Z, m.dir);
+      const fl = m.obj.getObjectByName('missile-flare') as THREE.Sprite | undefined;
+      if (fl) {
+        const d = cam.distanceTo(m.obj.position);
+        const k = Math.max(fl.userData.base as number, d * 0.012) * (0.8 + 1.2 * night) * (0.9 + 0.2 * Math.random());
+        fl.scale.set(k, k, 1);
+      }
     }
     this.flashT = Math.max(0, this.flashT - dt * 0.7);
     if (this.el.flash) this.el.flash.style.opacity = String(this.flashT * this.flashT);
@@ -694,13 +746,16 @@ export class MissileSystem implements IMissiles {
     let fov = 58;
     if (c.phase === 'missile' && c.first && !c.first.done) {
       const m = c.first;
+      // behind, above and a little to the side: never looking down its own smoke trail
       const back = m.type.missileLen * 2.6 + 12;
-      eye.copy(m.obj.position).addScaledVector(m.dir, -back).addScaledVector(UP, back * 0.32);
+      const side = _v3.crossVectors(m.dir, UP);
+      if (side.lengthSq() < 1e-4) side.set(1, 0, 0);
+      side.normalize();
+      eye.copy(m.obj.position).addScaledVector(m.dir, -back).addScaledVector(UP, back * 0.35).addScaledVector(side, back * 0.22);
       // locked: keep the plane in frame; no lock: look where the missile goes (you steer it)
       if (m.target) look.copy(c.target.pos);
       else look.copy(m.obj.position).addScaledVector(m.dir, 400);
-      const d = eye.distanceTo(look);
-      fov = clamp((2 * Math.atan((c.target.visual.dims.span * 1.6) / Math.max(1, d)) * 180) / Math.PI, 12, 62);
+      fov = 55;
     } else if (c.phase === 'impact') {
       c.impactT += dt;
       // watch it go down: a little off the impact point, keeping the plane in frame
@@ -760,6 +815,7 @@ export class MissileSystem implements IMissiles {
       <div class="msl-msg"></div>
       <div class="msl-ammo"></div>
       <div class="msl-btns">
+        <button class="msl-b msl-lock" data-a="lock">AUTO LOCK <kbd>L</kbd></button>
         <button class="msl-b msl-fire" data-a="fire">FIRE <kbd>S</kbd></button>
         <button class="msl-b msl-all" data-a="all">ALL <kbd>␣</kbd></button>
         <button class="msl-b msl-spread" data-a="spread">SPREAD <kbd>F</kbd></button>
@@ -780,7 +836,8 @@ export class MissileSystem implements IMissiles {
       const a = (e.target as HTMLElement).closest('button')?.dataset.a;
       if (!a) return;
       e.stopPropagation();
-      if (a === 'fire') this.say(this.fire());
+      if (a === 'lock') this.say(this.autoLock());
+      else if (a === 'fire') this.say(this.fire());
       else if (a === 'all') this.say(this.fire(0, { all: true }));
       else if (a === 'spread') this.toggleSpread();
       else if (a === 'replay' && this.ctx.replay.canReplay) this.ctx.replay.start();

@@ -556,6 +556,8 @@ export class Fx implements IFx, FxKit, StreamerSink {
     let f = this.fires.find((e) => !e.active);
     if (!f) f = this.fires.find((e) => e.auto) ?? this.fires.reduce((a, b) => (a.age > b.age ? a : b));
     f.start(target, offset, fire, smoke, size, auto);
+    f.cap = 0;
+    f.lifeK = 1;
     f.born = this.time;
     // crash replay: a fire on a wreck group follows one of its plane parts (the replay poses parts, not groups)
     f.rTarget = target;
@@ -593,9 +595,11 @@ export class Fx implements IFx, FxKit, StreamerSink {
     };
   }
 
-  attachTrail(target: THREE.Object3D, localOffset: THREE.Vector3, o: { fire: number; smoke: number; size: number }): TrailHandle {
+  attachTrail(target: THREE.Object3D, localOffset: THREE.Vector3, o: { fire: number; smoke: number; size: number; cap?: number }): TrailHandle {
     if (!this.main || !target) return { stop() {}, setIntensity() {} };
     const f = this.startFire(target, localOffset, o.fire, o.smoke, o.size, false);
+    f.cap = o.cap ?? 0;
+    f.lifeK = o.cap ? 0.4 : 1;
     const gen = f.gen;
     return {
       stop: () => {
