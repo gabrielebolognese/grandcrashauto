@@ -132,6 +132,7 @@ export class Terrain implements ITerrain {
 
   update(dt: number): void {
     if (!this.ready) return;
+    this.scatter.updateFallen(dt);
     const t0 = performance.now();
     this.step(dt, this.ctx.engine.camera, CONFIG.terrain.uploadBudgetMs);
     const ms = performance.now() - t0;
@@ -230,6 +231,12 @@ export class Terrain implements ITerrain {
       if (!c.empty) n = c.carve(n, ax, az);
     }
     return n;
+  }
+
+  hitTrees(center: THREE.Vector3, quat: THREE.Quaternion, half: THREE.Vector3, vel: THREE.Vector3): number {
+    if (!this.ready) return 0;
+    const off = this.ctx.origin.offset;
+    return this.scatter.hitTrees(center, quat, half, vel, off.x, off.z);
   }
 
   heightAt(x: number, z: number): number {

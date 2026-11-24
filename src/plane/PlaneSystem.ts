@@ -74,6 +74,7 @@ const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const KMH = 3.6;
 
@@ -586,8 +587,134 @@ export class PlaneSystem implements IPlaneSystem {
   }
 
   /** Remove the player plane's body/gear/trails and tracking (does NOT re-park it). */
+  /** Crashed planes left in the world (user request): visual + main body, root follows the body until it settles. */
+  private wrecks: { visual: PlaneVisual; body: RAPIER_T.RigidBody | null; t: number; tracked: TrackedPlane }[] = [];
+
+  /**
+   * A crashed plane stays where it is (user request): its visual, main body (still collidable), wreck pieces and fires
+   * stay in the world and the fires fade slowly; the stand gets a fresh plane for the next flight. The oldest wrecks
+   * beyond the per-quality budget are removed.
+   */
+  private retireWreck(): void {
+    const { ctx } = this;
+    const rec = this.rec, visual = this.visual, tracked = this.tracked;
+    if (!rec || !visual || !tracked) return;
+    const W = CONFIG.planes.wreck;
+    const r = (a: number[]) => a[0] + Math.random() * (a[1] - a[0]);
+    // the plane's own fires (engines, tail, engulf, wing breaks) burn on and fade instead of being cut
+    const keep = (h: TrailHandle | null, size: number) => {
+      if (h) this.looseFires.push({ h, t: 0, life: r(W.fireHold), fade: r(W.fireFade), fire: 0.8, size });
+    };
+    for (const e of this.engines) {
+      keep(e.trail, e.trailSize);
+      e.trail = null;
+    }
+    for (const tr of this.tailTrails) keep(tr, NaN);
+    this.tailTrails = [];
+    for (const tr of this.engulfTrails) keep(tr, NaN);
+    this.engulfTrails = [];
+    for (const f of this.looseFires) {
+      if (f.life !== Infinity) continue;
+      f.life = f.t + r(W.fireHold);
+      f.fade = r(W.fireFade);
+    }
+    try {
+      ctx.breakup.retire?.(tracked);
+    } catch (err) {
+      reportError('[planes] breakup.retire failed', err);
+    }
+    const body = this.body;
+    this.body = null; // handed over to the wreck (keeps its colliders: cars still hit it)
+    this.colliderByPart.clear();
+    this.wrecks.push({ visual, body, t: 0, tracked });
+    this.tracked = null;
+    this.visual = null;
+    // a fresh plane of the same type for the stand / the next flight
+    const fresh = ctx.planeModels.create(rec.type);
+    ctx.engine.scene.add(fresh.root);
+    rec.visual = fresh;
+    // budget: the oldest wrecks go
+    const lvl = ctx.quality.level as 'low' | 'medium' | 'high';
+    const max = (W.keep as Record<string, number>)[lvl] ?? 2;
+    while (this.wrecks.length > max) this.dropWreck(this.wrecks.shift()!);
+  }
+
+  private dropWreck(w: { visual: PlaneVisual; body: RAPIER_T.RigidBody | null; tracked: TrackedPlane }): void {
+    const { ctx } = this;
+    try {
+      ctx.breakup.dropRetired?.(w.tracked);
+    } catch (err) {
+      reportError('[planes] breakup.dropRetired failed', err);
+    }
+    if (w.body) ctx.physics.removeBody(w.body);
+    w.visual.dispose();
+  }
+
+  private partPrev = new WeakMap<THREE.Object3D, THREE.Vector3>();
+  private treeT = 0;
+  /**
+   * Planes vs trees (user request): every part of the flown plane and of its wreck pieces that is low over the ground
+   * mows the trees it crosses — glancing / slow hits knock them over the way the part moves, fast low hits smash them.
+   * Each tree takes a little momentum out of the body that hit it. 30 Hz.
+   */
+  private treeStrikes(visual: PlaneVisual, dt: number): void {
+    const { ctx } = this;
+    const terrain = ctx.terrain;
+    if (!terrain?.hitTrees) return;
+    this.treeT += dt;
+    if (this.treeT < 1 / 30) return;
+    const step = this.treeT;
+    this.treeT = 0;
+    const S = CONFIG.terrain.scatter;
+    for (const p of visual.parts) {
+      const o = p.object;
+      if (!o.parent || !o.visible) continue;
+      o.updateWorldMatrix(true, false);
+      const c = _v.copy(p.boxCenter).sub(p.com).applyMatrix4(o.matrixWorld);
+      let prev = this.partPrev.get(o);
+      if (!prev) this.partPrev.set(o, (prev = c.clone()));
+      const vel = _v2.subVectors(c, prev).divideScalar(step);
+      prev.copy(c);
+      if (vel.lengthSq() < 4 || vel.lengthSq() > 400 * 400) continue; // still (or a teleport)
+      let g = -1e9;
+      try {
+        g = ctx.world.groundHeightAt(c.x, c.z);
+      } catch {
+        /* no ground info */
+      }
+      const reach = Math.max(p.halfExtents.x, p.halfExtents.y, p.halfExtents.z);
+      if (c.y - reach - g > 14) continue; // above the treetops
+      o.matrixWorld.decompose(_v3, _q, _v4);
+      const mass = terrain.hitTrees(c, _q, p.halfExtents, vel);
+      if (mass <= 0) continue;
+      // momentum: the body carrying this part loses a little speed per tree
+      const body = this.tracked && this.body && o.parent === visual.root ? this.body : ctx.breakup.pieces.find((w) => w.parts.includes(p.name))?.body ?? null;
+      if (!body) continue;
+      const m = body.mass();
+      const k = Math.min(0.25, (mass * S.treeDrag) / Math.max(1, m));
+      const lv = body.linvel();
+      body.applyImpulse({ x: -lv.x * k * m, y: 0, z: -lv.z * k * m }, true);
+    }
+  }
+
+  /** Wreck main bodies: the visual follows its body until it settles, then the body is frozen in place. */
+  private updateWrecks(dt: number): void {
+    for (const w of this.wrecks) {
+      const b = w.body;
+      if (!b) continue;
+      w.t += dt;
+      const t = b.translation(), q = b.rotation();
+      w.visual.root.position.set(t.x, t.y, t.z);
+      w.visual.root.quaternion.set(q.x, q.y, q.z, q.w);
+      const lv = b.linvel();
+      const slow = lv.x * lv.x + lv.y * lv.y + lv.z * lv.z < 0.3;
+      if (!b.isFixed() && (b.isSleeping() || slow || w.t > CONFIG.planes.wreck.settleS)) b.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+    }
+  }
+
   private teardownFlight(): void {
     const { ctx } = this;
+    if ((this.crashed || this.wrecked) && this.visual && this.tracked && this.rec) this.retireWreck();
     for (const e of this.engines) e.trail?.stop();
     for (const tr of this.tailTrails) tr.stop();
     this.tailTrails = [];
@@ -806,7 +933,7 @@ export class PlaneSystem implements IPlaneSystem {
       f.t += dt;
       if (f.t > f.life) {
         const k = Math.max(0, 1 - (f.t - f.life) / f.fade);
-        f.h.setIntensity(f.fire * k, 0.3 + 0.7 * k, f.size * (0.5 + 0.5 * k));
+        f.h.setIntensity(f.fire * k * Math.sqrt(k), 0.3 + 0.7 * k, Number.isFinite(f.size) ? f.size * (0.5 + 0.5 * k) : undefined);
         if (k <= 0) {
           f.h.stop();
           f.t = -1;
@@ -1841,6 +1968,8 @@ export class PlaneSystem implements IPlaneSystem {
     const { ctx } = this;
     const realDt = ctx.engine.realDt;
     this.updateLooseFires(dt);
+    if (this.wrecks.length) this.updateWrecks(dt);
+    if (this.active && this.visual && dt > 0) this.treeStrikes(this.visual, dt);
     // Real airport appeared after init → drop the temporary airfield and re-park.
     if (this.tempField && ctx.world.data?.airport?.stands?.length) {
       this.setupAirfield();

@@ -619,6 +619,12 @@ export interface IBreakup extends GameSystem {
   readonly focusPiece: WreckPiece | null;
   /** Remove every piece, fire and slick (respawn). */
   clear(): void;
+  /**
+   * The crashed plane's wreck stays in the world (user request): its pieces keep settling, its fires fade on their own
+   * schedule; it no longer counts for the camera focus / pieces list. clear() keeps it; dropRetired() removes it.
+   */
+  retire?(plane: TrackedPlane): void;
+  dropRetired?(plane: TrackedPlane): void;
 }
 
 // --------------------------- navigation + map screen (src/nav, src/ui/map) ---------------------------
@@ -648,6 +654,11 @@ export interface INav extends GameSystem {
 
 /** Procedural terrain beyond the city/airport (src/terrain). All query coordinates are LOCAL (scene) coordinates. */
 export interface ITerrain extends GameSystem {
+  /**
+   * Planes vs trees (user request): trees whose trunk crosses the oriented box (LOCAL centre, rotation, half extents)
+   * fall over, or are smashed on fast low hits. Returns the tree "mass" hit (1 smashed, 0.35 knocked) for momentum.
+   */
+  hitTrees?(center: THREE.Vector3, quat: THREE.Quaternion, half: THREE.Vector3, vel: THREE.Vector3): number;
   /** Final ground height (after highway corridor carving) at local x,z. Inside the city/airport bounds: their flat level. */
   heightAt(x: number, z: number): number;
   /** Surface material for tyres/fx (grass, sand, rock→concrete, snow→sand-like, asphalt on carved roads…). */

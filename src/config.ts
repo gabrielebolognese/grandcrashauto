@@ -1144,6 +1144,9 @@ export const CONFIG = {
       // the piece that falls away burns pieceFireS s
       tipFireS: 15, pieceFireS: 8,
     },
+    // Crashed planes stay in the world after a respawn (user request): the last `keep` wrecks per quality level, their
+    // fires burn on for fireHold s then fade over fireFade s (smoke lingers longer than flames).
+    wreck: { keep: { low: 1, medium: 2, high: 3 }, fireHold: [20, 40], fireFade: [90, 180], settleS: 40 },
     // Menu "click and fly" start (absolute x/z, height above ground, heading): east of the city, west along the coast.
     quickFly: { x: 1500, z: 170, agl: 380, dirX: -1, dirZ: 0 },
     // Plane bodies fly with real gravity (gravityScale = gravity / |physics.gravity|) even though the arcade world uses -14.
@@ -1316,11 +1319,12 @@ export const CONFIG = {
       crackSpeed: 4.5, // hard landing: fuselage may crack in two above this
     },
     fire: {
-      coolMin: 20,
-      coolMax: 60,
+      // wreck fires fade slowly and progressively (user request)
+      coolMin: 60,
+      coolMax: 140,
       maxTrails: { low: 5, medium: 8, high: 12 },
       patchSpacing: 14, // m between burning fuel patches along the slide path (× plane size)
-      patchDur: [20, 40],
+      patchDur: [40, 90],
       maxPatches: { low: 12, medium: 22, high: 36 },
       secondaries: [2, 4],
       secInterval: [0.3, 1.5],
@@ -1367,6 +1371,12 @@ export const CONFIG = {
       cableRadius: 700,
       forestDensity: 1.0, // trees per 100 m² in dense forest (× quality.treeDensity)
       castShadows: true,
+      // planes vs trees (user request): hits faster than treeSmashSpeed m/s low on the trunk (below this fraction of
+      // its height) smash the tree; everything else knocks it over. fallenMax = fallen trees kept per kind.
+      treeSmashSpeed: 40,
+      treeSmashLow: 0.55,
+      fallenMax: 160,
+      treeDrag: 900, // kg of momentum taken per smashed tree (knocked: x0.35)
     },
     ring: { segments: 160, rings: 9, outer: 16000, rebuildDistance: 700 },
     lake: { cell: 3200, chance: 0.55 },

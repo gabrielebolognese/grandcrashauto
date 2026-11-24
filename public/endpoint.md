@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 2 · 2026-11-24
+Endpoint version: 3 · 2026-11-24
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -90,8 +90,11 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
   the player can also walk around the cabin, even while the plane breaks apart.
 - **Destruction:** blow up engines one by one, split the plane in half, blow off the tail, tear a wing, or explode
   everything.
-- **Crash physics:** pieces keep their momentum, burn, tumble, slide and smash through trees. Fuel fires and
-  secondary explosions follow.
+- **Crash physics:** pieces keep their momentum, burn, tumble and slide. Fuel fires and secondary explosions follow.
+- **Trees break:** a plane or a piece clipping trees knocks them over the way it was moving. A fast, low, hard hit
+  smashes them to bits, and they stay broken.
+- **Wrecks stay:** after a respawn the old wreck stays where it crashed, and its fires fade slowly over a few
+  minutes. The last 2 wrecks are kept (1 on low quality, 3 on high), so a new scene can fly past an earlier crash.
 - **The camera is automatic and cinematic after a crash.** It follows the pieces, swings to the most interesting
   one (often the rear half), then rises into an aerial view of the wreck. Usually the best footage comes from
   leaving it alone.
@@ -400,6 +403,11 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v3 · 2026-11-24:** trees break and wrecks stay.
+  - Trees break: plane parts and wreck pieces clipping trees knock them over in the direction of travel, and fast low hits smash them.
+  - Crashed planes stay in the world after a respawn (last 2 wrecks, 1 on low quality, 3 on high). Their fires burn on, then fade slowly over minutes, with flames shrinking first and smoke lingering.
+  - Wreck fires in general burn longer and fade progressively.
 
 - **v2 · 2026-11-24:** replay reworked.
   - One camera for a whole pass instead of cutting every 2.8 s. The cockpit shot is gone, and Side and Ground are new fixed spectators. `replay next` restarts the clip from the next camera.

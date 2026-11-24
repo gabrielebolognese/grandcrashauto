@@ -43,7 +43,28 @@ interface Bucket {
 const BIT = (i: number) => 1 << i;
 
 const _m = new THREE.Matrix4();
+const _m2 = new THREE.Matrix4();
 const _c = new THREE.Color();
+const _qi = new THREE.Quaternion();
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _ax = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const TREE_H = [9, 7.5]; // pine, round: model height at scale 1
+
+/** A tree knocked over by a plane (user request): falls about its base, then lies there. */
+interface Fallen {
+  type: 0 | 1; // 0 pine, 1 round
+  x: number; // base, LOCAL coords
+  y: number;
+  z: number;
+  basis: THREE.Matrix4; // yaw + scale of the standing tree (no translation)
+  axis: THREE.Vector3; // horizontal axis it rotates about
+  ang: number;
+  vel: number;
+  len: number;
+  rest: boolean;
+}
 
 export class ScatterRenderer {
   readonly group = new THREE.Group();
@@ -63,6 +84,11 @@ export class ScatterRenderer {
   private shadows = true;
   stats = { chunks: 0, instances: 0, structures: 0, rebuilds: 0, tris: 0 };
   private triCounts: number[] = [];
+  // trees broken by planes: persistent keys (re-applied when a chunk is regenerated) + the fallen-tree pool
+  private broken = new Set<string>();
+  private fallenMesh: THREE.InstancedMesh[] = [];
+  private fallen: Fallen[][] = [[], []];
+  private fallenDirty = false;
 
   constructor(
     private ctx: GameContext,
@@ -129,7 +155,162 @@ export class ScatterRenderer {
     this.structures.setMatrixAt(hid, _m.makeTranslation(0, -1e4, 0));
     this.structures.setVisibleAt(hid, false);
     this.group.add(this.structures);
+    // fallen trees: two small instanced pools (pine, round), LOD0 models, ring buffers
+    for (const [i, geo] of [M.pineGeometry(0), M.roundTreeGeometry(0)].entries()) {
+      const mesh = new THREE.InstancedMesh(geo, mats.foliage, CONFIG.terrain.scatter.fallenMax);
+      mesh.name = i ? 'terrain.fallenRound' : 'terrain.fallenPine';
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CONFIG.terrain.scatter.fallenMax * 3).fill(1), 3);
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+      this.fallenMesh.push(mesh);
+    }
     this.applyQuality();
+  }
+
+  /**
+   * Plane parts vs trees (user request): every drawn pine / round tree whose trunk crosses the oriented box falls over
+   * (glancing or slow hits: tops clipped by a wing, a sliding wreck) or is smashed to bits (fast hits low on the
+   * trunk). center / vel LOCAL; returns the "tree mass" hit (1 per smashed tree, 0.35 per knocked one) so the caller
+   * can take momentum out of the hitting body.
+   */
+  hitTrees(center: THREE.Vector3, quat: THREE.Quaternion, half: THREE.Vector3, vel: THREE.Vector3, offX: number, offZ: number): number {
+    const S = CONFIG.terrain.scatter;
+    const r = half.length();
+    const ax = center.x + offX;
+    const az = center.z + offZ;
+    const c0 = Math.floor((ax - r - 6) / CH), c1 = Math.floor((ax + r + 6) / CH);
+    const r0 = Math.floor((az - r - 6) / CH), r1 = Math.floor((az + r + 6) / CH);
+    _qi.copy(quat).invert();
+    const speed = vel.length();
+    let mass = 0;
+    for (let cz = r0; cz <= r1; cz++) {
+      for (let cx = c0; cx <= c1; cx++) {
+        const c = this.chunks.get(ck(cx, cz));
+        const D = c?.data;
+        if (!D) continue;
+        for (const type of [ST.pine, ST.round] as const) {
+          const cnt = D.counts[type];
+          if (!cnt) continue;
+          const off = D.offsets[type];
+          const H = TREE_H[type === ST.pine ? 0 : 1];
+          for (let i = 0; i < cnt; i++) {
+            if (D.ranks[off + i] >= this.density) continue; // not drawn
+            const o = (off + i) * ST_MAT;
+            const M2 = D.mats;
+            const sy = M2[o + 5];
+            if (sy === 0) continue; // already down
+            const tx = cx * CH + M2[o + 12], tz = cz * CH + M2[o + 14];
+            const sc = Math.hypot(M2[o], M2[o + 2]);
+            const crown = 2.6 * sc;
+            const dx = tx - ax, dz = tz - az;
+            if (dx * dx + dz * dz > (r + crown) * (r + crown)) continue;
+            const ty = M2[o + 13];
+            // trunk segment (base to top) in box space vs the box grown by a trunk/crown radius
+            _a.set(tx - offX, ty, tz - offZ).sub(center).applyQuaternion(_qi);
+            _b.set(tx - offX, ty + H * sy, tz - offZ).sub(center).applyQuaternion(_qi);
+            const rad = 0.9 * sc;
+            let t0 = 0, t1 = 1;
+            let hit = true;
+            for (let k = 0; k < 3 && hit; k++) {
+              const a = k === 0 ? _a.x : k === 1 ? _a.y : _a.z;
+              const b = k === 0 ? _b.x : k === 1 ? _b.y : _b.z;
+              const h = (k === 0 ? half.x : k === 1 ? half.y : half.z) + rad;
+              const d = b - a;
+              if (Math.abs(d) < 1e-6) {
+                if (a < -h || a > h) hit = false;
+              } else {
+                let u0 = (-h - a) / d, u1 = (h - a) / d;
+                if (u0 > u1) [u0, u1] = [u1, u0];
+                t0 = Math.max(t0, u0);
+                t1 = Math.min(t1, u1);
+                if (t0 > t1) hit = false;
+              }
+            }
+            if (!hit) continue;
+            const hard = speed > S.treeSmashSpeed && t0 < S.treeSmashLow;
+            // the standing tree goes (persistently)
+            const key = cx + ',' + cz + ',' + type + ',' + i;
+            this.broken.add(key);
+            _m2.fromArray(M2, o);
+            for (let e = 0; e < 11; e++) M2[o + e] = 0;
+            for (const b of this.buckets) if (b.type === type) b.dirty = true;
+            const fx = this.ctx.fx;
+            _a.set(tx - offX, ty + H * sy * 0.55, tz - offZ);
+            if (hard) {
+              mass += 1;
+              fx.dust(_a, 1.2 + sc * 0.6, type === ST.pine ? 0x3d6b3a : 0x5a8f3c);
+              fx.dust(_b.set(tx - offX, ty + 1.5, tz - offZ), 0.9, 0x6b4f32);
+              fx.debrisBurst?.({ position: _a.clone(), velocity: vel.clone().multiplyScalar(0.4), count: 10, size: 0.5 * sc, kind: 'panel' });
+            } else {
+              mass += 0.35;
+              this.addFallen(type === ST.pine ? 0 : 1, tx - offX, ty, tz - offZ, _m2, vel, H * sy, speed);
+              fx.dust(_a, 0.6 + sc * 0.3, type === ST.pine ? 0x3d6b3a : 0x5a8f3c);
+            }
+          }
+        }
+      }
+    }
+    return mass;
+  }
+
+  private addFallen(type: 0 | 1, x: number, y: number, z: number, m: THREE.Matrix4, vel: THREE.Vector3, len: number, speed: number): void {
+    const list = this.fallen[type];
+    const max = CONFIG.terrain.scatter.fallenMax;
+    const f: Fallen = list.length >= max ? list.shift()! : { type, x: 0, y: 0, z: 0, basis: new THREE.Matrix4(), axis: new THREE.Vector3(), ang: 0, vel: 0, len: 1, rest: false };
+    f.x = x;
+    f.y = y;
+    f.z = z;
+    f.basis.copy(m).setPosition(0, 0, 0);
+    // falls the way it was pushed: rotate about the horizontal axis perpendicular to the push
+    _ax.set(vel.x, 0, vel.z);
+    if (_ax.lengthSq() < 1e-4) _ax.set(1, 0, 0);
+    _ax.normalize();
+    f.axis.set(_ax.z, 0, -_ax.x); // up x push
+    f.ang = 0.04;
+    f.vel = Math.min(2.2, 0.3 + (speed / Math.max(4, len)) * 0.35);
+    f.len = Math.max(2, len);
+    f.rest = false;
+    list.push(f);
+    this.fallenDirty = true;
+  }
+
+  /** Falling trees: a rigid rod tipping over its base (angular accel = 1.5 g / L * sin angle), resting on its crown. */
+  updateFallen(dt: number): void {
+    let any = this.fallenDirty;
+    for (const list of this.fallen) {
+      for (const f of list) {
+        if (f.rest) continue;
+        f.vel += ((1.5 * 9.81) / f.len) * Math.sin(f.ang) * dt;
+        f.ang += f.vel * dt;
+        if (f.ang >= 1.47) {
+          f.ang = 1.47;
+          if (f.vel > 0.6) f.vel *= -0.18; // a small bounce on the crown
+          else f.rest = true;
+        }
+        any = true;
+      }
+    }
+    if (!any) return;
+    this.fallenDirty = false;
+    for (let t = 0; t < 2; t++) {
+      const mesh = this.fallenMesh[t];
+      const list = this.fallen[t];
+      for (let i = 0; i < list.length; i++) {
+        const f = list[i];
+        _q.setFromAxisAngle(f.axis, f.ang);
+        _m.makeRotationFromQuaternion(_q).multiply(f.basis);
+        _m.elements[12] = f.x;
+        _m.elements[13] = f.y;
+        _m.elements[14] = f.z;
+        mesh.setMatrixAt(i, _m);
+      }
+      mesh.count = list.length;
+      mesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   applyQuality(): void {
@@ -238,6 +419,16 @@ export class ScatterRenderer {
   onScatter(data: ScatterData): void {
     const c = this.chunks.get(ck(data.cx, data.cz));
     if (!c) return;
+    // trees broken by planes stay broken when a chunk is generated again
+    if (this.broken.size) {
+      const pre = data.cx + ',' + data.cz + ',';
+      for (const k of this.broken) {
+        if (!k.startsWith(pre)) continue;
+        const parts = k.split(',').map(Number);
+        const o = (data.offsets[parts[2]] + parts[3]) * ST_MAT;
+        for (let e = 0; e < 11; e++) data.mats[o + e] = 0;
+      }
+    }
     c.data = data;
     c.mask = 0;
     c.band = 3;
@@ -381,6 +572,12 @@ export class ScatterRenderer {
       b.mesh.position.z -= dz;
       b.dirty = true;
     }
+    for (const list of this.fallen)
+      for (const f of list) {
+        f.x -= dx;
+        f.z -= dz;
+      }
+    this.fallenDirty = true;
   }
 
   dispose(): void {
