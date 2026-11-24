@@ -1,0 +1,28 @@
+#!/bin/sh
+# Every change ships an endpoint update: public/endpoint.md is the contract the video-maker project reads.
+# A commit must stage public/endpoint.md with a higher "Endpoint version: N" and a new Changelog line.
+# (Enabled per clone with: git config core.hooksPath .githooks)
+staged=$(git diff --cached --name-only)
+[ -z "$staged" ] && exit 0
+if ! echo "$staged" | grep -qx 'public/endpoint.md'; then
+  echo "pre-commit: every change needs an endpoint update." >&2
+  echo "  Edit public/endpoint.md: raise 'Endpoint version: N' by one, add a Changelog line (newest first)," >&2
+  echo "  and update any section the change affects (commands, recorder, proven scenes, limits). Then git add it." >&2
+  exit 1
+fi
+ver() { sed -n 's/^Endpoint version: *\([0-9][0-9]*\).*/\1/p' | head -n 1; }
+new=$(git show :public/endpoint.md | ver)
+old=$(git show HEAD:public/endpoint.md 2>/dev/null | ver)
+if [ -z "$new" ]; then
+  echo "pre-commit: public/endpoint.md lost its 'Endpoint version: N' line." >&2
+  exit 1
+fi
+if [ -n "$old" ] && [ "$new" -le "$old" ]; then
+  echo "pre-commit: raise 'Endpoint version' in public/endpoint.md (now $new, last commit $old) and add a Changelog line." >&2
+  exit 1
+fi
+if ! git show :public/endpoint.md | grep -q "^- \*\*v$new "; then
+  echo "pre-commit: add a Changelog entry starting with '- **v$new · <date>:**' in public/endpoint.md." >&2
+  exit 1
+fi
+exit 0

@@ -62,6 +62,13 @@ freeze / step with K and `.`; see `gca.help()`).
 Film any agent scene to a smooth 1080p MP4 and open it (frame-exact offline render, needs ffmpeg):
 `node scripts/film.mjs --scene "night; fly jumbo agl 9; wait 3.5; pitch up 1.6; wait 1.6; split" --seconds 15`.
 
+**Endpoint for AI video makers:** [`public/endpoint.md`](public/endpoint.md), served at
+https://grandcrashauto.netlify.app/endpoint.md, is the brief another Claude Code project reads to play the game in Chrome
+and film scenes. The recorder is `public/endpoint/film.mjs` (no dependencies: Node 22, Chrome or Edge, ffmpeg),
+served at `/endpoint/film.mjs`; `scripts/film.mjs` runs the same recorder against the dev server.
+Every change updates the endpoint: raise its version and add a Changelog line. The `.githooks/pre-commit` hook
+enforces it; enable it with `git config core.hooksPath .githooks`.
+
 ## Deploy
 
 `netlify.toml` is included: connect the GitHub repo in Netlify (build `npm ci && npm run build`, publish `dist`) and

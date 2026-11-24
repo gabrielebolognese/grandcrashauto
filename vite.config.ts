@@ -1,4 +1,15 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
+
+/** The endpoint contract version (public/endpoint.md, "Endpoint version: N") baked into the game as gca.version. */
+function endpointVersion(): number {
+  try {
+    const m = /Endpoint version:\s*(\d+)/.exec(readFileSync(new URL('./public/endpoint.md', import.meta.url), 'utf8'));
+    return m ? Number(m[1]) : 0;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * LIVE_PREVIEW=1 (npm run live): while many agents edit files, collapse the flood of HMR updates into one full page
@@ -31,6 +42,7 @@ function debouncedReload(): Plugin {
 // base './' => the build works from any static host or sub-path (GitHub Pages, Netlify, Vercel, file server).
 export default defineConfig({
   base: './',
+  define: { __ENDPOINT_VERSION__: JSON.stringify(endpointVersion()) },
   plugins: [debouncedReload()],
   server: {
     host: false,

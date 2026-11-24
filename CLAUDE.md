@@ -23,6 +23,15 @@ conventions, ownership and how to verify your work.
   `?agent` (agent mode, src/agent: text view + ghost-physics forecast + latched keys + `window.gca` command API, first
   in simSystems; `scripts/scenarios/agent*.mjs`), `?rec` (recording mode, src/ui/RecMode.ts),
   `?seed=N`, `?quality=low|medium|high`, `?car=<share code>`.
+- **Endpoint: `public/endpoint.md`, served at https://grandcrashauto.netlify.app/endpoint.md. EVERY change updates it.**
+  A separate Claude Code project (the video maker) reads it to play the game in Chrome and film scenes with
+  `public/endpoint/film.mjs` (zero-dependency recorder; `node scripts/film.mjs` runs the same recorder against :5999).
+  With every commit:
+  - raise "Endpoint version: N" by one (vite.config.ts bakes it into the game as `gca.version`)
+  - add a Changelog line, newest first: `- **vN · YYYY-MM-DD:** …`
+  - update every section the change affects: commands, `gca` API, recorder, proven scenes, limits, new filmable features
+  `.githooks/pre-commit` enforces this (`git config core.hooksPath .githooks`). Keep the doc user-facing:
+  no secrets, no local paths.
 
 ## Architecture (contract-first, stub-wired)
 - `src/main.ts` → `src/game/Game.ts` (orchestrator: builds `GameContext`, state machine, update order, explode/reset flow).

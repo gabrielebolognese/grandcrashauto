@@ -43,6 +43,8 @@ type Plan =
   | { k: 'stop'; label: string }
   | { k: 'none' };
 
+/** Endpoint contract version: read from public/endpoint.md ("Endpoint version: N") at build time (vite.config.ts). */
+declare const __ENDPOINT_VERSION__: number;
 const PULSE = 1; // s of hold per key tap
 const MAX_HOLD = 20;
 const PLANE_NAMES: Record<PlaneTypeId, string> = { prop: 'Prop plane', bizjet: 'Private jet', airliner: 'Airliner', jumbo: 'Jumbo (747)' };
@@ -93,6 +95,7 @@ export class Agent implements IAgent {
   private weatherBefore: string | null = null;
   private groundCache = new Map<number, GroundSample>();
   private groundCacheT = 0;
+  private filmBuf: { w: number; h: number; c: HTMLCanvasElement; x: CanvasRenderingContext2D; px: Uint8Array; img: ImageData } | null = null;
 
   constructor(private ctx: GameContext) {}
 
@@ -155,6 +158,33 @@ export class Agent implements IAgent {
       freeze: (on = true) => this.run(on ? 'freeze' : 'go'),
       step: (s = 1) => this.run(`run ${s}`),
       cancel: () => this.run('cancel'),
+      places: () => this.run('places'),
+      /** Endpoint contract version (public/endpoint.md, "Endpoint version: N"). */
+      version: typeof __ENDPOINT_VERSION__ === 'number' ? __ENDPOINT_VERSION__ : 0,
+      /** True once the game has booted (title, menu or playing): commands work from then on. */
+      ready: () => ctx.game.state !== 'boot',
+      /**
+       * Frame-exact filming (public/endpoint/film.mjs drives it): while filming the game advances ONLY on frame() /
+       * advance(), each call = exactly dt of game time, so the footage is smooth whatever the machine.
+       */
+      film: {
+        start: () => {
+          ctx.engine.setFilming(true);
+          return 'filming: the game now advances only on gca.film.frame() / gca.film.advance()';
+        },
+        /** Advance dt s of game time, render, return the frame as a JPEG data URL (pure 3D view, no buttons). */
+        frame: (dt = 1 / 30, quality = 0.94) => this.filmFrame(dt, quality),
+        /** Advance n frames of dt s without capturing (pre-roll, dry runs). */
+        advance: (n = 1, dt = 1 / 30) => {
+          if (!ctx.engine.filming) ctx.engine.setFilming(true);
+          for (let i = 0; i < n; i++) ctx.engine.filmStep(dt);
+          return this.simT;
+        },
+        stop: () => {
+          ctx.engine.setFilming(false);
+          return 'live';
+        },
+      },
       raw: { game: ctx.game, ctx, CONFIG },
     };
     (window as unknown as { gca: typeof api }).gca = api;
@@ -448,12 +478,21 @@ export class Agent implements IAgent {
           if (ctx.game.state !== 'driving') ctx.game.play();
           if (ctx.game.mode === 'plane') planes.backToCar();
           return 'back in the car';
+        case 'places': {
+          const ps = ctx.nav.pois as { id: string; name: string; discovered?: boolean }[];
+          const open = ps.filter((p) => p.discovered !== false), locked = ps.filter((p) => p.discovered === false);
+          return `places you can teleport to (in the car): ${open.map((p) => `${p.id} = ${p.name}`).join(' · ') || 'none'}${locked.length ? `\nlocked until you drive within reach: ${locked.map((p) => p.name).join(' · ')}` : ''}`;
+        }
         case 'teleport':
         case 'goto': {
           const q = w.slice(1).join(' ');
+          if (!q) return 'error: teleport <place> — "places" lists them';
           const poi = ctx.nav.pois.find((p) => p.id === q) ?? ctx.nav.pois.find((p) => p.name.toLowerCase().includes(q));
           if (!poi) return `error: unknown place. Known: ${ctx.nav.pois.map((p) => p.id).join(', ')}`;
           if (ctx.game.state !== 'driving') ctx.game.play();
+          if (ctx.game.mode === 'plane') return 'error: teleport works from the car — "car" first';
+          const chk = (ctx.nav as { canTeleport?: (p: unknown) => { ok: boolean; reason: string } }).canTeleport?.(poi);
+          if (chk && !chk.ok) return `error: ${chk.reason}`;
           ctx.nav.teleport(poi.id);
           return `teleporting to ${poi.name} (wait ~2 s)`;
         }
@@ -723,6 +762,29 @@ export class Agent implements IAgent {
     } catch (err) {
       return `error: ${(err as Error)?.message ?? err}`;
     }
+  }
+
+  /** Film mode: advance exactly dt s of game time, render, read the finished frame from the GL buffer → JPEG data URL. */
+  private filmFrame(dt: number, quality: number): string {
+    const e = this.ctx.engine;
+    if (!e.filming) e.setFilming(true);
+    e.filmStep(dt);
+    // read in the same task as the render (readPixels waits for the finished image; screenshots raced the GPU)
+    e.renderer.setRenderTarget(null);
+    const gl = e.renderer.getContext();
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, row = w * 4;
+    let f = this.filmBuf;
+    if (!f || f.w !== w || f.h !== h) {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const x = c.getContext('2d')!;
+      f = this.filmBuf = { w, h, c, x, px: new Uint8Array(w * h * 4), img: x.createImageData(w, h) };
+    }
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, f.px);
+    for (let y = 0; y < h; y++) f.img.data.set(f.px.subarray((h - 1 - y) * row, (h - y) * row), y * row);
+    f.x.putImageData(f.img, 0, 0);
+    return f.c.toDataURL('image/jpeg', quality);
   }
 
   private cmdFly(w: string[]): string {
@@ -1101,7 +1163,7 @@ export class Agent implements IAgent {
     const env = ctx.env;
     const hrs = env.clockHours;
     const night = env.nightFactor ?? 0;
-    const speedTag = this.frozen ? 'FROZEN — K / "go" resumes, "." or "run 1" = +1 s' : `LIVE ×${(ctx.engine.timeScale ?? 1).toFixed(2)}`;
+    const speedTag = this.frozen ? 'FROZEN — K / "go" resumes, "." or "run 1" = +1 s' : ctx.engine.filming ? `FILMING (frame-exact) ×${(ctx.engine.timeScale ?? 1).toFixed(2)}` : `LIVE ×${(ctx.engine.timeScale ?? 1).toFixed(2)}`;
     L.push(`GRAND CRASH AUTO · AGENT VIEW · t ${t1(this.simT)} s · ${speedTag}`);
     L.push(`WORLD   ${hrs !== undefined ? fmtTime(hrs) : '--:--'} ${night > 0.6 ? 'night' : night > 0.15 ? 'dusk' : 'day'} · weather ${env.weather?.kind ?? 'clear'}`);
     if (st !== 'driving') {
@@ -1253,7 +1315,7 @@ function parseSpeed(a?: string, b?: string): number {
 const HELP = `GRAND CRASH AUTO — AGENT COMMANDS (gca.do("a; b; wait 2; c") — ";" separates, "wait N" delays what follows by N s of game time)
 WORLD    night · day · sunset · dawn · time 23:30 · weather clear|cloudy|overcast|rain|drizzle|storm|fog|snow|auto
 START    fly <prop|jet|airliner|jumbo> [agl 25] [speed 150 | speed 500 kmh] [heading 90|n|e|s|w] [over forest|city|sea] [at X Z]
-         (agl < 150 starts over a forest and keeps terrain-following at that height) · switch <type> (mid-air) · car · teleport <place>
+         (agl < 150 starts over a forest and keeps terrain-following at that height) · switch <type> (mid-air) · car · teleport <place> · places
 FLY      pitch up|down [s] [0..1] · climb [s] · dive [s] · bank left|right [s] · yaw left|right [s] · stick <pitch> <roll> <s>
          throttle 0..100 | +10 | -10 | max | idle · release (centre everything)
 AUTO     alt <m above ground> (terrain following) · heading <deg|n|e|s|w> · bank <deg, +right> · speed <m/s> · level · ap off · alt off …
@@ -1264,6 +1326,8 @@ CAMERA   cam · cam chase|cockpit|wing|orbit|hood · replay · replay next|resta
 TIME     freeze · go · run <s> (advance then freeze) · slowmo <scale> <s> · timescale <x> · cancel (clear the queue)
 UI       rec on|off (recording mode: buttons tiny in one corner) · panel on|off · menu
 TEXT     gca.state() = this view · gca.json() = the same as data · the FORECAST is a ghost copy of the real physics run ahead
+FILM     gca.film.start() · gca.film.frame(1/30) → JPEG of exactly 1/30 s later · gca.film.advance(n, dt) · gca.film.stop()
+DOCS     /endpoint.md (how to play + make videos) · /endpoint/film.mjs (recorder: node film.mjs --scene "…")
 RECIPES  (add "rec on;" first for clean footage)
   night tree-skim split   night; fly jumbo agl 22 speed 150; wait 6; pitch up 2; wait 2; split; wait 6; replay
   wing-off death spiral   fly airliner agl 700; wing left half; wait 32; cam
