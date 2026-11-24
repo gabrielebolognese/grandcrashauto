@@ -59,6 +59,8 @@ Useful URL parameters: `?quality=low|medium|high`, `?seed=N`, `?car=<share code>
 `?agent` (agent mode for AI players such as Claude in Chrome: a live text view with a physics forecast of the next
 seconds, keys where a tap = a 1 s hold, a timed command language — `gca.do("night; fly jumbo agl 22; wait 6; pitch up 2; wait 2; split")`,
 freeze / step with K and `.`; see `gca.help()`).
+Film any agent scene to a smooth 1080p MP4 and open it (frame-exact offline render, needs ffmpeg):
+`node scripts/film.mjs --scene "night; fly jumbo agl 9; wait 3.5; pitch up 1.6; wait 1.6; split" --seconds 15`.
 
 ## Deploy
 

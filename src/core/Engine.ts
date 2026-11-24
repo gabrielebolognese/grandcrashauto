@@ -61,10 +61,13 @@ export class Engine {
   private width = 1;
   private height = 1;
   private hidden = false;
+  private dpr = 0;
   /** Agent mode: keep simulating while hidden / when rAF stalls (worker clock). */
   private keepAlive = false;
   private lastTickAt = 0;
   private clock: Worker | null = null;
+  /** Film mode (scripts/film.mjs): the loop stops ticking by itself; filmStep(dt) advances exactly dt and renders. */
+  filming = false;
 
   constructor(container: HTMLElement, antialias: boolean) {
     this.canvas = document.createElement('canvas');
@@ -138,8 +141,14 @@ export class Engine {
   }
 
   resize(): void {
-    this.width = Math.max(1, window.innerWidth);
-    this.height = Math.max(1, window.innerHeight);
+    const w = Math.max(1, window.innerWidth);
+    const hh = Math.max(1, window.innerHeight);
+    const dpr = window.devicePixelRatio || 1;
+    // spurious resize events (same size): re-setting the canvas size would wipe the frame on screen
+    if (w === this.width && hh === this.height && dpr === this.dpr) return;
+    this.dpr = dpr;
+    this.width = w;
+    this.height = hh;
     this.canvas.style.width = this.width + 'px';
     this.canvas.style.height = this.height + 'px';
     for (const cam of new Set([this.camera, this.view.camera])) {
@@ -162,7 +171,7 @@ export class Engine {
     const loop = (now: number) => {
       if (!this.running) return;
       this.rafId = requestAnimationFrame(loop);
-      this.tick(now);
+      if (!this.filming) this.tick(now);
     };
     this.rafId = requestAnimationFrame(loop);
   }
@@ -179,11 +188,25 @@ export class Engine {
       this.clock = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
       this.clock.onmessage = () => {
         const now = performance.now();
-        if (this.running && now - this.lastTickAt > 30) this.tick(now);
+        if (this.running && !this.filming && now - this.lastTickAt > 30) this.tick(now);
       };
     } catch {
       /* no workers: rAF only */
     }
+  }
+
+  /** Film mode on/off: frame-exact offline rendering at full resolution (every step = exactly dt of game time). */
+  setFilming(on: boolean): void {
+    this.filming = on;
+    if (on) this.setRenderScale(1);
+    this.last = performance.now();
+    this.acc = 0;
+  }
+
+  /** Film mode: advance exactly dt seconds (fixed steps + update) and render one frame. */
+  filmStep(dt: number): void {
+    if (!this.filming) return;
+    this.tick(this.last + dt * 1000);
   }
 
   stop(): void {

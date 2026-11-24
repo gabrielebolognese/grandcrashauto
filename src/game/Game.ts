@@ -332,7 +332,7 @@ export class Game implements GameActions {
     }
     if (this.state === 'garage') this.guard(ctx.garage, 'update', () => ctx.garage.update?.(realDt, alpha));
     this.guard(ctx.ui, 'update', () => ctx.ui.update?.(realDt, alpha));
-    ctx.quality.update(realDt, this.state === 'driving' || this.state === 'menu' || this.state === 'title');
+    if (!ctx.engine.filming) ctx.quality.update(realDt, this.state === 'driving' || this.state === 'menu' || this.state === 'title'); // film: fixed full res
   }
 
   private handleTriggers(): void {
