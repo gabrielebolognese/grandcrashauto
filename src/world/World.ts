@@ -109,7 +109,7 @@ export class World implements IWorld {
       this.root.add(this.airport.group);
     }
     if (this.data.concert) {
-      this.concert = new ConcertStage(this.data.concert);
+      this.concert = new ConcertStage(this.data.concert, this.ctx);
       this.root.add(this.concert.group);
     }
 

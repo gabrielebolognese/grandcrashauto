@@ -32,6 +32,8 @@ interface Autopilot {
   heading: number | null; // deg, 0 = north, 90 = east
   bank: number | null; // deg, + = right
   speed: number | null; // m/s airspeed
+  /** Homing (fly … target <place>): ABSOLUTE point the plane steers and dives into. */
+  target: { x: number; y: number; z: number; name: string } | null;
 }
 interface Queued {
   at: number;
@@ -77,7 +79,7 @@ export class Agent implements IAgent {
   private simT = 0;
   private runUntil = Infinity;
   private holds = new Map<Axis, Hold>();
-  private ap: Autopilot = { alt: null, heading: null, bank: null, speed: null };
+  private ap: Autopilot = { alt: null, heading: null, bank: null, speed: null, target: null };
   private throttleCmd: number | null = null;
   private queue: Queued[] = [];
   private override: Partial<ControlState> = {};
@@ -192,7 +194,7 @@ export class Agent implements IAgent {
   }
 
   private resetFlightAids(): void {
-    this.ap = { alt: null, heading: null, bank: null, speed: null };
+    this.ap = { alt: null, heading: null, bank: null, speed: null, target: null };
     this.throttleCmd = null;
     this.fc = null;
   }
@@ -291,6 +293,7 @@ export class Agent implements IAgent {
       if (this.holds.has('handbrake')) o.handbrake = true;
       if (this.holds.has('turbo')) o.turbo = true;
     }
+    if (ctx.planes.crashed) this.ap.target = null; // homing ends at the crash
     if (ctx.planes.autopilotGamma !== undefined || gamma !== null) ctx.planes.autopilotGamma = gamma;
     const any = Object.keys(o).length > 0;
     ctx.input.agentOverride = any ? o : null;
@@ -337,6 +340,16 @@ export class Agent implements IAgent {
       roll = clamp(err * 1.1, -max, max) / CONFIG.planes.assist.bankLimitDeg;
     }
     if (ap.bank !== null) roll = clamp(ap.bank, -60, 60) / CONFIG.planes.assist.bankLimitDeg;
+    if (ap.target) {
+      // homing: point the flight path straight at the target (bearing + glide angle), so it crashes right there
+      const o = this.ctx.origin.offset;
+      const dx = ap.target.x - o.x - v.x, dz = ap.target.z - o.z - v.z;
+      const dist = Math.max(1, Math.hypot(dx, dz));
+      const brg = Math.atan2(dx, -dz) / DEG;
+      const err = wrap180(brg - v.heading);
+      roll = clamp(err * 1.4, -40, 40) / CONFIG.planes.assist.bankLimitDeg;
+      gamma = clamp(Math.atan2(ap.target.y - v.y, dist), -0.62, 0.2);
+    }
     if (ap.speed !== null) {
       const base = this.throttleCmd ?? v.throttle;
       throttle = clamp(base + (ap.speed - V) * 0.01, 0, 1);
@@ -478,6 +491,9 @@ export class Agent implements IAgent {
           if (ctx.game.state !== 'driving') ctx.game.play();
           if (ctx.game.mode === 'plane') planes.backToCar();
           return 'back in the car';
+        case 'target':
+        case 'crash':
+          return this.cmdTarget(w.slice(1));
         case 'places': {
           const ps = ctx.nav.pois as { id: string; name: string; discovered?: boolean }[];
           const open = ps.filter((p) => p.discovered !== false), locked = ps.filter((p) => p.discovered === false);
@@ -605,7 +621,7 @@ export class Agent implements IAgent {
         case 'ap':
         case 'autopilot':
           if (w[1] === 'off') {
-            this.ap = { alt: null, heading: null, bank: null, speed: null };
+            this.ap = { alt: null, heading: null, bank: null, speed: null, target: null };
             return 'autopilot off';
           }
           return 'error: ap off  (use alt / heading / bank / speed to engage)';
@@ -787,8 +803,56 @@ export class Agent implements IAgent {
     return f.c.toDataURL('image/jpeg', quality);
   }
 
+/** A target by name (concert, stage, crowd, city, downtown, beach, airport, park, any place id / name) or "x z" (absolute). */
+  private findTarget(words: string[]): { x: number; z: number; name: string } | null {
+    const { ctx } = this;
+    const o = ctx.origin.offset;
+    const a = parseFloat(words[0] ?? ''), b = parseFloat(words[1] ?? '');
+    if (Number.isFinite(a) && Number.isFinite(b)) return { x: a, z: b, name: `${Math.round(a)} ${Math.round(b)}` };
+    const q = words.join(' ').trim();
+    if (!q) return null;
+    const c = ctx.world.data?.concert;
+    // the concert = between the stage and the crowd (it takes both); stage / crowd = just that
+    const crowdX = c ? (c.floor.minX + c.floor.maxX) / 2 : 0;
+    if (c && q === 'concert') return { x: (c.stage.x + c.floor.minX + 10) / 2 + o.x, z: c.stage.z + o.z, name: 'the concert' };
+    if (c && q === 'stage') return { x: c.stage.x + o.x, z: c.stage.z + o.z, name: 'the concert stage' };
+    if (c && (q === 'crowd' || q === 'fans' || q === 'audience')) return { x: crowdX + o.x, z: (c.floor.minZ + c.floor.maxZ) / 2 + o.z, name: 'the concert crowd' };
+    if (q === 'city' || q === 'town') return this.findTarget(['downtown']);
+    const poi = ctx.nav.pois.find((p) => p.id === q) ?? ctx.nav.pois.find((p) => p.name.toLowerCase().includes(q));
+    if (poi) return { x: poi.pose.position.x + o.x, z: poi.pose.position.z + o.z, name: poi.name };
+    return null;
+  }
+
+  /**
+   * Homing crash set-up (user request: "crash it on the city / on the concert"): from the current position (or a fresh
+   * spawn, see fly … target) the autopilot steers and dives so the plane hits the target. target off = stop homing.
+   */
+  private cmdTarget(w: string[]): string {
+    if (w[0] === 'off' || w[0] === 'stop') {
+      this.ap.target = null;
+      return 'target off';
+    }
+    if (w[0] === 'into' || w[0] === 'on') w = w.slice(1);
+    const stop = w.findIndex((x) => x === 'in' || x === 'from' || x === 'speed' || x === 'agl');
+    const t = this.findTarget(stop >= 0 ? w.slice(0, stop) : w);
+    if (!t) return 'error: target <concert | stage | crowd | city | beach | airport | park | place id | x z>  ("places" lists them)';
+    if (!this.flying) return 'error: no plane flying — use "fly <type> target <place> [in s] [from n|e|s|w]"';
+    const o = this.ctx.origin.offset;
+    this.ap.target = { x: t.x, z: t.z, y: this.groundY(t.x - o.x, t.z - o.z), name: t.name };
+    this.ap.alt = null;
+    this.ap.heading = null;
+    this.ap.bank = null;
+    this.holds.delete('pitch');
+    this.holds.delete('roll');
+    const p = this.ctx.planes.state.position;
+    const d = Math.hypot(t.x - o.x - p.x, t.z - o.z - p.z);
+    return `homing on ${t.name}, ${f0(d)} m away — it will crash there (target off to stop)`;
+  }
+
   private cmdFly(w: string[]): string {
     const { ctx } = this;
+    const ti = w.indexOf('target') >= 0 ? w.indexOf('target') : w.indexOf('into');
+    if (ti >= 0) return this.cmdFlyTarget(w, ti);
     const type = TYPE_ALIAS[w[1] ?? 'jumbo'] ?? (w[1] && !['agl', 'alt', 'speed', 'heading', 'over', 'at'].includes(w[1]) ? null : 'jumbo');
     if (!type) return 'error: fly prop|jet|airliner|jumbo [agl m] [speed m/s|kmh] [heading deg|n|e|s|w] [over forest|city|sea] [at x z]';
     const get = (k: string) => {
@@ -837,6 +901,48 @@ export class Agent implements IAgent {
       ctx.planes.gearLock = 0; // and keep the gear up
     }
     return `${PLANE_NAMES[type]} in the air, ${f0(h)} m above the ground, ${where}${this.ap.alt !== null ? ` — terrain-following ${f0(this.ap.alt)} m (alt off to stop)` : ''}`;
+  }
+
+/** fly <type> target <place> [in s] [from n|e|s|w|deg] [speed v] [agl h]: spawn on a straight dive that hits it. */
+  private cmdFlyTarget(w: string[], ti: number): string {
+    const { ctx } = this;
+    const type = TYPE_ALIAS[w[1] ?? 'jumbo'] ?? 'jumbo';
+    const keys = ['in', 'from', 'speed', 'agl', 'alt', 'heading'];
+    let end = w.length;
+    for (let i = ti + 1; i < w.length; i++) if (keys.includes(w[i])) {
+      end = i;
+      break;
+    }
+    const t = this.findTarget(w.slice(ti + 1, end));
+    if (!t) return 'error: fly <type> target <concert | stage | crowd | city | beach | airport | park | place id | x z> [in 14] [from s]';
+    const get = (k: string) => {
+      const i = w.indexOf(k);
+      return i >= 0 ? w[i + 1] : undefined;
+    };
+    if (ctx.game.state !== 'driving') ctx.game.play();
+    if (ctx.game.state !== 'driving' || !ctx.planes.spawnAir) return 'error: cannot start a flight now';
+    const o = ctx.origin.offset;
+    const T = clamp(parseFloat(get('in') ?? '') || 14, 4, 60);
+    const cruise: Record<string, number> = { prop: 55, bizjet: 120, airliner: 110, jumbo: 110 };
+    const spIn = get('speed');
+    const sp = spIn ? parseSpeed(spIn, w[w.indexOf('speed') + 2]) : cruise[type];
+    const ty = this.groundY(t.x - o.x, t.z - o.z);
+    // approach direction: from the sea for targets on the coast, else from the east (or as asked)
+    const from = get('from');
+    let hd = HEADINGS[from ?? ''] ?? parseFloat(from ?? '');
+    if (!Number.isFinite(hd)) hd = t.z > 150 ? 180 : 90;
+    const fx = Math.sin(hd * DEG), fz = -Math.cos(hd * DEG); // unit vector from the target toward the start
+    const aglIn = parseFloat(get('agl') ?? get('alt') ?? '');
+    const D0 = sp * T;
+    const ang = Number.isFinite(aglIn) ? Math.atan2(aglIn, D0) : 10 * DEG;
+    const D = D0 * Math.cos(ang), H = D * Math.tan(ang);
+    const sx = t.x + fx * D - o.x, sz = t.z + fz * D - o.z;
+    const g0 = this.groundY(sx, sz);
+    const agl = Math.max(20, ty + H - g0);
+    ctx.planes.spawnAir(type, sx, sz, agl, -fx, -fz, sp);
+    this.ap = { alt: null, heading: null, bank: null, speed: sp, target: { x: t.x, z: t.z, y: ty, name: t.name } };
+    ctx.planes.gearLock = 0;
+    return `${PLANE_NAMES[type]} ${f0(D)} m from ${t.name} (coming from the ${COMPASS[Math.round(((hd % 360) + 360) % 360 / 45) % 8]}), ${f0(agl)} m up at ${f0(sp)} m/s, homing — it crashes there in ≈ ${f0(T)} s (target off to stop)`;
   }
 
   private cmdCam(name?: string): string {
@@ -1212,6 +1318,11 @@ export class Agent implements IAgent {
     if (this.ap.heading !== null) ap.push(`heading ${hdg(this.ap.heading)}`);
     if (this.ap.bank !== null) ap.push(`bank ${s0(this.ap.bank)}°`);
     if (this.ap.speed !== null) ap.push(`speed ${f0(this.ap.speed)} m/s`);
+    if (this.ap.target) {
+      const p = ctx.planes.state.position;
+      const d = Math.hypot(this.ap.target.x - o.x - p.x, this.ap.target.z - o.z - p.z);
+      ap.push(`HOMING on ${this.ap.target.name} (${f0(d)} m, ≈ ${t1(d / Math.max(1, ctx.planes.state.airspeed))} s)`);
+    }
     if (ctx.game.mode === 'plane') L.push(`AUTO    ${ap.length ? ap.join(' · ') : 'off'}`);
     // forecast
     if (this.fcLines.length) {
@@ -1319,6 +1430,8 @@ START    fly <prop|jet|airliner|jumbo> [agl 25] [speed 150 | speed 500 kmh] [hea
 FLY      pitch up|down [s] [0..1] · climb [s] · dive [s] · bank left|right [s] · yaw left|right [s] · stick <pitch> <roll> <s>
          throttle 0..100 | +10 | -10 | max | idle · release (centre everything)
 AUTO     alt <m above ground> (terrain following) · heading <deg|n|e|s|w> · bank <deg, +right> · speed <m/s> · level · ap off · alt off …
+TARGET   fly <type> target <concert|stage|crowd|city|beach|airport|park|place|x z> [in 14] [from n|e|s|w] [speed v] [agl h]
+         (spawns on a dive that crashes there) · target <place> (home on it from where you are) · target off
 CRASH    split · tail · engine 1..4 · explode · wing left|right far|half · gear · respawn · retry
 ON FOOT  walk · pilot · window · view · flyagain   (keys: W/S/A/D tap = 1 s, E grab)
 CAR      gas [s] · brake [s] · steer left|right [s] [0..1] · handbrake [s] · turbo [s] · barrel left|right · explode · reset

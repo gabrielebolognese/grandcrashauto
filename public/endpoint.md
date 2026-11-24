@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 5 · 2026-11-24
+Endpoint version: 6 · 2026-11-24
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -98,6 +98,8 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
 - **The camera is automatic and cinematic after a crash.** It follows the pieces, swings to the most interesting
   one (often the rear half), then rises into an aerial view of the wreck. Usually the best footage comes from
   leaving it alone.
+- **The beach concert** (west end of the beach) has a big crowd and a band. A crash there knocks people flying and sends the rest running and screaming, and the stage collapses: it is no longer an indestructible block.
+- **Cockpit and wing views** look freely in 360° (drag), and stay where you looked.
 - **Passengers and crew** (airliner, jumbo, private jet):
   - About a third of the seats are taken, by the same people in the same seats every flight.
   - Most wear seatbelts. Their reactions are fixed: after an engine blast, the window seats by that engine panic, stare at it and scream (mildly), and the rest of that side looks worried. A split, tail blast or explosion makes everyone panic, then brace. A spin or dive keeps them braced, with the odd scream.
@@ -185,6 +187,17 @@ the 3D view directly, so its videos never contain any buttons.
 | `release` | centres everything |
 
 With the stick centred, the assists hold the flight path and keep the wings level.
+
+**Crash on a target** (the easy way to aim a crash)
+
+| Command | Effect |
+|---|---|
+| `fly jumbo target concert` | spawns the plane on a straight dive that **crashes into the target**. A homing autopilot keeps steering into it, so it really hits. Options: `in 14` (seconds until impact, default 14) · `from s` (approach direction n/e/s/w or degrees; default: from the sea for coastal targets, else from the east) · `speed 110` · `agl 200` (start height, which sets how steep the dive is; default about a 10° dive) |
+| targets | `concert` (between the stage and the crowd: takes both) · `stage` · `crowd` · `city` (downtown) · `beach` · `airport` · `park` · `garage` · `highway` · `jump` · any place from `places` · or `x z` absolute coordinates |
+| `target concert` | already flying: home on a target from where you are (it dives into it) |
+| `target off` | stop homing |
+
+The text view's AUTO line shows `HOMING on <target> (distance, seconds left)`, and the FORECAST predicts the impact.
 
 **Autopilot**
 
@@ -287,6 +300,7 @@ want to cut it short.
 | The request says | Use |
 |---|---|
 | "drastically low", "skimming the trees", "hugging the ground" | `fly jumbo agl 9` (forest start). Around 5 clips the trees; 20–30 is low but clear |
+| "crash it into the concert / the city / the beach" | `fly jumbo target concert in 14` (or `target city` while flying) |
 | "low over the city", "between buildings" | `fly airliner agl 120 over city` |
 | "over the ocean", "along the beach" | `over sea` (starts off the south coast, heading west along the beach) |
 | "lift it a bit", "pull up" | `pitch up 1.5`; 1–2 s is a gentle lift and 3+ s a steep climb |
@@ -312,6 +326,7 @@ want to cut it short.
 | Wing-off death spiral | `fly airliner agl 700; wing left half; wait 32; cam` | 45 s | a slow loss of control, then a spin into the ground |
 | Engines one by one | `fly jumbo; engine 1; wait 3; engine 2; wait 3; engine 3; wait 3; engine 4` | 20 s | four separate explosions, then a powerless glide |
 | Walk while it splits | `fly jumbo agl 500; walk; wait 4; split` | 15 s | in the cabin when it tears open |
+| Jumbo into the concert | `fly jumbo target concert in 12` | 20 s | in from the sea, slams into the beach concert: the stage collapses, the crowd is thrown, the band falls |
 | Tail off over the city | `fly airliner agl 250 over city; wait 4; tail; wait 1; cam` | 20 s | the tail goes, and the plane falls into the city |
 
 The forest start is the same spot every time (a fixed search), so a scene looks almost the same on every take.
@@ -408,6 +423,12 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v6 · 2026-11-24:** targets, concert and terrain.
+  - New `fly <type> target <place> [in s] [from dir]` and `target <place>` / `target off`: homing crash set-ups (concert, stage, crowd, city, beach, airport… or x z).
+  - The concert stage now breaks apart on a crash, and the crowd reacts to plane crashes (knocked flying near the impact, fleeing and screaming further out, band included). Before, they stayed perfectly fine.
+  - Cockpit and wing cameras: free 360° look.
+  - Terrain: smooth shading and colours instead of blocky facets. Farmland is only greens, yellows and green-browns (no purple), and mountains are smooth.
 
 - **v5 · 2026-11-24:** passengers and crew.
   - About 30 % of the seats are taken, by the same people every flight. Most are belted, with fixed reactions: engine blast (that side panics, looks out and screams mildly), split or explosion (panic then brace), spin or dive (brace and scream now and then).

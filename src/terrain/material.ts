@@ -7,7 +7,7 @@ import type { GameContext } from '../game/contracts';
  * Terrain-module materials (all MeshStandardMaterial + onBeforeCompile patches, created ONCE at init):
  *  - shared aerial-perspective haze (distance + altitude + sun glow, follows the environment's fog distance so weather
  *    and cloud whiteout thicken it), applied before tone mapping like the env's own distant scenery;
- *  - terrain: flat per-face colours (provoking vertex), sRGB→linear vertex colours, dynamic snow line
+ *  - terrain: smooth vertex colours + vertex normals (user request: no blocky facets), sRGB→linear, dynamic snow line
  *    (uSnowLine − uSnow), radial depth "squash" so terrain/mountain ring beyond the camera far plane still render;
  *  - foliage: wind sway (uWind, uTime); rotor: spinning turbine blades.
  * Patches chain with whatever env.patchMaterial installed (wetness / snow / puddles).
@@ -108,23 +108,20 @@ function addHaze(shader: THREE.WebGLProgramParametersWithUniforms, extraVert = '
 
 /** Ground material for terrain tiles + the distant ring. */
 export function createTerrainMaterial(ctx: GameContext): THREE.MeshStandardMaterial {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.94, metalness: 0, fog: false });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: false, roughness: 0.94, metalness: 0, fog: false });
   mat.name = 'terrain.ground';
   try {
     ctx.env.patchMaterial?.(mat, 'ground');
   } catch (err) {
     console.warn('[terrain] env.patchMaterial failed', err);
   }
-  chain(mat, 'terrain-ground-v1', (shader) => {
+  chain(mat, 'terrain-ground-v2', (shader) => {
     const G = GLOBAL_UNIFORMS;
     shader.uniforms.uSnowLine = G.uSnowLine;
     shader.uniforms.uSnow = G.uSnow;
     shader.uniforms.uTSquash = TERRAIN_UNIFORMS.uTSquash;
     shader.uniforms.uTSnowJitter = TERRAIN_UNIFORMS.uTSnowJitter;
-    const flatColV = THREE.ShaderChunk.color_pars_vertex.replace('varying vec4 vColor', 'flat varying vec4 vColor');
-    const flatColF = THREE.ShaderChunk.color_pars_fragment.replace('varying vec4 vColor', 'flat varying vec4 vColor');
     shader.vertexShader = shader.vertexShader
-      .replace('#include <color_pars_vertex>', flatColV)
       .replace(
         '#include <common>',
         `#include <common>
@@ -134,9 +131,8 @@ uniform float uSnow;
 uniform float uTSnowJitter;
 uniform vec3 uTSquash;
 uniform vec4 uTHaze;
-flat varying float vSnowAmt;`,
+varying float vSnowAmt;`,
       )
-      .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3(0.0, 1.0, 0.0);')
       .replace(
         '#include <color_vertex>',
         `#include <color_vertex>
@@ -160,8 +156,7 @@ flat varying float vSnowAmt;`,
 `,
     );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <color_pars_fragment>', flatColF)
-      .replace('#include <common>', '#include <common>\nflat varying float vSnowAmt;')
+      .replace('#include <common>', '#include <common>\nvarying float vSnowAmt;')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>

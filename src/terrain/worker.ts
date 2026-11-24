@@ -47,7 +47,7 @@ scope.onmessage = (e) => {
       }
       case 'tile': {
         const r = buildTile(m.level, m.tx, m.tz, seed);
-        scope.postMessage({ type: 'tile', id: m.id, ms: performance.now() - t0, data: r }, [r.positions.buffer, r.colors.buffer, r.snow.buffer, r.index.buffer]);
+        scope.postMessage({ type: 'tile', id: m.id, ms: performance.now() - t0, data: r }, [r.positions.buffer, r.colors.buffer, r.normals.buffer, r.snow.buffer, r.index.buffer]);
         return;
       }
       case 'chunk': {

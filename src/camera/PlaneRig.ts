@@ -245,10 +245,19 @@ export class PlaneRig {
     }
     const s = c.orbitSensitivity;
     const seq = !!this.ctx.planes?.inCockpitSequence;
-    // Grab-the-world semantics (same as the car cameras).
+    // Grab-the-world semantics (same as the car cameras). Free 360° look (user request): yaw is unlimited (wrapped,
+    // continuous), the mounted cockpit / wing views can look almost straight up and down.
+    void seq;
     this.lookYawT += dx * s;
-    if (!seq) this.lookYawT = clamp(this.lookYawT, -Math.PI, Math.PI);
-    this.lookPitchT = clamp(this.lookPitchT + dy * s, -1.2, 1.2);
+    if (this.lookYawT > Math.PI) {
+      this.lookYawT -= Math.PI * 2;
+      this.lookYaw -= Math.PI * 2;
+    } else if (this.lookYawT < -Math.PI) {
+      this.lookYawT += Math.PI * 2;
+      this.lookYaw += Math.PI * 2;
+    }
+    const pMax = this.isMounted ? 1.5 : 1.2;
+    this.lookPitchT = clamp(this.lookPitchT + dy * s, -pMax, pMax);
     this.idle = 0;
   }
 
@@ -275,10 +284,10 @@ export class PlaneRig {
       if (this.shakeFx.trauma < c.cockpitSeqShake) this.shakeFx.trauma = c.cockpitSeqShake;
     }
 
-    // Free look recentres after a pause (not during the cockpit sequence).
+    // Free look recentres after a pause in the chase view (cockpit / wing views stay where you looked).
     this.idle += dt;
     const seq = !!this.ctx.planes?.inCockpitSequence;
-    if (this.idle > c.planeLookReturn && !seq) {
+    if (this.idle > c.planeLookReturn && !seq && !this.isMounted) {
       this.lookYawT += (0 - this.lookYawT) * expK(2.5, dt);
       this.lookPitchT += (0 - this.lookPitchT) * expK(2.5, dt);
     }

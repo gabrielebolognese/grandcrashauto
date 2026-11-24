@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import type RAPIER from '@dimforge/rapier3d-compat';
 import { CONFIG } from '../config';
 import { approach, clamp, dampAngle, smoothstep } from '../core/math';
 import { Rng } from '../core/rng';
@@ -38,8 +37,8 @@ interface Person {
 interface SectionFrame {
   obj: THREE.Object3D | null;
   com: THREE.Vector3;
-  body: RAPIER.RigidBody | null;
-  vPrev: THREE.Vector3;
+  pPrev: THREE.Vector3; // world position of the section part last frame
+  vPrev: THREE.Vector3; // its world velocity
   acc: THREE.Vector3;
   gApp: THREE.Vector3; // apparent gravity in the section frame
   hist: number;
@@ -52,6 +51,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _a = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 
@@ -93,6 +93,7 @@ export class CabinPeople {
     });
     ev.on('originShift', ({ delta }) => {
       for (const p of this.people) p.wp.sub(delta);
+      for (const s of this.secs) s.pPrev.sub(delta);
     });
   }
 
@@ -161,7 +162,7 @@ export class CabinPeople {
     for (const p of this.people) p.sec = this.secAt(p.p.z);
     this.secs = cab.sections.map((s) => {
       const info = visual.partByName[s.part];
-      return { obj: info?.object ?? null, com: info?.com.clone() ?? new THREE.Vector3(), body: null, vPrev: new THREE.Vector3(), acc: new THREE.Vector3(), gApp: new THREE.Vector3(0, -G, 0), hist: 0, q: new THREE.Quaternion() };
+      return { obj: info?.object ?? null, com: info?.com.clone() ?? new THREE.Vector3(), pPrev: new THREE.Vector3(), vPrev: new THREE.Vector3(), acc: new THREE.Vector3(), gApp: new THREE.Vector3(0, -G, 0), hist: 0, q: new THREE.Quaternion() };
     });
     this.group = ctx.npcs.createAvatarGroup?.(looks, type.length * 7 + type.charCodeAt(1)) ?? null;
     if (this.group) {
@@ -244,55 +245,39 @@ export class CabinPeople {
   }
 
   // ───────────────────────────── physics ─────────────────────────────
-  private bodyFor(i: number): RAPIER.RigidBody | null {
-    const s = this.secs[i];
-    const vis = this.visual;
-    if (!s?.obj || !vis) return null;
-    let body: RAPIER.RigidBody | null = null;
-    if (s.obj.parent === vis.root) body = this.tracked?.body ?? null;
-    if (!body) {
-      const part = this.cabin!.sections[i].part;
-      body = this.ctx.breakup.pieces.find((w) => w.parts.includes(part))?.body ?? null;
-    }
-    try {
-      if (body && !this.ctx.physics.world.bodies.contains(body.handle)) body = null;
-    } catch {
-      body = null;
-    }
-    return body;
-  }
+  /** Kept for the walker's hook; the section motion is read from the visuals (no physics-body access at all). */
+  fixedUpdate(_dt: number): void {}
 
-  fixedUpdate(dt: number): void {
-    if (!this.group || !this.people.length || dt <= 0) return;
-    for (let i = 0; i < this.secs.length; i++) {
-      const s = this.secs[i];
-      const body = this.bodyFor(i);
-      if (!body || !s.obj) {
-        s.hist = 0;
-        continue;
-      }
-      const lv = body.linvel(), av = body.angvel(), t = body.translation();
-      s.obj.updateWorldMatrix(true, false);
-      const w = _v.set(0, 0, 0).applyMatrix4(s.obj.matrixWorld); // the section part (its centre of mass)
-      const rx = w.x - t.x, ry = w.y - t.y, rz = w.z - t.z;
-      const vx = lv.x + av.y * rz - av.z * ry, vy = lv.y + av.z * rx - av.x * rz, vz = lv.z + av.x * ry - av.y * rx;
-      if (s.hist > 0 && s.body === body) {
-        _v2.set((vx - s.vPrev.x) / dt, (vy - s.vPrev.y) / dt, (vz - s.vPrev.z) / dt);
-        if (_v2.length() > CONFIG.walk.maxFrameAccel) _v2.setLength(CONFIG.walk.maxFrameAccel);
-        s.acc.lerp(_v2, 1 - Math.exp(-dt / 0.05));
-      } else s.acc.set(0, 0, 0);
-      s.vPrev.set(vx, vy, vz);
-      s.body = body;
-      s.hist++;
-    }
-  }
-
-  /** Apparent gravity per section (same cinematic rules as the player: you fall faster than a split / diving plane). */
+  /**
+   * Apparent gravity per section (same cinematic rules as the player: you fall faster than a split / diving plane).
+   * The section's acceleration comes from its part's world position over the last frames.
+   */
   private frames(dt: number): void {
     const W = CONFIG.walk;
     const intact = !!this.tracked?.body;
     for (const s of this.secs) {
-      if (!s.obj) continue;
+      if (!s.obj || !s.obj.parent) {
+        s.hist = 0;
+        continue;
+      }
+      s.obj.updateWorldMatrix(true, false);
+      const pos = _v.setFromMatrixPosition(s.obj.matrixWorld);
+      if (s.hist === 0 || dt <= 1e-4 || pos.distanceToSquared(s.pPrev) > 200 * 200) {
+        s.pPrev.copy(pos);
+        s.vPrev.set(0, 0, 0);
+        s.acc.set(0, 0, 0);
+        s.hist = 1;
+      } else {
+        _v2.subVectors(pos, s.pPrev).divideScalar(dt);
+        if (s.hist > 1) {
+          const a = _a.subVectors(_v2, s.vPrev).divideScalar(dt);
+          if (a.length() > W.maxFrameAccel) a.setLength(W.maxFrameAccel);
+          s.acc.lerp(a, 1 - Math.exp(-dt / 0.08));
+        }
+        s.vPrev.copy(_v2);
+        s.pPrev.copy(pos);
+        s.hist++;
+      }
       const k = intact ? 1 : W.splitCoupling;
       const a = s.acc;
       const gw = _v.set(-a.x * k, -G - a.y * k, -a.z * k);

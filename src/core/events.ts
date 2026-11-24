@@ -25,6 +25,8 @@ export interface GameEvents extends Record<string, unknown> {
   horn: { position: THREE.Vector3; on: boolean };
   /** A big explosion happened (vehicle emits for the player car). */
   explosion: { position: THREE.Vector3; radius: number; force: number };
+  /** The beach concert stage collapsed (a crash / blast hit it): the band and the crowd react. */
+  concertStageBroken: { position: THREE.Vector3 };
   /** The player car was respawned repaired (game/vehicle). */
   carReset: { position: THREE.Vector3; yaw: number };
   /** The player car was spawned into the world (vehicle). */

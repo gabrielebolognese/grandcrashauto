@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GLOBAL_UNIFORMS } from '../../core/uniforms';
+import type { GameContext } from '../../game/contracts';
 import type { ConcertData } from '../types';
+import { StageParts } from './StageParts';
 
 /**
  * Beach concert dressing on top of the solid stage (CityGen.concertGrounds): animated LED wall, sweeping light beams,
@@ -13,8 +15,12 @@ export class ConcertStage {
   readonly group = new THREE.Group();
   private disposables: { dispose(): void }[] = [];
   private hideDist = 1400;
+  /** Breakable stage structure (deck, wall, trusses, roof, speakers, barrier). */
+  readonly parts: StageParts | null = null;
+  private powerOff = { value: 0 };
+  private last = performance.now();
 
-  constructor(c: ConcertData) {
+  constructor(c: ConcertData, ctx?: GameContext) {
     const st = c.stage;
     const g = this.group;
     g.name = 'world-concert';
@@ -26,7 +32,7 @@ export class ConcertStage {
     // ── LED wall ──
     const screenGeo = new THREE.PlaneGeometry(c.screen.w, c.screen.h);
     const screenMat = new THREE.ShaderMaterial({
-      uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTime: GLOBAL_UNIFORMS.uTime, uNight: GLOBAL_UNIFORMS.uNight, uAspect: { value: c.screen.w / c.screen.h } },
+      uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTime: GLOBAL_UNIFORMS.uTime, uNight: GLOBAL_UNIFORMS.uNight, uAspect: { value: c.screen.w / c.screen.h }, uOff: this.powerOff },
       vertexShader: /* glsl */ `
         #include <fog_pars_vertex>
         varying vec2 vUv;
@@ -41,6 +47,7 @@ export class ConcertStage {
         uniform float uTime;
         uniform float uNight;
         uniform float uAspect;
+        uniform float uOff;
         varying vec2 vUv;
         vec3 pal(float t) { return 0.55 + 0.45 * cos(6.28318 * (vec3(0.0, 0.33, 0.67) + t)); }
         void main() {
@@ -70,6 +77,8 @@ export class ConcertStage {
           }
           vec2 px = fract(uv * vec2(110.0, 50.0)) - 0.5;
           col *= 0.4 + 0.6 * smoothstep(0.5, 0.3, length(px)); // LED pixels
+          // stage collapsed: the wall flickers and dies
+          if (uOff > 0.0) col *= step(0.6, fract(sin(floor(t * 23.0) * 91.7) * 437.5)) * max(0.0, 1.0 - uOff) + 0.02;
           gl_FragColor = vec4(col * (1.1 + 0.9 * uNight), 1.0);
           #include <fog_fragment>
         }`,
@@ -208,10 +217,28 @@ export class ConcertStage {
     banner.name = 'concert-banner';
     g.add(banner);
     this.disposables.push(banGeo, banMat, tex);
+
+    // ── breakable structure (user request) ──
+    if (ctx && c.parts?.length) {
+      const parts = new StageParts(ctx, c.parts, g);
+      (this as { parts: StageParts | null }).parts = parts;
+      parts.ride(screen, 'wall');
+      parts.ride(fixtures, 'roof');
+      parts.ride(banner, 'roof');
+      parts.onBroken(() => {
+        beams.visible = false; // the light show dies with the power
+        this.powerOff.value = 0.001;
+      });
+    }
   }
 
   /** Per frame: hide the whole dressing when the camera is far (cam in LOCAL coordinates). */
   update(cam: THREE.Vector3): void {
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - this.last) / 1000);
+    this.last = now;
+    this.parts?.update(dt);
+    if (this.powerOff.value > 0) this.powerOff.value = Math.min(1, this.powerOff.value + dt / 2.5);
     const p = this.group.position;
     const o = this.group.parent?.position; // world root (shifted with the floating origin)
     this.group.visible = Math.hypot(cam.x - p.x - (o?.x ?? 0), cam.z - p.z - (o?.z ?? 0)) < this.hideDist;
@@ -219,6 +246,7 @@ export class ConcertStage {
 
   /** Floating origin: the group lives under the world root (shifted with it); nothing cached here. */
   dispose(): void {
+    this.parts?.dispose();
     for (const d of this.disposables) d.dispose();
     this.group.removeFromParent();
   }

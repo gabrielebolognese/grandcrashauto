@@ -22,6 +22,7 @@ export class MountainRing {
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
     g.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(9), 3, true));
     g.setAttribute('aSnow', new THREE.BufferAttribute(new Uint8Array(6), 2, true));
+    g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3));
     g.setIndex([0, 1, 2]);
     this.mesh = new THREE.Mesh(g, material);
     this.mesh.name = 'terrain.ring';
@@ -66,6 +67,7 @@ export class MountainRing {
     }
     g.setAttribute('aSnow', new THREE.BufferAttribute(snow, 2, true));
     g.setIndex(new THREE.BufferAttribute(d.index, 1));
+    g.computeVertexNormals(); // smooth shading (user request: the faceted mountains looked low quality)
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), d.rOut);
     this.mesh.geometry.dispose();
     this.mesh.geometry = g;

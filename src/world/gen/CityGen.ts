@@ -1,5 +1,5 @@
 import { CONFIG } from '../../config';
-import { chunkIndex, type CityData, type DistrictId, type RoadKind, type Vec3 } from '../types';
+import { chunkIndex, type CityData, type ConcertData, type DistrictId, type RoadKind, type Vec3 } from '../types';
 import { HeightField, SURF, type SurfCode } from '../HeightField';
 import * as L from './layout';
 import { buildHighway, buildRampStrips, buildSpur, deckY, nearestS, outward, sampleIndexAt } from './highway';
@@ -491,25 +491,30 @@ function concertGrounds(ctx: GenCtx): void {
   const st = { x: -366, w: 22, d: 12, base: -0.5, top: 1.8 };
   const x0 = st.x - st.d / 2, x1 = st.x + st.d / 2;
   const z0 = zc - st.w / 2, z1 = zc + st.w / 2;
-  const box = (cx: number, cy: number, cz: number, w: number, h: number, d: number, col: number, mat: number) =>
-    layout.solids.push({ cx, cy, cz, w, h, d, yaw: 0, col, mat, collide: true });
-  box(st.x, st.base, zc, st.d, st.top - st.base, st.w, 0x3a3d4c, Mat.Plain); // deck
-  box(x1 - 0.15, st.top - 0.02, zc, 0.3, 0.06, st.w, 0xffd166, Mat.Paint); // deck edge stripe
-  box(x0 - 0.6, st.base, zc, 1.2, 13.5 - st.base, st.w + 4, 0x2a2c3a, Mat.Plain); // back wall (LED screen frame)
-  for (const px of [x0 - 0.1, x1 + 0.5]) for (const pz of [z0 - 1.1, z1 + 1.1]) box(px, st.base, pz, 0.9, 14 - st.base, 0.9, 0xd9dde6, Mat.Metal); // truss towers
-  box(st.x - 0.1, 14, zc, st.d + 2.2, 1.6, st.w + 3.4, 0xff7a6b, Mat.Paint); // roof
+  // the stage is BREAKABLE (user request): its boxes are not static city solids but separate physics parts that the
+  // world's ConcertStage builds (fixed until a crash / blast hits them, then they collapse)
+  const parts: NonNullable<ConcertData['parts']> = [];
+  const box = (cx: number, cy: number, cz: number, w: number, h: number, d: number, col: number, mat: number, role: NonNullable<ConcertData['parts']>[number]['role']) =>
+    parts.push({ cx, cy, cz, w, h, d, col, metal: mat === Mat.Metal, role });
+  box(st.x, st.base, zc, st.d, st.top - st.base, st.w, 0x3a3d4c, Mat.Plain, 'deck'); // deck
+  box(x1 - 0.15, st.top - 0.02, zc, 0.3, 0.06, st.w, 0xffd166, Mat.Paint, 'trim'); // deck edge stripe
+  box(x0 - 0.6, st.base, zc, 1.2, 13.5 - st.base, st.w + 4, 0x2a2c3a, Mat.Plain, 'wall'); // back wall (LED screen frame)
+  for (const px of [x0 - 0.1, x1 + 0.5]) for (const pz of [z0 - 1.1, z1 + 1.1]) box(px, st.base, pz, 0.9, 14 - st.base, 0.9, 0xd9dde6, Mat.Metal, 'truss'); // truss towers
+  box(st.x - 0.1, 14, zc, st.d + 2.2, 1.6, st.w + 3.4, 0xff7a6b, Mat.Paint, 'roof'); // roof
   for (const pz of [z0 - 3.4, z1 + 3.4]) {
-    box(x1 - 1.6, st.base, pz, 3.2, 9 - st.base, 3.2, 0x23252e, Mat.Plain); // speaker stack
-    box(x1 - 1.6, 9, pz, 3.4, 0.4, 3.4, 0x5cc8d6, Mat.Paint);
+    box(x1 - 1.6, st.base, pz, 3.2, 9 - st.base, 3.2, 0x23252e, Mat.Plain, 'speaker'); // speaker stack
+    box(x1 - 1.6, 9, pz, 3.4, 0.4, 3.4, 0x5cc8d6, Mat.Paint, 'trim');
   }
-  box(x1 + 3.2, -0.4, zc, 0.35, 1.5, st.w + 6, 0xdfe3ea, Mat.Metal); // crowd barrier
+  box(x1 + 3.2, -0.4, zc, 0.35, 1.5, st.w + 6, 0xdfe3ea, Mat.Metal, 'barrier'); // crowd barrier
   const floor = { minX: x1 + 4.6, maxX: x1 + 4.6 + 62, minZ: L.BEACH_START_Z + 2.2, maxZ: L.SHORE_Z - 2.4, y: L.SAND_TOP * 0.5 };
   data.concert = {
     stage: { x: st.x, y: 0, z: zc, yaw, w: st.w, d: st.d, top: st.top },
     screen: { x: x0 + 0.02, y: 8, z: zc, w: 19, h: 8.6 },
     floor,
     bounds: { minX: x0 - 2, maxX: floor.maxX, minZ: L.BEACH_START_Z, maxZ: L.SHORE_Z },
+    parts,
   };
+  void layout;
   // keep furniture / random spots off the grounds
   for (let x = x0 - 2; x <= floor.maxX + 20; x += 6) for (let z = L.BEACH_START_Z + 2; z <= L.SHORE_Z; z += 6) ctx.space.add(x, z, 3.5);
 }

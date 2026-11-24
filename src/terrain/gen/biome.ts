@@ -32,22 +32,22 @@ export const PAL = {
   grassCoast: hex(0xa2ce70), grass: hex(0x8bc25c), grassLush: hex(0x6eaf52), meadowDry: hex(0xc3c26a),
   lawn: hex(0x9acd6a), hedge: hex(0x548a46),
   forest: hex(0x5e9a52), forestDark: hex(0x4c8749), pine: hex(0x4d7c4e), pineDark: hex(0x3f6a46),
-  rockyHill: hex(0xb4a791), rock: hex(0x9d949c), rockDark: hex(0x827b88), cliff: hex(0xccb08e), cliffDark: hex(0xab9176),
+  rockyHill: hex(0xb4a791), rock: hex(0x9b978c), rockDark: hex(0x7e7a70), cliff: hex(0xccb08e), cliffDark: hex(0xab9176),
   alpine: hex(0xa6c47f), alpineDry: hex(0xbab987),
   dirt: hex(0xb8936a), cut: hex(0xb69e80), gravel: hex(0xbdb6aa),
 };
 
-// Crop palette (pastel patchwork) + weights.
+// Crop palette + weights. User request: only shades of green, yellows, and browns mixed with green (no purple).
 const CROPS: RGB[] = [
-  hex(0xd9bc5a), // wheat
+  hex(0xd6bd5c), // wheat (yellow)
   hex(0x86bf55), // green crop
-  hex(0xe6cb45), // canola (butter)
-  hex(0xa08fd6), // lavender
-  hex(0x9a7352), // ploughed
-  hex(0x8ccb98), // pasture (mint)
-  hex(0xb9a774), // fallow
+  hex(0xe2c94a), // canola (yellow)
+  hex(0x6fa64a), // deep green rows
+  hex(0x8f7f4f), // ploughed (brown, a little green)
+  hex(0x8ec463), // pasture
+  hex(0xaaa569), // fallow (khaki green-brown)
   hex(0xa2bd55), // corn
-  hex(0xf09c80), // poppy/peach meadow (rare)
+  hex(0xb9b65c), // olive meadow (rare)
 ];
 const CROP_W = [0.22, 0.2, 0.09, 0.08, 0.12, 0.15, 0.07, 0.05, 0.02];
 const CROP_CUM: number[] = [];

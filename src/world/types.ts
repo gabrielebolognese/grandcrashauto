@@ -182,6 +182,11 @@ export interface ConcertData {
   floor: { minX: number; maxX: number; minZ: number; maxZ: number; y: number };
   /** The whole grounds incl. stage + speakers (random crowds / props keep out). */
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /**
+   * Breakable stage boxes (user request): bottom-centre (cx, cy, cz), size, colour, metal, role. Built and simulated
+   * by the world's ConcertStage (fixed until a crash / blast hits them, then they collapse).
+   */
+  parts?: { cx: number; cy: number; cz: number; w: number; h: number; d: number; col: number; metal: boolean; role: 'deck' | 'trim' | 'wall' | 'truss' | 'roof' | 'speaker' | 'barrier' }[];
 }
 
 export interface CityData {

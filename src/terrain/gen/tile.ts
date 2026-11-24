@@ -6,8 +6,8 @@ import { hash2 } from './noise';
 
 /**
  * Render-tile mesh builder (runs in a worker). A level-L tile is a (N+1)² INDEXED grid of (2·2^L) m cells with skirts.
- * Faceted look: the shader uses derivative normals (flat facets) and a FLAT colour varying taken from each triangle's
- * provoking (last) vertex, so colours stay per-face even though vertices are shared.
+ * Smooth look (user request: the faceted per-face colours read as pixelated blocks): per-VERTEX colours interpolated
+ * across the triangles and smooth normals from the bordered height grid (central differences).
  * Triangulation matches Rapier's heightfield (diagonal from (x1,z0) to (x0,z1)) so L0 tiles = colliders exactly.
  */
 
@@ -21,6 +21,7 @@ export interface TileMesh {
   size: number;
   positions: Float32Array; // relative to the tile centre (y absolute)
   colors: Uint8Array; // sRGB
+  normals: Int8Array; // smooth vertex normals (normalized bytes)
   snow: Uint8Array; // x = flatness, y = jitter
   index: Uint16Array;
   indexCount: number;
@@ -109,6 +110,7 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
   const nV = V * V + 4 * V;
   const positions = new Float32Array(nV * 3);
   const colors = new Uint8Array(nV * 3);
+  const normals = new Int8Array(nV * 3);
   const snow = new Uint8Array(nV * 2);
   let minY = 1e9;
   let maxY = -1e9;
@@ -123,26 +125,21 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
       if (y > maxY) maxY = y;
     }
   }
-  // per-CELL colours: both triangles of cell (i, j) use vertex c = (i, j+1) as their provoking vertex
+  // per-VERTEX colours + smooth normals (central differences on the bordered grid)
   const latticeX = Math.round(x0 / cell);
   const latticeZ = Math.round(z0 / cell);
-  const cellCol = new Uint8Array(N * N * 3);
-  const cellSnow = new Uint8Array(N * N * 2);
-  for (let j = 0; j < N; j++) {
-    for (let i = 0; i < N; i++) {
-      const ha = hAt(i, j);
-      const hb = hAt(i + 1, j);
-      const hc = hAt(i, j + 1);
-      const hd = hAt(i + 1, j + 1);
-      let gx = (hb - ha) / cell;
-      let gz = (hc - ha) / cell;
-      let ny = 1 / Math.sqrt(1 + gx * gx + gz * gz);
-      gx = (hd - hc) / cell;
-      gz = (hd - hb) / cell;
-      ny = (ny + 1 / Math.sqrt(1 + gx * gx + gz * gz)) * 0.5;
-      const v = (j + 1) * V + i; // provoking vertex
-      const va = j * V + i;
-      INFO.h = (ha + hb + hc + hd) * 0.25;
+  for (let j = 0; j <= N; j++) {
+    for (let i = 0; i <= N; i++) {
+      const gx = (hAt(i + 1, j) - hAt(i - 1, j)) / (2 * cell);
+      const gz = (hAt(i, j + 1) - hAt(i, j - 1)) / (2 * cell);
+      const inv = 1 / Math.sqrt(1 + gx * gx + gz * gz);
+      const ny = inv;
+      const v = j * V + i;
+      normals[v * 3] = Math.round(-gx * inv * 127);
+      normals[v * 3 + 1] = Math.round(inv * 127);
+      normals[v * 3 + 2] = Math.round(-gz * inv * 127);
+      const va = v;
+      INFO.h = hAt(i, j);
       INFO.coast = coast[va];
       INFO.cliff = cliff[va];
       INFO.mtn = mtn[va];
@@ -152,21 +149,14 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
       INFO.lakeR = lakeR[va];
       INFO.zone = zone[va];
       INFO.dune = dune[va];
-      let ck = carve[v];
-      if (carve[va] === CARVE.road || carve[va + 1] === CARVE.road || carve[v] === CARVE.road || carve[v + 1] === CARVE.road) ck = CARVE.road;
+      const ck = carve[v];
       const jit = hash2(seed, latticeX + i, latticeZ + j, 77 + level);
-      const sh = shadeAt(x0 + (i + 0.5) * cell, z0 + (j + 0.5) * cell, INFO, ny, ck, cell, jit, seed);
-      const k3 = (j * N + i) * 3;
-      cellCol[k3] = sh.r < 0 ? 0 : sh.r > 255 ? 255 : sh.r;
-      cellCol[k3 + 1] = sh.g < 0 ? 0 : sh.g > 255 ? 255 : sh.g;
-      cellCol[k3 + 2] = sh.b < 0 ? 0 : sh.b > 255 ? 255 : sh.b;
-      cellSnow[(j * N + i) * 2] = Math.round(Math.max(0, Math.min(1, (ny - 0.55) / 0.4)) * 255);
-      cellSnow[(j * N + i) * 2 + 1] = Math.round(jit * 255);
-      colors[v * 3] = cellCol[k3];
-      colors[v * 3 + 1] = cellCol[k3 + 1];
-      colors[v * 3 + 2] = cellCol[k3 + 2];
-      snow[v * 2] = cellSnow[(j * N + i) * 2];
-      snow[v * 2 + 1] = cellSnow[(j * N + i) * 2 + 1];
+      const sh = shadeAt(x0 + i * cell, z0 + j * cell, INFO, ny, ck, cell, 0.5 + (jit - 0.5) * 0.35, seed);
+      colors[v * 3] = sh.r < 0 ? 0 : sh.r > 255 ? 255 : sh.r;
+      colors[v * 3 + 1] = sh.g < 0 ? 0 : sh.g > 255 ? 255 : sh.g;
+      colors[v * 3 + 2] = sh.b < 0 ? 0 : sh.b > 255 ? 255 : sh.b;
+      snow[v * 2] = Math.round(Math.max(0, Math.min(1, (ny - 0.55) / 0.4)) * 255);
+      snow[v * 2 + 1] = Math.round(jit * 255);
     }
   }
 
@@ -182,10 +172,10 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
       const d = c + 1;
       index[ic++] = b;
       index[ic++] = a;
-      index[ic++] = c; // T1 (a, c, b) rotated: provoking c
+      index[ic++] = c; // T1 (a, c, b)
       index[ic++] = d;
       index[ic++] = b;
-      index[ic++] = c; // T2 (b, c, d) rotated: provoking c
+      index[ic++] = c; // T2 (b, c, d)
     }
   }
 
@@ -198,6 +188,7 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
     if (e === 2) return (N - 1) * N + (N - 1 - k);
     return (N - 1 - k) * N;
   };
+  void adjCell;
   // edge e: 0 north (j=0, +x), 1 east (i=N, +z), 2 south (j=N, -x), 3 west (i=0, -z) — outward winding
   for (let e = 0; e < 4; e++) {
     for (let k = 0; k <= N; k++) {
@@ -220,12 +211,14 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
       positions[bv * 3] = positions[top * 3];
       positions[bv * 3 + 1] = positions[top * 3 + 1] - skirt;
       positions[bv * 3 + 2] = positions[top * 3 + 2];
-      const cc = adjCell(e, Math.min(k, N - 1));
-      colors[bv * 3] = cellCol[cc * 3] * 0.82;
-      colors[bv * 3 + 1] = cellCol[cc * 3 + 1] * 0.82;
-      colors[bv * 3 + 2] = cellCol[cc * 3 + 2] * 0.82;
+      colors[bv * 3] = colors[top * 3] * 0.82;
+      colors[bv * 3 + 1] = colors[top * 3 + 1] * 0.82;
+      colors[bv * 3 + 2] = colors[top * 3 + 2] * 0.82;
+      normals[bv * 3] = normals[top * 3];
+      normals[bv * 3 + 1] = normals[top * 3 + 1];
+      normals[bv * 3 + 2] = normals[top * 3 + 2];
       snow[bv * 2] = 0;
-      snow[bv * 2 + 1] = cellSnow[cc * 2 + 1];
+      snow[bv * 2 + 1] = snow[top * 2 + 1];
     }
     for (let k = 0; k < N; k++) {
       const cc = adjCell(e, k);
@@ -236,10 +229,10 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
       const b1 = b0 + 1;
       index[ic++] = t0;
       index[ic++] = t1;
-      index[ic++] = b1; // provoking b1
+      index[ic++] = b1;
       index[ic++] = t0;
       index[ic++] = b1;
-      index[ic++] = b0; // provoking b0
+      index[ic++] = b0;
     }
   }
 
@@ -252,7 +245,7 @@ export function buildTile(level: number, tx: number, tz: number, seed: number): 
   }
 
   return {
-    level, tx, tz, cx, cz, size, positions, colors, snow,
+    level, tx, tz, cx, cz, size, positions, colors, normals, snow,
     index: ic === index.length ? index : index.slice(0, ic),
     indexCount: ic, minY: cellsKept ? minY - skirt : 0, maxY: cellsKept ? maxY : 0, lakes,
   };

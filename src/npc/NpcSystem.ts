@@ -272,6 +272,18 @@ export class NpcSystem implements INpcSystem {
       ev.on('explosion', (e) => this.onExplosion(e.position, e.radius, e.force)),
       // plane fireballs scatter crowds too (e.g. a jet into the concert)
       ev.on('planeExplosion', (e) => !e.replay && this.onExplosion(e.position, e.radius, e.kind === 'secondary' ? 1 : 1.6)),
+      // a plane slamming into the ground near people: the close ones are knocked flying, the rest flee screaming
+      ev.on('planeImpact', (e) => {
+        if (e.replay || e.outcome === 'landing' || this.impactT > 0) return;
+        this.impactT = 0.3;
+        const r = Math.min(40, Math.max(10, 8 + Math.sqrt(Math.max(0, e.energy)) / 800));
+        this.onExplosion(e.position, r, 0.9);
+      }),
+      // the concert stage collapsed: the band (normally unshakeable on its deck) and the front rows go down
+      ev.on('concertStageBroken', (e) => {
+        for (const s of this.crowd.sites) if (s.kind === 'stage') s.noReact = false;
+        this.onExplosion(e.position, 22, 1.3);
+      }),
       ev.on('carReset', () => {
         this.fillT = 0.5;
       }),
@@ -1369,7 +1381,11 @@ export class NpcSystem implements INpcSystem {
   }
 
   private onExplosion(pos: THREE.Vector3, radius: number, force: number): void {
-    if (this.hidden) return;
+    if (this.hidden) {
+      // a crash down on the ground while we were "hidden" (flying high): wake up so crowds react (user request)
+      if (pos.y - this.ground(pos.x, pos.z) > 90) return;
+      this.wake();
+    }
     const flee = radius * CONFIG.npc.explosionFlee;
     const fmul = Math.min(2, Math.max(0.4, force));
     let count = 0;
@@ -1406,6 +1422,71 @@ export class NpcSystem implements INpcSystem {
       for (let i = 0; i < site.n; i++) if (site.alive[i] && !site.pend[i]) blast(site.mx[i], site.mz[i], -1, site, i);
     }
     if (count > 0) this.ctx.events.emit('npcStartled', { position: pos, count, scream: true });
+  }
+
+  private wake(): void {
+    if (!this.hidden) return;
+    this.hidden = false;
+    this.root.visible = true;
+    this.fillT = 0.8;
+  }
+
+  private plowT = 0;
+  private plowPrev = new WeakMap<THREE.Object3D, THREE.Vector3>();
+  private impactT = 0;
+  private plowScreamT = 0;
+  /**
+   * Planes and wreck pieces plowing through people (user request: the concert crowd must not stay fine): everyone
+   * within a mass-scaled radius of a fast, low plane body is knocked flying along its path. 10 Hz.
+   */
+  private plow(dt: number): void {
+    this.plowT -= dt;
+    this.plowScreamT -= dt;
+    this.impactT -= dt;
+    if (this.plowT > 0 || this.ctx.game.mode !== 'plane') return;
+    this.plowT = 0.1;
+    // positions from the visuals (velocity over the last tick) — no physics-body access from here
+    const movers: { o: THREE.Object3D; m: number }[] = [];
+    const vis = this.ctx.planes.visual;
+    if (vis && this.ctx.planes.currentTracked?.body) movers.push({ o: vis.root, m: vis.mass });
+    for (const p of this.ctx.breakup.pieces) movers.push({ o: p.object, m: p.mass });
+    let count = 0;
+    let at: THREE.Vector3 | null = null;
+    for (const { o, m } of movers) {
+      if (!o.parent) continue;
+      o.updateWorldMatrix(true, false);
+      const t = new THREE.Vector3().setFromMatrixPosition(o.matrixWorld);
+      const prev = this.plowPrev.get(o);
+      this.plowPrev.set(o, t.clone());
+      if (!prev || prev.distanceToSquared(t) > 80 * 80) continue;
+      const v = t.clone().sub(prev).divideScalar(0.1);
+      const sp = Math.hypot(v.x, v.y, v.z);
+      if (sp < 6) continue;
+      const r = Math.min(22, Math.max(2.5, 0.25 * Math.cbrt(Math.max(1, m))));
+      if (t.y - this.ground(t.x, t.z) > r + 6) continue;
+      const knock = (x: number, z: number, npc: number, site: CrowdSite | null, member: number) => {
+        const dx = x - t.x, dz = z - t.z;
+        const d = Math.hypot(dx, dz) || 0.01;
+        if (d > r) return;
+        const ux = dx / d, uz = dz / d;
+        const k = Math.min(1.6, sp / 30);
+        this.queue(0, d / 120, npc, site, member, v.x * 0.5 * k + ux * 5, 3 + 4 * k, v.z * 0.5 * k + uz * 5, -uz * rr(3, 8), rr(-3, 3), ux * rr(3, 8));
+        count++;
+      };
+      for (const n of this.npcs) {
+        if (!n.active || n.st === S.Knocked || n.st === S.Settle) continue;
+        knock(n.body ? n.px : n.x, n.body ? n.pz : n.z, n.i, null, -1);
+      }
+      for (const site of this.crowd.sites) {
+        if (!site.on || Math.hypot(site.x - t.x, site.z - t.z) > r + site.radius) continue;
+        for (let i = 0; i < site.n; i++) if (site.alive[i] && !site.pend[i]) knock(site.mx[i], site.mz[i], -1, site, i);
+      }
+      if (count && !at) at = new THREE.Vector3(t.x, t.y, t.z);
+    }
+    if (count && at && this.plowScreamT <= 0) {
+      this.plowScreamT = 0.8;
+      this.ctx.events.emit('npcStartled', { position: at, count, scream: true });
+    }
   }
 
   private startFlee(n: Npc, ux: number, uz: number, dur: number, tx: number, tz: number): void {
@@ -1925,7 +2006,8 @@ export class NpcSystem implements INpcSystem {
 
     // part 2: crowd disabled while flying high
     const agl = ctx.game.mode === 'plane' ? (ctx.planes?.state?.altitudeAgl ?? 0) : 0;
-    const hide = ctx.game.mode === 'plane' && ctx.planes?.active && agl > C.altitudeHide;
+    // (not once it has crashed: the wreck is down here with the people)
+    const hide = ctx.game.mode === 'plane' && ctx.planes?.active && !ctx.planes.crashed && agl > C.altitudeHide;
     if (hide !== this.hidden) {
       this.hidden = !!hide;
       this.root.visible = !this.hidden;
@@ -1950,6 +2032,7 @@ export class NpcSystem implements INpcSystem {
     }
 
     this.updateCar();
+    this.plow(dt);
     this.updateEnvironment();
     const desired = Math.min(this.poolSize - 40, Math.round(ctx.quality.current.npcCount * this.densityNow));
     this.debug.desired = desired;

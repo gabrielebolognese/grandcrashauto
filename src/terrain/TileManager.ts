@@ -73,6 +73,7 @@ export class TileManager {
     this.dummy = new THREE.BufferGeometry();
     this.dummy.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.VPT * 3), 3));
     this.dummy.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(this.VPT * 3), 3, true));
+    this.dummy.setAttribute('normal', new THREE.BufferAttribute(new Int8Array(this.VPT * 3), 3, true));
     this.dummy.setAttribute('aSnow', new THREE.BufferAttribute(new Uint8Array(this.VPT * 2), 2, true));
     this.dummy.setIndex(new THREE.BufferAttribute(new Uint16Array(this.IPT), 1));
     this.dummy.boundingBox = new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
@@ -291,6 +292,7 @@ export class TileManager {
     const g = this.scratch;
     g.setAttribute('position', new THREE.BufferAttribute(d.positions, 3));
     g.setAttribute('color', new THREE.BufferAttribute(d.colors, 3, true));
+    g.setAttribute('normal', new THREE.BufferAttribute(d.normals, 3, true));
     g.setAttribute('aSnow', new THREE.BufferAttribute(d.snow, 2, true));
     g.setIndex(new THREE.BufferAttribute(d.index, 1));
     const h = d.size / 2;
