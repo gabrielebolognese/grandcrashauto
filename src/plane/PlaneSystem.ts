@@ -9,7 +9,7 @@ import {
   PLANE_TYPES, type CrashOutcome, type ImpactInfo, type ImpactSurface, type PlaneEngineInfo, type PlaneEngineState,
   type PlaneEngineStatus, type PlaneState, type PlaneTypeId, type PlaneVisual, type TrackedPlane, type WreckPiece,
 } from './types';
-import { FlightModel, defaultInputs, planeCfg, type FlightInputs, type PlaneCfg } from './FlightModel';
+import { FlightModel, defaultInputs, planeCfg, speedPush, type FlightInputs, type PlaneCfg } from './FlightModel';
 import { PlaneGear } from './PlaneGear';
 import { TempAirfield, airfieldFromCity, shiftAirfield, type AirfieldInfo } from './airfield';
 
@@ -512,8 +512,9 @@ export class PlaneSystem implements IPlaneSystem {
     this.lightsKey = -1;
     this.lodLevel = -1;
     if (air) {
-      // Cruise power: enough thrust for level flight at the spawn speed.
-      const thr = this.levelThrottle(vel.length() > 1 ? vel.length() : cfg.cruiseKmh / KMH);
+      // Cruise power: the throttle whose speed is the spawn speed (speed response) — never less than level flight needs.
+      const v0 = vel.length() > 1 ? vel.length() : cfg.cruiseKmh / KMH;
+      const thr = Math.max(this.levelThrottle(v0), this.throttleForSpeed(v0));
       this.throttle = thr;
       for (const e of this.engines) e.st.spool = thr;
     }
@@ -535,6 +536,14 @@ export class PlaneSystem implements IPlaneSystem {
       /* camera not ready */
     }
     ctx.events.emit('planeSpawned', { type, inAir: air });
+  }
+
+  /** The throttle the speed response maps to airspeed v (m/s). */
+  private throttleForSpeed(v: number): number {
+    const m = this.model;
+    if (!m) return 0.6;
+    const vMin = m.vStall * CONFIG.planes.speedResponse.minStall;
+    return clamp((v - vMin) / Math.max(1, m.vTop - vMin), 0.15, 1);
   }
 
   private levelThrottle(v: number): number {
@@ -1051,6 +1060,7 @@ export class PlaneSystem implements IPlaneSystem {
     }
     return {
       model, inputs: this.inputs, body, rest: PlaneGear.restHeight(visual, cfg), throttle: this.throttle, spool: n ? spool / n : 0, idle: cfg.idle,
+      share: this.engines.length ? n / this.engines.length : 0,
       tailExplodeIn: this.tailLost && Number.isFinite(this.tailExplodeAt) ? Math.max(0, this.tailExplodeAt - this.tailT) : null,
     };
   }
@@ -1828,9 +1838,27 @@ export class PlaneSystem implements IPlaneSystem {
       fi.roll = clamp((err * 1.6) / CONFIG.planes.assist.bankLimitDeg, -1, 1);
       fi.pitch = 0;
       model.gammaHold = clamp(Math.atan2(ram.y - t.y, Math.max(1, Math.hypot(dx, dz))), -0.6, 0.45);
-      this.throttle = 1; // full power to catch it
+      // fast, not flat out: at 1050 km/h the two planes close too fast to meet (≈ 1.3 × cruise, as rams always flew)
+      this.throttle = this.throttleForSpeed((1.3 * cfg.cruiseKmh) / KMH);
     }
     model.step(dt, body, fi);
+    if (controllable && !this.onGround) {
+      // speed follows the throttle (user request)
+      let ok = 0, sp = 0;
+      for (const e of this.engines) if (e.st.status === 'ok') {
+        ok++;
+        sp += e.st.spool;
+      }
+      const a = speedPush(model, model.airspeed, ok ? sp / ok : 0, this.engines.length ? ok / this.engines.length : 0);
+      if (a !== 0) {
+        const v = body.linvel();
+        const V = Math.hypot(v.x, v.y, v.z);
+        if (V > 1) {
+          const k = (a * body.mass()) / V;
+          body.addForce({ x: v.x * k, y: v.y * k, z: v.z * k }, true);
+        }
+      }
+    }
     this.wingFailTorque(dt, body);
 
     // Fallbacks when nobody else classified the crash: under water, or falling out of the world.

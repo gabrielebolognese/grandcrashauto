@@ -13,13 +13,17 @@ interface Frame {
   vs: Float32Array | null; // the plane's visual damage state (torn caps, interiors, charring, crush…)
   fc: number; // the fx clock (fires born later stay dormant in the replay)
   x: Float32Array | null; // extra objects (missiles): 17 floats each (world matrix + visible)
+  // the other plane (user request: the replay shows the plane you rammed / crashed into too): a sky plane near you
+  cv: PlaneVisual | null;
+  cm: Float32Array | null; // its parts' world matrices
+  cvs: Float32Array | null; // its visual damage state
 }
 interface RecEvent {
   t: number;
   kind: EvKind;
   data: Record<string, unknown>;
 }
-type Shot = 'Missile' | 'Chase' | 'Side' | 'Ground' | 'Orbit' | 'Tail' | 'Top' | 'You';
+type Shot = 'Missile' | 'Chase' | 'Hit plane' | 'Side' | 'Ground' | 'Orbit' | 'Tail' | 'Top' | 'You';
 
 const _p = new THREE.Vector3();
 const _p2 = new THREE.Vector3();
@@ -111,6 +115,10 @@ export class Replay implements IReplay {
         if (f.a) {
           f.a[12] -= delta.x;
           f.a[14] -= delta.z;
+        }
+        if (f.cm) for (let o = 0; o < f.cm.length; o += 16) {
+          f.cm[o + 12] -= delta.x;
+          f.cm[o + 14] -= delta.z;
         }
       }
       for (const e of this.events) {
@@ -208,7 +216,22 @@ export class Replay implements IReplay {
         x![i * 17 + 16] = o.visible && !!o.parent ? 1 : 0;
       });
     }
-    this.frames.push({ t: this.recT, m, a, vs, fc: ctx.fx.clock ?? 0, x });
+    let cv: PlaneVisual | null = null, cm: Float32Array | null = null, cvs: Float32Array | null = null;
+    if (!this.watchVisual) {
+      cv = (ctx.missiles as { coSubject?: () => PlaneVisual | null } | undefined)?.coSubject?.() ?? null;
+      if (cv && cv !== this.visual) {
+        const cp = cv.parts;
+        const same = f?.cv === cv;
+        cm = same && f!.cm && f!.cm.length === cp.length * 16 ? f!.cm : new Float32Array(cp.length * 16);
+        for (let i = 0; i < cp.length; i++) {
+          const o = cp[i].object;
+          o.updateWorldMatrix(true, false);
+          cm.set(o.matrixWorld.elements, i * 16);
+        }
+        cvs = cv.captureState?.(same ? f!.cvs : null) ?? null;
+      } else cv = null;
+    }
+    this.frames.push({ t: this.recT, m, a, vs, fc: ctx.fx.clock ?? 0, x, cv, cm, cvs });
     while (this.events.length && this.recT - this.events[0].t > R.seconds + 1) this.events.shift();
   }
 
@@ -217,6 +240,7 @@ export class Replay implements IReplay {
     if (!this.canReplay || !this.visual) return;
     const { ctx } = this;
     this.active = true;
+    document.getElementById('ui-root')?.classList.add('replaying');
     const last = this.frames[this.frames.length - 1].t;
     this.t1 = last + 1.2;
     this.t0 = Math.max(this.frames[0].t, last - CONFIG.replay.seconds);
@@ -241,12 +265,31 @@ export class Replay implements IReplay {
       o.matrixAutoUpdate = false;
     });
     this.liveState = this.visual.captureState?.() ?? null;
+    // the other plane: the one recorded last (the plane you hit), posed from its own frames
+    this.co = null;
+    this.coSaved = [];
+    for (let i = this.frames.length - 1; i >= 0 && !this.co; i--) this.co = this.frames[i].cv;
+    if (this.co) {
+      this.co.parts.forEach((p, i) => {
+        const o = p.object;
+        if (!this.inScene(o) || !o.parent) return;
+        o.parent.updateWorldMatrix(true, false);
+        this.coSaved.push({ obj: o, inv: new THREE.Matrix4().copy(o.parent.matrixWorld).invert(), i });
+        o.matrixAutoUpdate = false;
+      });
+      this.coLive = this.co.captureState?.() ?? null;
+      this.coVs = null;
+      this.coA = this.coB = null;
+      const ci = this.co.parts.findIndex((p) => p.name === 'fuselageCenter');
+      this.coIdx = ci >= 0 ? ci : 0;
+    }
     (ctx.walker as unknown as { setHandVisible?: (on: boolean) => void }).setHandVisible?.(false);
     this.appliedVs = null;
     const idx = this.visual.parts.findIndex((p) => p.name === 'fuselageCenter');
     this.subjIdx = idx >= 0 ? idx : 0;
     this.subjectAt(this.t0, this.subj); // the streaming focus is valid from the first frame
     this.shots = this.extras.length ? ['Missile', 'Chase'] : ['Chase'];
+    if (this.co && this.coSaved.length) this.shots.push('Hit plane'); // a whole pass on the plane you rammed
     // the missiles (removed from the scene after their impact) come back for the replay
     this.extrasAdded = [];
     for (const o of this.extras) {
@@ -291,11 +334,20 @@ export class Replay implements IReplay {
     if (!this.active) return;
     const { ctx } = this;
     this.active = false;
+    document.getElementById('ui-root')?.classList.remove('replaying');
     for (const s of this.saved) {
       s.obj.matrixAutoUpdate = true;
       s.obj.updateMatrix();
     }
     this.saved = [];
+    for (const s of this.coSaved) {
+      s.obj.matrixAutoUpdate = true;
+      s.obj.updateMatrix();
+    }
+    this.coSaved = [];
+    if (this.co && this.coLive && this.co.applyState) this.co.applyState(this.coLive);
+    this.co = null;
+    this.coLive = null;
     for (const o of this.extras) o.matrixAutoUpdate = true;
     for (const o of this.extrasAdded) o.removeFromParent();
     this.extrasAdded = [];
@@ -365,6 +417,7 @@ export class Replay implements IReplay {
       this.appliedVs = vs;
     }
     this.ctx.fx.replayClock?.(a.fc + (b.fc - a.fc) * u);
+    this.playCo(a, b, u);
     // the missiles
     if (a.x && b.x) {
       const n = Math.min(this.extras.length, a.x.length / 17, b.x.length / 17);
@@ -401,6 +454,46 @@ export class Replay implements IReplay {
     }
     this.updateSubject(a, b, u, realDt);
     this.direct(realDt);
+  }
+
+  private co: PlaneVisual | null = null;
+  private coSaved: { obj: THREE.Object3D; inv: THREE.Matrix4; i: number }[] = [];
+  private coLive: Float32Array | null = null;
+  private coVs: Float32Array | null = null;
+  private coA: Frame | null = null;
+  private coB: Frame | null = null;
+  private coK = 0;
+  private coIdx = 0;
+
+  /** The other plane at this moment (before it was first recorded: where it was then). */
+  private playCo(a: Frame, b: Frame, u: number): void {
+    const co = this.co;
+    if (!co || !this.coSaved.length) return;
+    let A = a.cv === co ? a : null, B = b.cv === co ? b : null;
+    if (!A && !B) {
+      // not recorded yet at this time: hold it at its first recorded pose
+      const first = this.frames.find((f) => f.cv === co && f.t >= a.t);
+      if (!first) return;
+      A = B = first;
+    }
+    if (!A) A = B;
+    if (!B) B = A;
+    const k = A === B ? 0 : u;
+    this.coA = A;
+    this.coB = B;
+    this.coK = k;
+    for (const s of this.coSaved) {
+      const o = s.i * 16;
+      if (!A!.cm || !B!.cm || o + 16 > A!.cm.length || o + 16 > B!.cm.length) continue;
+      this.lerpMat(A!.cm, B!.cm, o, k, _m);
+      s.obj.matrix.multiplyMatrices(s.inv, _m);
+      s.obj.matrixWorldNeedsUpdate = true;
+    }
+    const vs = k < 0.5 ? A!.cvs : B!.cvs;
+    if (vs && vs !== this.coVs && co.applyState) {
+      co.applyState(vs);
+      this.coVs = vs;
+    }
   }
 
   private fcAt(t: number): number {
@@ -462,8 +555,19 @@ export class Replay implements IReplay {
   /** What the cameras look at: the centre fuselage (else the first part), velocity from the recording. */
   private updateSubject(a: Frame, b: Frame, u: number, realDt: number): void {
     const o = this.subjIdx * 16;
-    _p.set(a.m[o + 12], a.m[o + 13], a.m[o + 14]);
-    _p2.set(b.m[o + 12], b.m[o + 13], b.m[o + 14]);
+    if (this.shots[this.shot] === 'Hit plane' && this.coA?.cm && this.coB?.cm) {
+      const c = this.coIdx * 16;
+      _p.set(this.coA.cm[c + 12], this.coA.cm[c + 13], this.coA.cm[c + 14]);
+      _p2.set(this.coB.cm[c + 12], this.coB.cm[c + 13], this.coB.cm[c + 14]);
+      u = this.coK;
+      if (this.coA !== this.coB) {
+        a = this.coA;
+        b = this.coB;
+      }
+    } else {
+      _p.set(a.m[o + 12], a.m[o + 13], a.m[o + 14]);
+      _p2.set(b.m[o + 12], b.m[o + 13], b.m[o + 14]);
+    }
     this.subj.copy(_p).lerp(_p2, u);
     const dt = Math.max(1e-3, b.t - a.t);
     _v.subVectors(_p2, _p).divideScalar(dt);
@@ -495,15 +599,16 @@ export class Replay implements IReplay {
   private direct(realDt: number): void {
     const { ctx } = this;
     const cam = ctx.engine.camera;
-    const S = this.size;
-    const subj = this.subj;
     const shot = this.shots[this.shot];
+    const S = shot === 'Hit plane' && this.co ? clamp(this.co.dims.length, 10, 75) : this.size;
+    const subj = this.subj;
     const eye = _p.copy(subj);
     const look = _p2.copy(subj);
     let fov = 55;
     let smooth = 0; // seconds of position smoothing (0 = locked)
     switch (shot) {
       case 'Chase':
+      case 'Hit plane':
         eye.addScaledVector(this.chaseDir, -S * 1.5).addScaledVector(UP, S * 0.35);
         smooth = 0.25;
         break;

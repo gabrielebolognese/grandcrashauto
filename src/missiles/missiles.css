@@ -31,6 +31,14 @@
 .msl-fire { background: rgba(160, 30, 24, 0.9); border-color: #ff6b5b; padding: 14px 22px; font-size: 15px; }
 .msl-b.active { background: rgba(40, 120, 70, 0.95); }
 .msl-lock { background: rgba(20, 90, 50, 0.92); border-color: #6bff9c; }
+/* spectator cameras: NUKE CAM / HIT PLANE CAM / BACK (top centre, above the HUD) */
+.msl-spec { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 30;
+  display: none; gap: 8px; align-items: center; pointer-events: auto; }
+.msl-spec.on { display: flex; }
+#ui-root.replaying .msl-spec { display: none; }
+.msl-spec .msl-b { font-size: 13px; padding: 7px 12px; }
+.msl-spec-t { color: #fff; font: 700 13px system-ui, sans-serif; text-shadow: 0 1px 3px #000a; background: rgba(10, 14, 22, 0.6);
+  padding: 7px 12px; border-radius: 10px; white-space: nowrap; }
 .msl-hint { position: absolute; left: 50%; bottom: max(6px, env(safe-area-inset-bottom)); transform: translateX(-50%); font-size: 10px; opacity: 0.6; white-space: nowrap; }
 .msl-flash { position: absolute; inset: 0; background: #fffbe8; opacity: 0; pointer-events: none; z-index: 40; }
 #ui-root.rec .msl-hint, #ui-root.rec .msl-top { display: none; }

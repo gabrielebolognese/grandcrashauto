@@ -4,7 +4,7 @@ import { CONFIG } from '../config';
 import { clamp } from '../core/math';
 import { GLOBAL_UNIFORMS } from '../core/uniforms';
 import type { GameContext, IMissiles, LauncherInfo, SkyPlaneInfo, TrailHandle } from '../game/contracts';
-import type { TrackedPlane } from '../plane/types';
+import type { PlaneVisual, TrackedPlane } from '../plane/types';
 import { AirTraffic, type SkyPlane } from './AirTraffic';
 import { Launchers, missileModel, type Launcher } from './Launchers';
 import { LAUNCHER_TYPES, type LauncherType } from './types';
@@ -46,6 +46,7 @@ const Z = new THREE.Vector3(0, 0, 1);
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const ENERGY: Record<string, number> = { small: 500, medium: 1600, big: 4200, nuke: 30000 };
@@ -92,6 +93,15 @@ export class MissileSystem implements IMissiles {
   private camSet = false;
   private msgT = 0;
   private ramId: number | null = null;
+  // spectator cameras (user request): ride your nuke / missile, or follow the sky plane you just hit
+  private spec: { kind: 'missile' | 'hit'; m: Missile | null; p: SkyPlane | null; at: THREE.Vector3 | null; t: number; holdT: number } | null = null;
+  private lastHit: { p: SkyPlane; t: number } | null = null;
+  private specBar: HTMLDivElement | null = null;
+  private specKey = '';
+  private specAnchor = new THREE.Vector3();
+  private specOff = new THREE.Vector3();
+  private specSide = new THREE.Vector3(1, 0, 0);
+  private clock = 0;
   private flashT = 0;
   private focusV = new THREE.Vector3();
   private flareMat: THREE.SpriteMaterial | null = null;
@@ -112,7 +122,10 @@ export class MissileSystem implements IMissiles {
       }
       this.camPos.sub(delta);
       this.control?.impactAt.sub(delta);
+      this.spec?.at?.sub(delta);
     });
+    ctx.events.on('planeSpawned', () => this.spectate(null));
+    ctx.events.on('modeChanged', () => this.spectate(null));
     // mid-air collisions: a plane (yours or a wreck piece) slamming into a sky plane breaks it where it was hit
     ctx.events.on('contact', (e) => {
       const a = this.traffic.byCollider(e.h1), b = this.traffic.byCollider(e.h2);
@@ -170,6 +183,15 @@ export class MissileSystem implements IMissiles {
 
   /** Streaming focus while in the control room (the launcher, the flying missile, the impact). */
   get focus(): THREE.Vector3 | null {
+    const s = this.spec;
+    if (s) {
+      // the world streams around what you watch: the plane (the target of the missile) or the blast point
+      const p = s.p ?? s.m?.target ?? null;
+      if (p) return this.focusV.copy(p.pos);
+      if (s.at) return this.focusV.copy(s.at);
+      if (s.m?.ground) return this.focusV.copy(s.m.ground);
+      return null;
+    }
     const c = this.control;
     if (!c) return null;
     // the world keeps streaming around the turret: chasing a 600 m/s missile / a far crash re-streamed terrain every frame
@@ -184,6 +206,7 @@ export class MissileSystem implements IMissiles {
     if (!p) return 'that plane is gone';
     if (ctx.game.state !== 'driving') return 'not playing';
     if (this.control) this.exitControl();
+    if (this.spec) this.spectate(null);
     if (ctx.walker.active && ctx.walker.mode === 'cabin') ctx.walker.stop();
     this.control = { launcher: l, target: p, phase: 'aim', first: null, impactAt: new THREE.Vector3(), impactT: 0, spread: false, u: 0, v: 0, inputWas: false };
     // start aimed at the target (a little off, so you aim it yourself)
@@ -289,14 +312,227 @@ export class MissileSystem implements IMissiles {
       const p = this.traffic.planes.find((x) => x.id === planeId);
       if (!p) return 'that plane is gone';
       this.launch(silo, i, p, null, 0, 0, false, 0);
-      return `nuke launched at the ${p.name}`;
+      return `nuke launched at the ${p.name} — K / NUKE CAM rides it`;
     }
     if (!at) return 'nuke what?';
     const o = this.ctx.origin.offset;
     const g = new THREE.Vector3(at.x - o.x, 0, at.z - o.z);
     g.y = this.groundAt(g.x, g.z) + 30; // airburst
     this.launch(silo, i, null, g, 0, 0, false, 0);
-    return 'nuke launched';
+    return 'nuke launched — K / NUKE CAM rides it';
+  }
+
+  // ───────────────────────────── spectator cameras ─────────────────────────────
+  get viewing(): boolean {
+    return !!this.spec;
+  }
+
+  /** Your newest missile / nuke still flying (or about to fire). */
+  private watchable(): Missile | null {
+    for (let i = this.missiles.length - 1; i >= 0; i--) {
+      const m = this.missiles[i];
+      if (!m.done && (m.target || m.seek || m.ground)) return m;
+    }
+    return null;
+  }
+
+  /** The sky plane you hit last, while it is still around (90 s). */
+  private hitWatchable(): SkyPlane | null {
+    const h = this.lastHit;
+    if (!h || this.clock - h.t > 90 || !this.traffic.planes.includes(h.p)) return null;
+    return h.p;
+  }
+
+  /** Switch the view (user request): ride your missile / nuke, follow the plane you hit, or back (null). */
+  spectate(kind: 'missile' | 'hit' | null): string {
+    const { ctx } = this;
+    if (kind === null) {
+      if (!this.spec) return '';
+      this.spec = null;
+      (ctx.planes as { freeze?: (on: boolean) => void }).freeze?.(false);
+      document.getElementById('ui-root')?.classList.remove('msl-control');
+      const cam = ctx.engine.camera;
+      cam.fov = 60;
+      cam.updateProjectionMatrix();
+      try {
+        ctx.cameraRig.snap();
+      } catch {
+        /* camera not ready */
+      }
+      return 'back to your view';
+    }
+    if (this.control) return 'leave the control room first';
+    if (ctx.game.state !== 'driving') return 'not playing';
+    const m = kind === 'missile' ? this.watchable() : null;
+    const p = kind === 'hit' ? this.hitWatchable() : null;
+    if (kind === 'missile' && !m) return 'no missile or nuke of yours is flying';
+    if (kind === 'hit' && !p) return 'you have not hit a plane yet';
+    this.spec = { kind, m, p, at: null, t: 0, holdT: 0 };
+    this.camSet = false;
+    // your plane waits in the air while you watch (it would fly on unattended)
+    if (ctx.game.mode === 'plane') (ctx.planes as { freeze?: (on: boolean) => void }).freeze?.(true);
+    document.getElementById('ui-root')?.classList.add('msl-control');
+    if (m) return m.type.warhead === 'nuke' ? '☢ riding the nuke' : '🚀 riding the missile';
+    return `🎯 watching the ${p!.name.split(' · ')[0]}`;
+  }
+
+  /** Replay: the other plane to record with yours — the ram target, the plane you hit, else the nearest within 3 km. */
+  coSubject(): PlaneVisual | null {
+    const T = this.traffic.planes;
+    if (this.ramId !== null) {
+      const r = T.find((x) => x.id === this.ramId);
+      if (r) return r.visual;
+    }
+    const h = this.lastHit;
+    if (h && this.clock - h.t < 30 && T.includes(h.p)) return h.p.visual;
+    const me = this.ctx.planes.currentTracked?.visual?.root ?? null;
+    if (!me || this.ctx.game.mode !== 'plane') return null;
+    me.getWorldPosition(_v);
+    let best: SkyPlane | null = null, bd = 3000;
+    for (const p of T) {
+      const d = p.pos.distanceTo(_v);
+      if (d < bd) {
+        bd = d;
+        best = p;
+      }
+    }
+    return best?.visual ?? null;
+  }
+
+  private toast(text: string): void {
+    if (text) this.ctx.events.emit('toast', { text, ms: 1600 });
+  }
+
+  private updateSpec(dt: number): void {
+    const { ctx } = this;
+    const s = this.spec;
+    this.drawSpecBar();
+    if (!s) return;
+    s.t += dt;
+    if (s.m) {
+      if (s.m.done) {
+        // the missile went off: watch the plane it hit (or the blast)
+        if (s.m.target && this.traffic.planes.includes(s.m.target)) s.p = s.m.target;
+        else s.at = (s.m.ground ?? s.m.pos).clone();
+        s.m = null;
+        s.holdT = 0;
+        this.camSet = false;
+      }
+    }
+    if (s.p && !this.traffic.planes.includes(s.p)) {
+      this.spectate(null);
+      return;
+    }
+    if (!s.m && !s.p) {
+      s.holdT += dt;
+      if (s.holdT > 8) {
+        this.spectate(null);
+        return;
+      }
+    }
+    const cam = ctx.engine.camera;
+    const eye = _v.set(0, 0, 0), look = _v2.set(0, 0, 0);
+    let fov = 55;
+    if (s.m) {
+      // a three-quarter chase from the side: the nuke big in frame, its trail streaming away (never through the lens)
+      const m = s.m;
+      const back = m.type.missileLen * 3 + 15;
+      const side = _v3.crossVectors(m.dir, UP);
+      if (side.lengthSq() > 1e-3) this.specSide.lerp(side.normalize(), 0.1).normalize(); // climbing straight up: keep the last side
+      this.specAnchor.copy(m.obj.position);
+      // beside it and a touch ahead: the fire trail streams AWAY from the lens (close to it, it washes the frame out)
+      eye.copy(m.obj.position).addScaledVector(m.dir, back * 0.15).addScaledVector(this.specSide, back * 1.1).addScaledVector(UP, back * 0.35);
+      // look just ahead of its nose (the nuke near the centre of the frame), a touch toward where it is going
+      look.copy(m.obj.position).addScaledVector(m.dir, back * 0.45);
+      const tgt = m.target ?? m.seek;
+      const goal = tgt ? tgt.pos : m.ground;
+      if (goal) look.lerp(_v3.subVectors(goal, m.obj.position).normalize().multiplyScalar(back * 0.45).add(m.obj.position), 0.15);
+      fov = 60;
+    } else if (s.p) {
+      // chase the plane going down: behind its motion, above and a little to the side
+      const p = s.p;
+      const L = clamp(p.visual.dims.length, 10, 75);
+      const dir = _v3.copy(p.vel);
+      if (dir.lengthSq() < 4) dir.set(Math.sin(p.yaw), 0, Math.cos(p.yaw));
+      dir.y *= 0.5;
+      dir.normalize();
+      const side = _v4.crossVectors(dir, UP);
+      if (side.lengthSq() < 1e-4) side.set(1, 0, 0);
+      side.normalize();
+      this.specAnchor.copy(p.pos);
+      eye.copy(p.pos).addScaledVector(dir, -L * 2.4).addScaledVector(UP, L * 0.7).addScaledVector(side, L * 0.9);
+      look.copy(p.pos);
+      fov = 58;
+    } else if (s.at) {
+      // a blast with nothing to follow: a wide look from a safe distance
+      this.specAnchor.copy(s.at);
+      eye.copy(s.at).add(_v3.set(900, 500, 900));
+      look.copy(s.at);
+      fov = 60;
+    }
+    // smooth the camera's offset from the subject, not its world position (no lag behind a fast nuke)
+    _v3.subVectors(eye, this.specAnchor);
+    if (!this.camSet) this.specOff.copy(_v3);
+    else this.specOff.lerp(_v3, 1 - Math.exp(-dt / 0.25));
+    this.camSet = true;
+    this.camPos.copy(this.specAnchor).add(this.specOff);
+    const gy = this.groundAt(this.camPos.x, this.camPos.z) + 2;
+    if (this.camPos.y < gy) this.camPos.y = gy;
+    cam.position.copy(this.camPos);
+    _m.lookAt(this.camPos, look, UP);
+    cam.quaternion.setFromRotationMatrix(_m);
+    if (Math.abs(cam.fov - fov) > 0.05) {
+      cam.fov += (fov - cam.fov) * Math.min(1, dt * 6);
+      cam.updateProjectionMatrix();
+    }
+    cam.updateMatrixWorld();
+  }
+
+  /** The small bar with the camera buttons (NUKE CAM / MISSILE CAM / HIT PLANE CAM / BACK). */
+  private drawSpecBar(): void {
+    const { ctx } = this;
+    const s = this.spec;
+    const m = !s && !this.control ? this.watchable() : null;
+    const hp = !s && !this.control ? this.hitWatchable() : null;
+    const show = ctx.game.state === 'driving' && !ctx.replay.active && (!!s || !!m || !!hp);
+    let key = '';
+    if (show) {
+      if (s) {
+        const what = s.m ? (s.m.type.warhead === 'nuke' ? '☢ riding the nuke' : '🚀 riding the missile') : s.p ? `🎯 ${s.p.name.split(' · ')[0]}${s.p.down ? ' · down' : s.p.hit ? ' · going down' : ''}` : '💥 the blast';
+        key = `s|${what}`;
+      } else key = `a|${m ? m.type.warhead : ''}|${hp ? hp.id : ''}`;
+    }
+    if (key === this.specKey) return;
+    this.specKey = key;
+    if (!show) {
+      this.specBar?.classList.remove('on');
+      return;
+    }
+    if (!this.specBar) {
+      const b = document.createElement('div');
+      b.className = 'msl-spec';
+      b.addEventListener('click', (e) => {
+        const a = (e.target as HTMLElement).closest('button')?.dataset.a;
+        if (!a) return;
+        e.stopPropagation();
+        if (a === 'back') this.spectate(null);
+        else if (a === 'mcam') this.toast(this.spectate('missile'));
+        else if (a === 'hcam') this.toast(this.spectate('hit'));
+      });
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+      (document.getElementById('ui-root') ?? document.body).append(b);
+      this.specBar = b;
+    }
+    const parts: string[] = [];
+    if (s) {
+      parts.push(`<span class="msl-spec-t">${key.slice(2)}</span>`);
+      parts.push('<button class="msl-b msl-back" data-a="back">◀ BACK <kbd>K</kbd></button>');
+    } else {
+      if (m) parts.push(`<button class="msl-b msl-fire" data-a="mcam">${m.type.warhead === 'nuke' ? '☢ NUKE CAM' : '🚀 MISSILE CAM'} <kbd>K</kbd></button>`);
+      if (hp) parts.push(`<button class="msl-b msl-lock" data-a="hcam">🎯 HIT PLANE CAM${m ? '' : ' <kbd>K</kbd>'}</button>`);
+    }
+    this.specBar.innerHTML = parts.join('');
+    this.specBar.classList.add('on');
   }
 
   /** AUTO LOCK (button / L): the turret swings onto the target, and any missile flying blind locks on now. */
@@ -549,6 +785,7 @@ export class MissileSystem implements IMissiles {
   /** A warhead on a sky plane: the joints around the hit part break, it falls burning. */
   private hitPlane(p: SkyPlane, pos: THREE.Vector3, part: string, warhead: string): void {
     const { ctx } = this;
+    if (!this.lastHit || this.lastHit.p !== p) this.lastHit = { p, t: this.clock };
     const vis = p.visual;
     const R = JOINT_R[warhead];
     // impact point in the root frame (intact) — or the part's rest position (split)
@@ -646,6 +883,23 @@ export class MissileSystem implements IMissiles {
 
   // ───────────────────────────── control room ─────────────────────────────
   private onKey(e: KeyboardEvent, down: boolean): void {
+    if (!this.control && down && !e.repeat && e.code === 'KeyK' && this.ctx.game.state === 'driving' && !this.ctx.replay.active) {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      if (this.spec) this.spectate(null);
+      else if (this.watchable()) this.toast(this.spectate('missile'));
+      else if (this.hitWatchable()) this.toast(this.spectate('hit'));
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (!this.control && this.spec && down && !e.repeat && (e.code === 'Escape' || e.code === 'KeyB')) {
+      this.spectate(null);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (!this.control) return;
     const k = e.code;
     const t = e.target as HTMLElement | null;
@@ -687,30 +941,44 @@ export class MissileSystem implements IMissiles {
     if (ctx.game.state !== 'driving') return;
     this.launchers.update(dt);
     this.traffic.update(dt, alpha);
-    const cam = ctx.engine.camera.position;
-    const night = GLOBAL_UNIFORMS.uNight.value;
     for (const m of this.missiles) {
       if (m.done) continue;
       m.obj.position.lerpVectors(m.prev, m.pos, alpha);
       m.obj.quaternion.setFromUnitVectors(Z, m.dir);
-      const fl = m.obj.getObjectByName('missile-flare') as THREE.Sprite | undefined;
-      if (fl) {
-        const d = cam.distanceTo(m.obj.position);
-        const k = Math.max(fl.userData.base as number, d * 0.012) * (0.8 + 1.2 * night) * (0.9 + 0.2 * Math.random());
-        fl.scale.set(k, k, 1);
-      }
     }
     this.flashT = Math.max(0, this.flashT - dt * 0.7);
     if (this.el.flash) this.el.flash.style.opacity = String(this.flashT * this.flashT);
+    this.clock += dt;
+    this.updateSpec(dt);
     const c = this.control;
-    if (!c) return;
-    if (!this.traffic.planes.includes(c.target)) {
-      this.exitControl();
-      return;
+    if (c) {
+      if (!this.traffic.planes.includes(c.target)) this.exitControl();
+      else {
+        this.input(c, dt);
+        this.camera(c, dt);
+        this.drawHud(c, dt);
+      }
     }
-    this.input(c, dt);
-    this.camera(c, dt);
-    this.drawHud(c, dt);
+    this.sizeFlares();
+  }
+
+  /**
+   * The exhaust flares, sized for where the camera finally is this frame (after the control room / nuke cam moved it:
+   * sized for the chase camera kilometres away, a flare filled the whole screen up close).
+   */
+  private sizeFlares(): void {
+    const cam = this.ctx.engine.camera.position;
+    const night = GLOBAL_UNIFORMS.uNight.value;
+    for (const m of this.missiles) {
+      if (m.done) continue;
+      const fl = m.obj.getObjectByName('missile-flare') as THREE.Sprite | undefined;
+      if (!fl) continue;
+      const d = cam.distanceTo(m.obj.position);
+      // the flare is for seeing it from far away; close up the fire trail shows it
+      fl.visible = d > 100;
+      const k = Math.max(fl.userData.base as number, d * 0.012) * (0.8 + 1.2 * night) * (0.9 + 0.2 * Math.random());
+      fl.scale.set(k, k, 1);
+    }
   }
 
   private input(c: Control, dt: number): void {

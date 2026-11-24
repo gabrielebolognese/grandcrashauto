@@ -97,6 +97,20 @@ const _up = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
 
+/**
+ * Speed response (user request): the extra acceleration (m/s², along the flight path) that brings the airspeed V
+ * toward the speed the engines are set to — lerp(minStall × Vs, top speed, spool). share = working engines / all.
+ */
+export function speedPush(model: FlightModel, V: number, spool: number, share: number): number {
+  const S = CONFIG.planes.speedResponse;
+  if (share <= 0 || model.stall || V < model.vStall * 0.8) return 0;
+  const sp = Math.min(1, Math.max(0, spool));
+  const vMin = model.vStall * S.minStall;
+  const err = vMin + (model.vTop - vMin) * sp - V;
+  const a = err > 0 ? Math.min(err * S.gain, S.accel * sp) : Math.max(err * S.gain, -S.brake);
+  return a * share;
+}
+
 export class FlightModel {
   readonly cfg: PlaneCfg;
   readonly surfaces: Surface[] = [];

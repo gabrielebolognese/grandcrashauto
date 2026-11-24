@@ -1187,12 +1187,16 @@ export const CONFIG = {
       groundSteerK: 1.5, // heading hold on the runway (1/s yaw-rate damping into the nose wheel)
     },
     turbulence: { jolt: 1.0, vertical: 2.2, gustToStorm: 0.04 },
+    // Speed follows the throttle (user request: "i cannot change the speed"): in the air, a push along the flight path
+    // brings the airspeed toward minStall × Vs (idle) … topKmh (full power), gain 1/s, at most accel × spool m/s²
+    // faster and brake m/s² slower, scaled by the share of working engines (dead engines: real physics only).
+    speedResponse: { minStall: 1.3, gain: 0.5, accel: 8, brake: 6 },
     lod: { high: 3, medium: 12 }, // × plane length (camera distance)
     // Per plane: spec table (mass … glideRatio) + flight-model tuning. Speeds km/h, areas m², forces N per engine.
     // takeoffRollM/takeoffS are reported vs measured; the brief's pairs are not physically consistent (see report),
     // tuning targets: lift-off time ≈ takeoffS, distance to clear 35 ft ≈ takeoffRollM.
     prop: {
-      mass: 1100, rotationKmh: 105, stallKmh: 85, topKmh: 280, takeoffRollM: 250, takeoffS: 8, engines: 1, fuelKg: 150, explosionRadius: 10, glideRatio: 9,
+      mass: 1100, rotationKmh: 105, stallKmh: 85, topKmh: 340, takeoffRollM: 250, takeoffS: 8, engines: 1, fuelKg: 150, explosionRadius: 10, glideRatio: 9,
       cruiseKmh: 210, wingArea: 18, span: 11, oswald: 0.75, cl0: 0.35, clAlpha: 5.0, stallDeg: 14.7, cd0: 0.051, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.6, finVolume: 0.07, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.04, gearCD: 0, retractable: false, flapsUpKmh: 150, flapsLandKmh: 120,
@@ -1202,7 +1206,7 @@ export const CONFIG = {
       rotatePitchDeg: 9, rotateRateDeg: 8, brakeDecel: 4.5, steerDeg: 40, suspension: [0.32, 0.3, 1.1], turbulence: 1.0,
     },
     bizjet: {
-      mass: 16000, rotationKmh: 200, stallKmh: 170, topKmh: 850, takeoffRollM: 900, takeoffS: 16, engines: 2, fuelKg: 4000, explosionRadius: 25, glideRatio: 15,
+      mass: 16000, rotationKmh: 200, stallKmh: 170, topKmh: 920, takeoffRollM: 900, takeoffS: 16, engines: 2, fuelKg: 4000, explosionRadius: 25, glideRatio: 15,
       cruiseKmh: 520, wingArea: 70, span: 16, oswald: 0.8, cl0: 0.25, clAlpha: 4.6, stallDeg: 15.2, cd0: 0.0072, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 4, wingAcFrac: 0.08, tailVolume: 0.65, finVolume: 0.07, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 290, flapsLandKmh: 235,
@@ -1212,7 +1216,7 @@ export const CONFIG = {
       rotatePitchDeg: 9, rotateRateDeg: 5.5, brakeDecel: 4, steerDeg: 45, suspension: [0.42, 0.3, 1.1], turbulence: 0.6,
     },
     airliner: {
-      mass: 70000, rotationKmh: 260, stallKmh: 215, topKmh: 880, takeoffRollM: 1500, takeoffS: 22, engines: 2, fuelKg: 18000, explosionRadius: 45, glideRatio: 15,
+      mass: 70000, rotationKmh: 260, stallKmh: 215, topKmh: 980, takeoffRollM: 1500, takeoffS: 22, engines: 2, fuelKg: 18000, explosionRadius: 45, glideRatio: 15,
       cruiseKmh: 520, wingArea: 180, span: 35, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 15.5, cd0: 0.0138, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 5, wingAcFrac: 0.08, tailVolume: 0.7, finVolume: 0.075, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 350, flapsLandKmh: 290,
@@ -1222,7 +1226,7 @@ export const CONFIG = {
       rotatePitchDeg: 8.5, rotateRateDeg: 4.5, brakeDecel: 3.5, steerDeg: 50, suspension: [0.55, 0.3, 1.1], turbulence: 0.35,
     },
     jumbo: {
-      mass: 330000, rotationKmh: 295, stallKmh: 245, topKmh: 920, takeoffRollM: 1900, takeoffS: 30, engines: 4, fuelKg: 150000, explosionRadius: 70, glideRatio: 15,
+      mass: 330000, rotationKmh: 295, stallKmh: 245, topKmh: 1050, takeoffRollM: 1900, takeoffS: 30, engines: 4, fuelKg: 150000, explosionRadius: 70, glideRatio: 15,
       cruiseKmh: 540, wingArea: 650, span: 64, oswald: 0.8, cl0: 0.25, clAlpha: 5.0, stallDeg: 15.9, cd0: 0.0125, cm0: -0.04,
       incidenceDeg: 2, dihedralDeg: 6, wingAcFrac: 0.08, tailVolume: 0.75, finVolume: 0.08, munkPitch: 0.25, munkYaw: 0.07,
       flapCL: 0.7, flapCD: 0.03, gearCD: 0.012, retractable: true, flapsUpKmh: 390, flapsLandKmh: 320,

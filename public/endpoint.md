@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 10 · 2026-11-24
+Endpoint version: 11 · 2026-11-24
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -108,11 +108,13 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
   **How to shoot:** on the map, tap a plane, then SHOOT. The map zooms out and the turrets glow with a line to the target; **tap a turret on the map** and you are in its control room, looking from behind it.
   - Aim with drag, A/D/W or the arrows, or press **AUTO LOCK (L)** to swing onto the target. Press S to fire. **No lock is needed.**
   - While you are in the control room your own plane waits in the air exactly where it was, and carries on when you press BACK.
-  - Missiles carry a bright exhaust flare, so they are easy to follow, especially at night.
+  - Missiles carry a bright exhaust flare, so they are easy to follow from far away, especially at night.
   - Aimed at the red marker, it locks and **always hits**; the same keys then pick where (nose, tail, a wing, an engine).
   - Without a lock the missile flies straight and the keys steer it. Its seeker locks on if the plane comes in front of it.
   - Each S fires again. BACK returns to your car or plane while the missiles keep going.
   - The replay shows the missile run and the plane going down. Flying, you can also RAM a sky plane on autopilot, or just crash into one.
+  - **Camera switches (K or the buttons at the top):** **NUKE CAM / MISSILE CAM** rides your newest nuke or missile in flight (also one fired from the map with NUKE, or after BACK), then follows the plane it hits all the way down. **HIT PLANE CAM** follows the sky plane you just rammed, crashed into or shot. Your own plane waits in the air while you watch; K or BACK returns.
+  - After a ram, the replay shows **both planes**, with a whole pass on the plane you hit (camera "Hit plane").
 - **Towers:** 7 crashable towers in the countryside around the city, each a teleport place:
   - **Medieval:** `tower-keep` Old Keep (round, battlements, red flag) · `tower-watch` Watchtower (square, timber lookout) · `tower-redroof` Red Roof Tower.
   - **Fantasy:** `tower-wizard` Wizard's Spire (purple hat, floating glowing crystal) · `tower-crystal` Crystal Spire (glowing prisms) · `tower-moon` Moon Tower (white and gold, floating rings) · `tower-sky` Sky Citadel Spire (about 210 m, a landmark with a beacon).
@@ -127,12 +129,14 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
   - Visible when you walk inside, or up close once the airframe is torn open.
 - **Cartoon tone:** people get knocked over comically and there is no gore. Keep requests in that spirit.
 
-| Plane | `fly` name | Engines | Stall speed | Cruise | Notes |
-|---|---|---|---|---|---|
-| Prop plane | `prop` | 1 | 85 km/h | 210 km/h | small, light, agile |
-| Private jet | `jet` | 2 | 170 km/h | 520 km/h | fast |
-| Airliner | `airliner` | 2 | 215 km/h | 520 km/h | walkable cabin |
-| Jumbo (747) | `jumbo` | 4 | 245 km/h | 540 km/h | the biggest crashes, walkable cabin, the default |
+| Plane | `fly` name | Engines | Stall speed | Cruise | Top speed | Notes |
+|---|---|---|---|---|---|---|
+| Prop plane | `prop` | 1 | 85 km/h | 210 km/h | 340 km/h | small, light, agile |
+| Private jet | `jet` | 2 | 170 km/h | 520 km/h | 920 km/h | fast |
+| Airliner | `airliner` | 2 | 215 km/h | 520 km/h | 980 km/h | walkable cabin |
+| Jumbo (747) | `jumbo` | 4 | 245 km/h | 540 km/h | 1050 km/h | the biggest crashes, walkable cabin, the default |
+
+**The throttle sets the speed:** Shift / Ctrl (or + / −, PageUp / PageDown, the slider on phones, `throttle 0..100`) and the plane really speeds up or slows down. Full power reaches the top speed in about 15–20 s (a jumbo goes from 540 to about 1040 km/h). Idle slows it down toward about 1.3 × its stall speed, like airbrakes. Planes spawn at the throttle that holds their cruise speed.
 
 Speeds in commands are in m/s unless you add `kmh` (`speed 140` = 504 km/h, `speed 300 kmh`).
 Engines are numbered 1 to 4 from left to right as seen from the cockpit.
@@ -203,7 +207,7 @@ the 3D view directly, so its videos never contain any buttons.
 | `bank 30` | holds a 30° bank, + = right (`bank off` releases it) |
 | `yaw left 1` | rudder |
 | `stick <pitch> <roll> <s>` | both axes at once, each −1..1 |
-| `throttle 80` | also `max`, `idle`, `+10`, `-10` |
+| `throttle 80` | also `max`, `idle`, `+10`, `-10`. The speed follows within seconds: `max` = the top speed, `idle` = slow down |
 | `release` | centres everything |
 
 With the stick centred, the assists hold the flight path and keep the wings level.
@@ -220,6 +224,7 @@ With the stick centred, the assists hold the flight path and keep the wings leve
 | `back` | leaves the control room (missiles keep homing) |
 | `ram nearest` · `ram 3` · `ram off` | flying: your plane's autopilot flies into that sky plane. It turns into you near the end, so a ram really connects |
 | `nuke nearest` · `nuke 3` · `nuke beach` · `nuke x z` | a nuke from the Nuke turret at a sky plane, or an airburst over a place. Each of its 2 tubes reloads in 120 s |
+| `watch nuke` · `watch missile` · `watch hit` · `watch off` | camera switches: ride your newest nuke / missile in flight (then follow the plane it hits down) · follow the sky plane you just hit or rammed · back to your view (`back` also works). Your plane waits while you watch |
 
 Plane numbers change every session, so scripted scenes should use `nearest`. Turrets reload tube by tube (Twin 35 s, Quad 22 s, Octo 12 s, Nuke 120 s).
 
@@ -292,7 +297,7 @@ want to cut it short.
 
 | Command | Effect |
 |---|---|
-| `replay` | after a crash, replays the last ~14 s. **One camera per pass, complete**: the whole clip plays from one camera, and the next pass switches to the next camera. Order: Chase, You (only if you were walking), Side (a spectator beside the big moment), Ground (a spectator on the ground near the crash site), Orbit, Tail, Top. The plane looks intact until the moment it broke, and fires appear only when they started. Slow motion around the main moments (engine blasts, the split / tail / total explosion, the first hard impact) |
+| `replay` | after a crash, replays the last ~14 s. **One camera per pass, complete**: the whole clip plays from one camera, and the next pass switches to the next camera. Order: Chase, Hit plane (only after a ram or a mid-air crash: a whole pass on the other plane), You (only if you were walking), Side (a spectator beside the big moment), Ground (a spectator on the ground near the crash site), Orbit, Tail, Top. The plane looks intact until the moment it broke, and fires appear only when they started. Slow motion around the main moments (engine blasts, the split / tail / total explosion, the first hard impact) |
 | `replay next` · `replay restart` · `replay stop` | next camera, starting the clip again from the beginning · the same camera from the start · stop |
 
 **Time**
@@ -365,6 +370,9 @@ want to cut it short.
 | Octo salvo | `shoot nearest from octo all spread` | 20 s | 8 small missiles streak up and hit all over the plane |
 | Nuke a jumbo | `shoot nearest from nuke` | 30 s | the nuke leaves the turret, then a blinding flash and a fireball; every plane nearby breaks apart |
 | Mid-air ram | `fly jumbo agl 1700 speed 170; wait 2; ram nearest` | 30–40 s | your jumbo hunts a sky plane and they collide |
+| Ram, then follow the victim down | `fly jumbo agl 1700 speed 170; wait 2; ram nearest`, after the hit `watch hit; wait 12; watch off; replay` | 50 s | the airliner you hit falls burning toward the sea; then the replay, including its "Hit plane" pass |
+| Ride the nuke | `nuke nearest; watch nuke` | 30–60 s (longer when the plane is far from the turret) | a side chase of the striped nuke over the mountains, the blast, then the plane going down (best at `night`: the fire trail glows) |
+
 | Jumbo into the Wizard's Spire | `fly jumbo target wizard in 10` | 20 s | the jumbo hits the spire high up, the purple-hatted top topples with its glowing crystal |
 | Night crash into the Sky Citadel | `night; fly jumbo target sky citadel in 14` | 25 s | the glowing 210 m spire lit up at night, the jumbo slices through it |
 | Jumbo into the concert | `fly jumbo target concert in 12` | 20 s | in from the sea, slams into the beach concert: the stage collapses, the crowd is thrown, the band falls |
@@ -464,6 +472,12 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v11 · 2026-11-24:** throttle, camera switches, ram replay.
+  - The throttle now changes the speed for real. Top speeds: jumbo 1050 km/h, airliner 980, private jet 920, prop 340. Full power reaches the top in about 15–20 s, and idle slows down like airbrakes.
+  - **NUKE CAM / MISSILE CAM** (K or the button) rides your nuke or missile, then follows the plane it hits. **HIT PLANE CAM** follows the plane you just rammed or hit. Agent: `watch nuke|missile|hit|off`.
+  - After a ram, the replay records the other plane too and adds a "Hit plane" pass.
+  - Fixed: up close, a missile's glow washed out the whole screen in the control room and missile views.
 
 - **v10 · 2026-11-24:** towers.
   - 3 medieval towers (Old Keep, Watchtower, Red Roof Tower) and 4 fantasy towers (Wizard's Spire, Crystal Spire, Moon Tower, Sky Citadel Spire), all teleport places, all crashable (they topple from where they are hit).

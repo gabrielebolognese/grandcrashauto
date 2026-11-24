@@ -247,6 +247,12 @@ export interface IMissiles extends GameSystem {
   nuke(planeId: number | null, at?: { x: number; z: number }): string;
   /** Aim the control room's launcher exactly at its target. */
   autoAim?(): void;
+  /** A spectator camera has the view (riding your nuke / missile, or following the plane you hit): input is off. */
+  readonly viewing?: boolean;
+  /** Switch the view: 'missile' = ride your newest missile / nuke in flight, 'hit' = the plane you just hit, null = back. */
+  spectate?(kind: 'missile' | 'hit' | null): string;
+  /** Replay: the other plane worth recording with yours (the ram target, the plane you hit, else the nearest). */
+  coSubject?(): unknown;
 }
 
 /** Several independently animated people in one mesh (src/npc/AvatarGroup). Matrices are absolute world matrices. */
@@ -301,6 +307,7 @@ export interface FlightSnapshot {
   spool: number; // mean spool of the working engines
   idle: number; // idle thrust fraction
   tailExplodeIn: number | null;
+  share?: number; // working engines / all (speed response)
 }
 
 /** Crash replay (src/replay): records the flown plane, plays the crash back from many cameras (sim frozen). */

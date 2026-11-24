@@ -3,7 +3,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import { CONFIG } from '../config';
 import { approach, DEG } from '../core/math';
 import type { FlightSnapshot } from '../game/contracts';
-import type { FlightInputs, FlightModel } from '../plane/FlightModel';
+import { speedPush, type FlightInputs, type FlightModel } from '../plane/FlightModel';
 
 /**
  * Agent forecasts. The plane forecast runs a GHOST copy of the real flight model (same aero, assists, trim state)
@@ -18,6 +18,7 @@ const _m = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _right = new THREE.Vector3();
+const _sp = new THREE.Vector3();
 
 /** Rigid body with the subset of the Rapier API the flight model uses, integrated semi-implicitly (like Rapier). */
 class GhostBody {
@@ -29,7 +30,7 @@ class GhostBody {
   private M = new THREE.Vector3();
   private invI = new THREE.Vector3();
   private frame = new THREE.Quaternion();
-  private invMass = 0;
+  invMass = 0;
   private gy = 0;
 
   copyFrom(body: RAPIER.RigidBody): void {
@@ -241,6 +242,12 @@ export function forecastFlight(
     fi.wheelAgl = view.agl;
     fi.agl = view.agl + snap.rest;
     model.step(dt, gb as unknown as RAPIER.RigidBody, fi);
+    // the plane's speed response (it follows the throttle), same as the real one
+    const sa = speedPush(model, model.airspeed, spool, snap.share ?? 1);
+    if (sa !== 0 && gb.invMass > 0) {
+      const V = gb.v.length();
+      if (V > 1) gb.addForce(_sp.copy(gb.v).multiplyScalar(sa / (gb.invMass * V)));
+    }
     gb.step(dt);
     if (out.stall === null && model.stallWarning) out.stall = t;
     if (t >= nextPoint - 1e-6) {
