@@ -164,6 +164,12 @@ export class Nav implements INav {
       if (data.airport?.carPark) add('airport', 'Airport', '✈️', data.airport.carPark, 'city');
       if (data.spawn) add('garage', 'Garage', '🔧', data.spawn, 'city');
     }
+    // air-defence sites (missiles): always known, always teleportable
+    try {
+      for (const p of ctx.missiles?.pois ?? []) add(p.id, p.name, p.icon, p.pose, 'city');
+    } catch {
+      /* missiles not ready */
+    }
     try {
       for (const p of ctx.terrain?.pois ?? []) add(p.id, p.name, p.icon, p.pose, 'terrain');
     } catch {

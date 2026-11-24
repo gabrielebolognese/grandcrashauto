@@ -1214,6 +1214,9 @@ export class PlaneSystem implements IPlaneSystem {
     }
   }
 
+  /** Ram autopilot target provider (missiles system: a sky plane's intercept point). */
+  ramTarget: (() => THREE.Vector3 | null) | null = null;
+
   /** Crashed or otherwise wrecked (user: no engine blasts after a crash, hard landings included). */
   get wrecked(): boolean {
     return this.crashed || this.split || this.gearCollapsed || this.wreckImpact;
@@ -1795,6 +1798,18 @@ export class PlaneSystem implements IPlaneSystem {
     fi.rotationHelp = true;
     fi.liftScale *= this.wingFailInputs(dt, fi);
     if (this.autopilotGamma !== null && fi.assisted && Math.abs(fi.pitch) < 0.06 && !this.onGround) model.gammaHold = this.autopilotGamma;
+    // ram autopilot (user request: "secretly" fly into another plane): steer + climb / dive at the intercept point
+    const ram = this.ramTarget?.() ?? null;
+    if (ram && !this.crashed && !this.onGround && fi.assisted) {
+      const dx = ram.x - t.x, dz = ram.z - t.z;
+      const brg = (Math.atan2(dx, -dz) * 180) / Math.PI;
+      let err = brg - this.state.heading;
+      err = ((((err + 180) % 360) + 360) % 360) - 180;
+      fi.roll = clamp((err * 1.6) / CONFIG.planes.assist.bankLimitDeg, -1, 1);
+      fi.pitch = 0;
+      model.gammaHold = clamp(Math.atan2(ram.y - t.y, Math.max(1, Math.hypot(dx, dz))), -0.6, 0.45);
+      this.throttle = 1; // full power to catch it
+    }
     model.step(dt, body, fi);
     this.wingFailTorque(dt, body);
 

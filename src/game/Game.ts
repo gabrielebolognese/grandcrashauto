@@ -20,6 +20,7 @@ import { Props } from '../world/props/Props';
 import { NpcSystem } from '../npc/NpcSystem';
 import { Walker } from '../walk/Walker';
 import { Replay } from '../replay/Replay';
+import { MissileSystem } from '../missiles/MissileSystem';
 import { Agent } from '../agent/Agent';
 import { CarFactory } from '../vehicle/models/CarFactory';
 import { PlayerVehicle } from '../vehicle/PlayerVehicle';
@@ -96,6 +97,7 @@ export class Game implements GameActions {
     ctx.cameraRig = new CameraRig(ctx);
     ctx.walker = new Walker(ctx);
     ctx.replay = new Replay(ctx);
+    ctx.missiles = new MissileSystem(ctx);
     if (params.has('agent')) ctx.agent = new Agent(ctx);
     ctx.fx = new Fx(ctx);
     ctx.audio = new Audio(ctx);
@@ -105,7 +107,7 @@ export class Game implements GameActions {
     // navigation, then the camera that follows them, then fx/audio.
     this.simSystems = [
       ctx.env, ctx.world, ctx.terrain, ctx.highways, ctx.props, ctx.npcs, ctx.vehicle, ctx.planes, ctx.breakup, ctx.nav,
-      ctx.cameraRig, ctx.walker, ctx.fx, ctx.audio, // walker after the rig: it drives the camera while on foot
+      ctx.cameraRig, ctx.walker, ctx.missiles, ctx.fx, ctx.audio, // walker / missiles after the rig: they drive the camera on foot / in a control room
       ctx.replay, // last: records the frame as rendered
     ];
     // agent first: its latched holds / autopilot / queued commands act before the vehicle and planes step
@@ -142,6 +144,7 @@ export class Game implements GameActions {
       [ctx.cameraRig, 'Framing the shot'],
       [ctx.walker, 'Stretching legs'],
       [ctx.replay, 'Loading the tape'],
+      ...(ctx.missiles ? [[ctx.missiles, 'Arming the air defence'] as [GameSystem, string]] : []),
       ...(ctx.agent ? [[ctx.agent, 'Waking the agent'] as [GameSystem, string]] : []),
       [ctx.fx, 'Loading effects'],
       [ctx.audio, 'Tuning the engine'],
@@ -300,7 +303,9 @@ export class Game implements GameActions {
     const target = this.mode === 'plane' ? ctx.planes.cameraTarget?.object : null;
     const onFoot = ctx.walker.focus;
     const replayAt = ctx.replay.active ? ctx.replay.focus : null;
+    const controlAt = ctx.missiles?.focus ?? null;
     if (replayAt) this.focus.copy(replayAt);
+    else if (controlAt) this.focus.copy(controlAt);
     else if (onFoot) this.focus.copy(onFoot);
     else if (target) target.getWorldPosition(this.focus);
     else if (ctx.vehicle.active && ctx.vehicle.object) this.focus.copy(ctx.vehicle.state.position);

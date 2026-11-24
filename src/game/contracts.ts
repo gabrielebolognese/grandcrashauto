@@ -71,6 +71,8 @@ export interface GameContext {
   replay: IReplay;
   /** Agent mode (?agent): text view + forecasts + tap-to-hold controls + command API (window.gca) for AI agents. */
   agent?: IAgent;
+  /** Missiles, nukes, air-defence sites and the perpetual sky traffic (src/missiles). */
+  missiles?: IMissiles;
   /** Part 3: floating origin (absolute = local + origin.offset), endless terrain, highway network. */
   origin: Origin;
   terrain: ITerrain;
@@ -200,6 +202,51 @@ export interface INpcSystem extends GameSystem {
 }
 
 /** A single directly-driven pedestrian-style character (the player on foot). */
+/** A plane of the perpetual sky traffic (map / agent). ax/az ABSOLUTE, alt = absolute y, heading deg (0 = north). */
+export interface SkyPlaneInfo {
+  id: number;
+  type: import('../plane/types').PlaneTypeId;
+  name: string;
+  ax: number;
+  az: number;
+  alt: number;
+  heading: number;
+  speed: number;
+  hit: boolean;
+}
+
+/** An air-defence site (map / agent). */
+export interface LauncherInfo {
+  id: string;
+  name: string;
+  kind: string;
+  ax: number;
+  az: number;
+  tubes: number;
+  ready: number;
+  warhead: string;
+  blurb: string;
+}
+
+/** Missiles + nukes + sky traffic + the control room (src/missiles). */
+export interface IMissiles extends GameSystem {
+  readonly sky: SkyPlaneInfo[];
+  readonly sites: LauncherInfo[];
+  readonly pois: { id: string; name: string; icon: string; pose: Pose }[];
+  readonly controlling: boolean;
+  /** Streaming focus while in the control room, else null. */
+  readonly focus: THREE.Vector3 | null;
+  /** Into the control room of a site, aiming at a sky plane. Returns '' or an error. */
+  enterControl(siteId: string, planeId: number): string;
+  exitControl(): void;
+  fire(n?: number, opts?: { all?: boolean; spread?: boolean }): string;
+  steer(u: number, v: number): void;
+  ram(planeId: number | null): string;
+  nuke(planeId: number | null, at?: { x: number; z: number }): string;
+  /** Aim the control room's launcher exactly at its target. */
+  autoAim?(): void;
+}
+
 /** Several independently animated people in one mesh (src/npc/AvatarGroup). Matrices are absolute world matrices. */
 export interface AvatarGroupHandle {
   readonly object: THREE.Object3D;
@@ -267,6 +314,9 @@ export interface IReplay extends GameSystem {
   nextCam(): void;
   /** Per frame while replaying (Game calls it instead of the simulation). */
   play(realDt: number): void;
+  /** Record another plane (a sky plane hit by a missile) + extra objects (the missiles) instead of yours. */
+  watch?(visual: import('../plane/types').PlaneVisual, extra: THREE.Object3D[]): void;
+  addExtra?(obj: THREE.Object3D): void;
   /** While replaying: where the world should stream around (the replayed plane), else null. */
   readonly focus?: THREE.Vector3 | null;
 }
@@ -485,6 +535,8 @@ export interface IFx extends GameSystem {
   scorch?(position: THREE.Vector3, normal: THREE.Vector3, size: number): void;
   /** The fx clock (crash replay records it). */
   readonly clock?: number;
+  /** Pooled light flash (explosions, launches, the nuke). */
+  flash?(x: number, y: number, z: number, peak: number, decay: number, distance: number): void;
   /** Crash replay rewind: the fx clock of the replayed moment, or null when the replay ends (see Fx.replayClock). */
   replayClock?(fxClock: number | null, restart?: boolean): void;
 }
@@ -559,6 +611,8 @@ export interface IPlaneSystem extends GameSystem {
   readonly boardCandidate: { type: PlaneTypeId; name: string } | null;
   /** True after a crash/destruction; UI shows Back to car / Respawn plane / Retry in air when crashTime > 3 s. */
   readonly crashed: boolean;
+  /** Ram autopilot (missiles / map "RAM"): where to fly into, or null. */
+  ramTarget?: (() => THREE.Vector3 | null) | null;
   /** Crashed OR otherwise wrecked (gear collapsed in a hard landing, split, hit the ground): no more engine blasts. */
   readonly wrecked?: boolean;
   readonly crashTime: number;
@@ -669,6 +723,8 @@ export interface INav extends GameSystem {
 
 /** Procedural terrain beyond the city/airport (src/terrain). All query coordinates are LOCAL (scene) coordinates. */
 export interface ITerrain extends GameSystem {
+  /** Nuke: every tree within radius of a LOCAL ground point is flattened (smashed near, knocked outward further). */
+  blastTrees?(center: THREE.Vector3, radius: number): number;
   /**
    * Planes vs trees (user request): trees whose trunk crosses the oriented box (LOCAL centre, rotation, half extents)
    * fall over, or are smashed on fast low hits. Returns the tree "mass" hit (1 smashed, 0.35 knocked) for momentum.

@@ -138,7 +138,7 @@ export class PlaneRig {
     const ev = this.ctx.events;
     const plane = () => this.ctx.game?.mode === 'plane';
     ev.on('planeSpawned', () => this.reset());
-    ev.on('planeExplosion', (e) => !e.replay && plane() && this.onExplosion(e.position, e.velocity, e.radius, e.kind));
+    ev.on('planeExplosion', (e) => !e.replay && plane() && this.onExplosion(e.position, e.velocity, e.radius, e.kind === 'missile' || e.kind === 'nuke' ? 'secondary' : e.kind));
     ev.on('engineExplode', (e) => !e.replay && plane() && this.shakeAt(e.position, CONFIG.camera.planeEngineShake, 350, 3));
     ev.on('planeBreak', (e) => plane() && this.shakeAt(e.position, 0.25 + 0.6 * clamp(e.intensity, 0, 1), 400, 0));
     ev.on('planeImpact', (e) => !e.replay && plane() && this.onImpact(e.position, e.velocity, e.outcome, e.energy));

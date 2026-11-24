@@ -53,6 +53,9 @@ export class MapRenderer {
   H = 1;
   dpr = 1;
   selected: NavPoi | null = null;
+  /** Sky traffic (missiles): the selected plane id and the hit boxes drawn this frame. */
+  skySelected: number | null = null;
+  private skyHits: { id: number; x: number; y: number }[] = [];
   /** Player marker screen position from the last render (the screen positions a CSS pulse there). */
   playerX = -1e4;
   playerY = -1e4;
@@ -97,6 +100,81 @@ export class MapRenderer {
     return (y - this.H / 2) / this.view.ppm + this.view.cz;
   }
 
+  hitSky(x: number, y: number): number | null {
+    let best: number | null = null;
+    let bd = 22;
+    for (const h of this.skyHits) {
+      const d = Math.hypot(h.x - x, h.y - y);
+      if (d < bd) {
+        bd = d;
+        best = h.id;
+      }
+    }
+    return best;
+  }
+
+  /** The perpetual sky traffic: plane glyphs along their heading (selectable), wrecks greyed out. */
+  private drawSky(): void {
+    const list = this.ctx.missiles?.sky ?? [];
+    this.skyHits.length = 0;
+    if (!list.length) return;
+    const g = this.g;
+    const col: Record<string, string> = { jumbo: '#ff7a6b', airliner: '#5cc8d6', bizjet: '#ffe39a', prop: '#9ee0c8' };
+    for (const p of list) {
+      const x = this.sx(p.ax), y = this.sy(p.az);
+      if (x < -40 || y < -40 || x > this.W + 40 || y > this.H + 40) continue;
+      const sel = p.id === this.skySelected;
+      const s = p.type === 'jumbo' ? 1.25 : p.type === 'prop' ? 0.75 : 1;
+      g.save();
+      g.translate(x, y);
+      if (sel) {
+        g.beginPath();
+        g.arc(0, 0, 18, 0, Math.PI * 2);
+        g.strokeStyle = '#ff4d3d';
+        g.lineWidth = 3;
+        g.stroke();
+      }
+      g.rotate((p.heading * Math.PI) / 180);
+      g.scale(s, s);
+      g.beginPath();
+      g.moveTo(0, -11);
+      g.lineTo(2.2, -3);
+      g.lineTo(11, 2);
+      g.lineTo(11, 4.5);
+      g.lineTo(2.2, 2);
+      g.lineTo(1.6, 8);
+      g.lineTo(5, 10.5);
+      g.lineTo(5, 12);
+      g.lineTo(0, 10.8);
+      g.lineTo(-5, 12);
+      g.lineTo(-5, 10.5);
+      g.lineTo(-1.6, 8);
+      g.lineTo(-2.2, 2);
+      g.lineTo(-11, 4.5);
+      g.lineTo(-11, 2);
+      g.lineTo(-2.2, -3);
+      g.closePath();
+      g.fillStyle = p.hit ? '#7d7f86' : col[p.type] ?? '#fff';
+      g.strokeStyle = '#1b2030';
+      g.lineWidth = 2;
+      g.stroke();
+      g.fill();
+      g.restore();
+      if (sel || this.view.ppm > 0.06) {
+        g.font = `600 11px ${FONT}`;
+        g.textAlign = 'center';
+        g.textBaseline = 'top';
+        g.lineWidth = 3;
+        g.strokeStyle = 'rgba(0,0,0,0.6)';
+        const t = p.hit ? '✖ shot down' : `${p.name.split(' · ')[0]} · ${Math.round(p.alt)} m`;
+        g.strokeText(t, x, y + 14);
+        g.fillStyle = '#fff';
+        g.fillText(t, x, y + 14);
+      }
+      if (!p.hit) this.skyHits.push({ id: p.id, x, y });
+    }
+  }
+
   hitPoi(x: number, y: number): NavPoi | null {
     let best: NavPoi | null = null;
     let bd = Infinity;
@@ -127,6 +205,7 @@ export class MapRenderer {
     this.drawRoute();
     this.drawCrowds();
     this.drawPois();
+    this.drawSky();
     this.drawPlayer();
   }
 

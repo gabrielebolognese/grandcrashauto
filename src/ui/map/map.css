@@ -588,3 +588,11 @@
     transition: none !important;
   }
 }
+
+/* sky traffic card (missiles): SHOOT → air-defence sites, RAM, NUKE */
+.nav-map .nm-sky { flex-wrap: wrap; }
+.nav-map.has-sel .nm-sky { transform: translate(-50%, calc(100% + 40px)); }
+.nav-map.has-sky .nm-sky { transform: translate(-50%, 0); }
+.nm-sky-b { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; max-height: 42vh; overflow: auto; }
+.nm-sky-b .btn { pointer-events: auto; }
+.nm-sky-b .nm-site { font-size: 12px; text-align: left; width: 100%; justify-content: flex-start; }

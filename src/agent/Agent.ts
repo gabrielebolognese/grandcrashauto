@@ -494,6 +494,76 @@ export class Agent implements IAgent {
         case 'target':
         case 'crash':
           return this.cmdTarget(w.slice(1));
+        case 'traffic':
+        case 'sky': {
+          const M = ctx.missiles;
+          if (!M) return 'error: no sky traffic';
+          const o = ctx.origin.offset;
+          const me = this.flying ? ctx.planes.state.position : ctx.engine.camera.position;
+          return M.sky.map((p) => `#${p.id} ${p.name} · ${p.hit ? 'SHOT DOWN' : `${f0(p.alt)} m · hdg ${f0(p.heading)}° · ${f0(p.speed * 3.6)} km/h`} · ${(Math.hypot(p.ax - o.x - me.x, p.az - o.z - me.z) / 1000).toFixed(1)} km`).join('\n') || 'no planes yet';
+        }
+        case 'sites':
+        case 'launchers':
+          return (ctx.missiles?.sites ?? []).map((s) => `${s.id} · ${s.name} · ${s.kind} · ${s.ready}/${s.tubes} ready · ${s.blurb}`).join('\n') || 'error: no sites';
+        case 'shoot':
+        case 'fire': {
+          const M = ctx.missiles;
+          if (!M) return 'error: no missiles';
+          // shoot <plane# | nearest> [from <site id | kind>] [n | all] [spread] [aim nose|tail|left|right|middle]
+          const id = w[1] === 'nearest' ? this.nearestSky(w.indexOf('from') >= 0 ? w[w.indexOf('from') + 1] : '') : parseInt((w[1] ?? '').replace('#', ''), 10);
+          if (!M.controlling || Number.isFinite(id)) {
+            if (!Number.isFinite(id)) return 'error: shoot <plane #> [from <site>] [2 | all] [spread] [aim nose|tail|left|right|middle]  ("traffic" lists the planes)';
+            const fi = w.indexOf('from');
+            const want = fi >= 0 ? w[fi + 1] ?? '' : '';
+            const p = M.sky.find((q) => q.id === id);
+            if (!p) return `error: no plane #${id}`;
+            const sites = [...M.sites].filter((s) => s.ready > 0 && (!want || s.id === want || s.id.includes(want) || s.kind.toLowerCase().includes(want) || s.name.toLowerCase().includes(want)));
+            sites.sort((a, b) => Math.hypot(a.ax - p.ax, a.az - p.az) - Math.hypot(b.ax - p.ax, b.az - p.az));
+            if (!sites.length) return 'error: no ready site matches';
+            const err = M.enterControl(sites[0].id, id);
+            if (err) return `error: ${err}`;
+            M.autoAim?.();
+          }
+          const ai = w.indexOf('aim');
+          const where = ai >= 0 ? w[ai + 1] : '';
+          const AIM: Record<string, [number, number]> = { nose: [0, 0.95], front: [0, 0.6], tail: [0, -0.95], rear: [0, -0.6], left: [-0.9, 0.05], right: [0.9, 0.05], middle: [0, 0], center: [0, 0], engine: [-0.35, 0.15] };
+          if (AIM[where]) M.steer(AIM[where][0], AIM[where][1]);
+          const all = w.includes('all');
+          const nIdx = w.findIndex((x, i) => i > 1 && /^\d+$/.test(x) && w[i - 1] !== 'from');
+          const n = nIdx >= 0 ? parseInt(w[nIdx], 10) : 0;
+          M.autoAim?.();
+          return M.fire(n, { all, spread: w.includes('spread') }) + (M.controlling ? ' — in the control room ("back" leaves, "steer u v" picks where)' : '');
+        }
+        case 'steer': {
+          const M = ctx.missiles;
+          if (!M?.controlling) return 'error: not in a control room';
+          M.steer(num(1, 0), num(2, 0));
+          return `aim point u ${num(1, 0)} (+ right wing) v ${num(2, 0)} (+ nose)`;
+        }
+        case 'back':
+          ctx.missiles?.exitControl();
+          return 'back to your vehicle (missiles keep homing)';
+        case 'ram': {
+          const M = ctx.missiles;
+          if (!M) return 'error: no sky traffic';
+          if (w[1] === 'off') return M.ram(null);
+          const id = w[1] === 'nearest' ? this.nearestSky('me') : parseInt((w[1] ?? '').replace('#', ''), 10);
+          if (!Number.isFinite(id)) return 'error: ram <plane #> | ram off';
+          // the ram autopilot flies: hand over (no holds / heading / speed of ours fighting it)
+          this.ap = { alt: null, heading: null, bank: null, speed: null, target: null };
+          this.throttleCmd = null;
+          this.holds.clear();
+          return M.ram(id);
+        }
+        case 'nuke': {
+          const M = ctx.missiles;
+          if (!M) return 'error: no silo';
+          const id = w[1] === 'nearest' ? this.nearestSky('silo') : parseInt((w[1] ?? '').replace('#', ''), 10);
+          if (Number.isFinite(id) && !Number.isFinite(parseFloat(w[2] ?? ''))) return M.nuke(id);
+          const t = this.findTarget(w.slice(1));
+          if (!t) return 'error: nuke <plane #> | nuke <place> | nuke <x z>';
+          return M.nuke(null, { x: t.x, z: t.z }) + ` at ${t.name}`;
+        }
         case 'places': {
           const ps = ctx.nav.pois as { id: string; name: string; discovered?: boolean }[];
           const open = ps.filter((p) => p.discovered !== false), locked = ps.filter((p) => p.discovered === false);
@@ -847,6 +917,30 @@ export class Agent implements IAgent {
     const p = this.ctx.planes.state.position;
     const d = Math.hypot(t.x - o.x - p.x, t.z - o.z - p.z);
     return `homing on ${t.name}, ${f0(d)} m away — it will crash there (target off to stop)`;
+  }
+
+/** The sky plane nearest to a site (by id / kind / name, '' = any ready site, 'silo', or 'me' = your position). */
+  private nearestSky(from: string): number {
+    const M = this.ctx.missiles;
+    if (!M) return NaN;
+    const o = this.ctx.origin.offset;
+    const pts: { x: number; z: number }[] = [];
+    if (from === 'me') {
+      const p = this.flying ? this.ctx.planes.state.position : this.ctx.engine.camera.position;
+      pts.push({ x: p.x + o.x, z: p.z + o.z });
+    } else for (const s of M.sites) if (s.ready > 0 && (!from || s.id.includes(from) || s.kind.toLowerCase().includes(from) || s.name.toLowerCase().includes(from))) pts.push({ x: s.ax, z: s.az });
+    let best = NaN, bd = Infinity;
+    for (const p of M.sky) {
+      if (p.hit) continue;
+      for (const q of pts) {
+        const d = Math.hypot(p.ax - q.x, p.az - q.z);
+        if (d < bd) {
+          bd = d;
+          best = p.id;
+        }
+      }
+    }
+    return best;
   }
 
   private cmdFly(w: string[]): string {
@@ -1430,6 +1524,8 @@ START    fly <prop|jet|airliner|jumbo> [agl 25] [speed 150 | speed 500 kmh] [hea
 FLY      pitch up|down [s] [0..1] · climb [s] · dive [s] · bank left|right [s] · yaw left|right [s] · stick <pitch> <roll> <s>
          throttle 0..100 | +10 | -10 | max | idle · release (centre everything)
 AUTO     alt <m above ground> (terrain following) · heading <deg|n|e|s|w> · bank <deg, +right> · speed <m/s> · level · ap off · alt off …
+MISSILES traffic (sky planes #) · sites · shoot <# | nearest> [from <site|kind>] [2|all] [spread] [aim nose|tail|left|right|middle] · steer <u> <v>
+         back · ram <# | nearest> | ram off (your plane flies into it) · nuke <# | nearest> | nuke <place|x z>
 TARGET   fly <type> target <concert|stage|crowd|city|beach|airport|park|place|x z> [in 14] [from n|e|s|w] [speed v] [agl h]
          (spawns on a dive that crashes there) · target <place> (home on it from where you are) · target off
 CRASH    split · tail · engine 1..4 · explode · wing left|right far|half · gear · respawn · retry

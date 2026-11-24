@@ -47,6 +47,13 @@ export class MapScreen {
   private cardWhy!: HTMLDivElement;
   private dirBtn!: HTMLButtonElement;
   private tpBtn!: HTMLButtonElement;
+  // sky plane card (missiles): SHOOT → pick a site, RAM (flying), NUKE
+  private sky!: HTMLDivElement;
+  private skyName!: HTMLDivElement;
+  private skyMeta!: HTMLDivElement;
+  private skyBody!: HTMLDivElement;
+  private skyMode: 'actions' | 'sites' = 'actions';
+  private skyT = 0;
   private listOpen = false;
   private dirty = true;
   private raf = 0;
@@ -151,7 +158,17 @@ export class MapScreen {
     cb.append(this.dirBtn, this.tpBtn);
     this.card.append(this.cardIc, ct, cb);
 
-    root.append(top, this.routeChip, ctrls, compass, scale, hint, this.loading, places, this.card);
+    // selected sky plane card
+    this.sky = el('div', 'nm-card nm-sky panel');
+    const sic = el('div', 'nm-card-ic', '✈️');
+    const st = el('div', 'nm-card-t');
+    this.skyName = el('div', 'nm-card-n');
+    this.skyMeta = el('div', 'nm-card-m');
+    st.append(this.skyName, this.skyMeta);
+    this.skyBody = el('div', 'nm-sky-b');
+    this.sky.append(sic, st, this.skyBody);
+    this.sky.addEventListener('pointerdown', (e) => e.stopPropagation());
+    root.append(top, this.routeChip, ctrls, compass, scale, hint, this.loading, places, this.card, this.sky);
     (document.getElementById('ui-root') ?? document.body).append(root);
 
     this.tiles = new TileCache();
@@ -343,6 +360,13 @@ export class MapScreen {
     }
     // render only on change (the player pulse is a CSS animation on a DOM element)
     if (this.renderer.resize()) this.dirty = true;
+    // the sky traffic moves: redraw a few times a second while there is some
+    this.skyT -= dt;
+    if (this.skyT <= 0 && this.ctx.missiles?.sky.length) {
+      this.skyT = 0.2;
+      this.dirty = true;
+      if (this.renderer.skySelected !== null) this.fillSky();
+    }
     if (this.dirty) this.draw(now);
   };
 
@@ -433,6 +457,76 @@ export class MapScreen {
   }
 
   // ─────────────────────────────── selection / card ───────────────────────────────
+  private selectSky(id: number | null): void {
+    this.renderer.skySelected = id;
+    this.skyMode = 'actions';
+    this.sky.classList.toggle('visible', id !== null);
+    this.root.classList.toggle('has-sky', id !== null);
+    if (id !== null) this.fillSky(true);
+    this.markDirty();
+  }
+
+  /** The sky plane card: what it is, and SHOOT (→ the air-defence sites) / RAM / NUKE. */
+  private fillSky(rebuild = false): void {
+    const M = this.ctx.missiles;
+    const id = this.renderer.skySelected;
+    const p = M?.sky.find((q) => q.id === id);
+    if (!M || !p || p.hit) {
+      this.selectSky(null);
+      return;
+    }
+    const f = this.nav.focusAbs();
+    const units = this.ctx.settings.values.units;
+    this.skyName.textContent = p.name;
+    this.skyMeta.textContent = `${Math.round(p.alt)} m up · ${Math.round(p.speed * 3.6)} km/h · ${formatDistance(Math.hypot(p.ax - f.x, p.az - f.z), units)} away`;
+    if (!rebuild) return;
+    const b = this.skyBody;
+    b.textContent = '';
+    const btn = (label: string, cls: string, fn: () => void) => {
+      const e = el('button', cls, label) as HTMLButtonElement;
+      e.type = 'button';
+      e.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.click();
+        fn();
+      });
+      b.append(e);
+      return e;
+    };
+    if (this.skyMode === 'actions') {
+      btn('🎯 Shoot', 'btn btn-primary', () => {
+        this.skyMode = 'sites';
+        this.fillSky(true);
+      });
+      if (this.ctx.game.mode === 'plane' && this.ctx.planes.active && !this.ctx.planes.crashed) {
+        btn('💥 Ram it', 'btn btn-mint', () => {
+          this.ctx.events.emit('toast', { text: M.ram(p.id), ms: 2200 });
+          this.nav.dismissMap();
+        });
+      }
+      btn('☢️ Nuke', 'btn btn-ghost', () => {
+        this.ctx.events.emit('toast', { text: M.nuke(p.id), ms: 2200 });
+        this.nav.dismissMap();
+      });
+    } else {
+      const sites = [...M.sites].sort((a, c) => Math.hypot(a.ax - p.ax, a.az - p.az) - Math.hypot(c.ax - p.ax, c.az - p.az));
+      for (const s of sites) {
+        const d = formatDistance(Math.hypot(s.ax - p.ax, s.az - p.az), units);
+        const e = btn(`${s.warhead === 'nuke' ? '☢️' : '🚀'} ${s.name} — ${s.kind} · ${s.ready}/${s.tubes} ready · ${d} from it`, 'btn nm-site', () => {
+          this.nav.dismissMap(); // the map paused the game: back to playing first
+          const err = M.enterControl(s.id, p.id);
+          if (err) this.ctx.events.emit('toast', { text: err, ms: 2000 });
+        });
+        e.title = s.blurb;
+        if (!s.ready) e.disabled = true;
+      }
+      btn('← Back', 'btn btn-ghost', () => {
+        this.skyMode = 'actions';
+        this.fillSky(true);
+      });
+    }
+  }
+
   private select(p: NavPoi | null): void {
     this.renderer.selected = p;
     this.root.classList.toggle('has-sel', !!p);
@@ -621,14 +715,23 @@ export class MapScreen {
         this.vel.x = this.vel.y = 0;
         const dbl = now - this.lastTap.t < 320 && Math.hypot(ptr.x - this.lastTap.x, ptr.y - this.lastTap.y) < 30;
         this.lastTap = { t: now, x: ptr.x, y: ptr.y };
-        const hit = this.renderer.hitPoi(ptr.x, ptr.y);
-        if (hit) {
+        const skyHit = this.renderer.hitSky(ptr.x, ptr.y);
+        const hit = skyHit === null ? this.renderer.hitPoi(ptr.x, ptr.y) : null;
+        if (skyHit !== null) {
+          this.click();
+          this.select(null);
+          this.selectSky(skyHit);
+        } else if (hit) {
+          this.selectSky(null);
           this.click();
           this.select(hit);
         } else if (dbl) {
           const R = this.renderer;
           this.flyTo(R.wx(ptr.x), R.wz(ptr.y), R.view.ppm * 2);
-        } else this.select(null);
+        } else {
+          this.select(null);
+          this.selectSky(null);
+        }
       }
     };
     cv.addEventListener('pointerup', end);

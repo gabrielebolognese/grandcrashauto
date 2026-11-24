@@ -238,6 +238,8 @@ export interface WreckPiece {
  * The breakup system calls the callbacks; the PlaneSystem keeps flying `body` while it is non-null.
  */
 export interface TrackedPlane {
+  /** Sky traffic: not the player's — kept through the player's respawns, never the crash camera's focus. */
+  persistent?: boolean;
   readonly type: PlaneTypeId;
   readonly visual: PlaneVisual;
   /** Intact body (null once the plane has split into pieces). */

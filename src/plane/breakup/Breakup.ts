@@ -520,12 +520,20 @@ export class Breakup implements IBreakup {
     this.syncPieces();
   }
 
+  /** Remove every piece, fire and registration of one plane (sky traffic recycling). */
+  drop(plane: TrackedPlane): void {
+    for (const rt of this.planes) if (rt.plane === plane) rt.retired = true;
+    this.untrack(plane);
+    this.dropRetired(plane);
+  }
+
   clear(): void {
-    // retired wrecks (crashed planes left in the world) stay; everything else goes
-    const retired = this.planes.filter((rt) => rt.retired);
+    // retired wrecks (crashed planes left in the world) and the sky traffic stay; everything else goes
+    const keepRt = (rt: PlaneRT) => rt.retired || !!rt.plane.persistent;
+    const retired = this.planes.filter(keepRt);
     const keepMap: [number, { rt: PlaneRT; asm: Assembly; part: number }][] = [];
-    for (const [h, v] of this.colliderMap) if (v.rt.retired) keepMap.push([h, v]);
-    this.planes = this.planes.filter((rt) => !rt.retired);
+    for (const [h, v] of this.colliderMap) if (keepRt(v.rt)) keepMap.push([h, v]);
+    this.planes = this.planes.filter((rt) => !keepRt(rt));
     for (const rt of this.planes) {
       for (const f of rt.fires) f.handle.stop();
       rt.fires = [];
@@ -643,6 +651,24 @@ export class Breakup implements IBreakup {
         }
         // a wreck left in the world freezes where it settles (its ground colliders unload once you fly away)
         const fr = a as unknown as { frozen?: boolean };
+        if (rt.plane.persistent && !rt.retired && !a.tracked && !fr.frozen && a.waterY === null) {
+          let gy = -1e9;
+          try {
+            gy = this.ctx.world.groundHeightAt(a.comW.x, a.comW.z);
+          } catch {
+            /* no ground info */
+          }
+          if (Number.isFinite(gy) && gy > -1e8 && a.comW.y < gy - 0.5) {
+            const t = a.body.translation();
+            a.body.setTranslation({ x: t.x, y: t.y + (gy + a.radius * 0.3 - a.comW.y), z: t.z }, true);
+            a.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+            fr.frozen = true;
+            a.read();
+            a.interp.capture(a.pos, a.quat);
+            continue;
+          }
+        }
+        if ((rt.retired || rt.plane.persistent) && !a.tracked && fr.frozen) continue;
         if (rt.retired && !a.tracked) {
           if (fr.frozen) continue;
           // fell through unloaded ground: back on the terrain surface, then frozen
@@ -2079,7 +2105,7 @@ export class Breakup implements IBreakup {
 
   private syncPieces(): void {
     const out: WreckPiece[] = [];
-    for (const rt of this.planes) if (!rt.retired) for (const a of rt.asms) if (!a.removed && a.piece) out.push(a.piece);
+    for (const rt of this.planes) if (!rt.retired && !rt.plane.persistent) for (const a of rt.asms) if (!a.removed && a.piece) out.push(a.piece);
     this.pieces = out;
     if (this.focusPiece && !out.includes(this.focusPiece)) this.focusPiece = null;
     if (!this.focusPiece && out.length) this.updateFocus(true);
@@ -2100,10 +2126,10 @@ export class Breakup implements IBreakup {
     let biggest: Assembly | null = null;
     let gm = -1;
     let maxMass = 0;
-    for (const rt of this.planes) if (!rt.retired) for (const a of rt.asms) if (!a.removed && a.piece) maxMass = Math.max(maxMass, a.mp.mass);
+    for (const rt of this.planes) if (!rt.retired && !rt.plane.persistent) for (const a of rt.asms) if (!a.removed && a.piece) maxMass = Math.max(maxMass, a.mp.mass);
     const minMass = maxMass * CONFIG.breakup.focusMinMassFrac;
     for (const rt of this.planes) {
-      if (rt.retired) continue;
+      if (rt.retired || rt.plane.persistent) continue;
       for (const a of rt.asms) {
         if (a.removed || !a.piece) continue;
         if (a.mp.mass > gm) (gm = a.mp.mass), (biggest = a);

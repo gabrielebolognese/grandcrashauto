@@ -770,6 +770,16 @@ export const CONFIG = {
   // within slowWindow s of explosions / impacts, the auto-director cuts every shotSeconds.
   replay: { seconds: 14, hz: 30, leadIn: 3.5, slowSpeed: 0.3, slowWindow: 1.4, shotSeconds: 2.8 },
 
+  // ───────────────────────────── missiles, nukes, sky traffic (owner: src/missiles) ─────────────────────
+  missiles: {
+    // perpetual traffic: planes kept in the sky per quality, spawn ring / despawn distance (m), wrecks kept (s)
+    traffic: { count: { low: 6, medium: 10, high: 14 }, spawnR: 5600, despawnR: 7600, wreckKeepS: 150 },
+    lockCone: 0.6, // rad between the aim and the target for a lock-on
+    terminal: 140, // m: inside this the missile flies straight at its aim point (it never misses)
+    impactHold: 6, // s watching the hit plane go down before the control room view returns
+    nuke: { fireball: 240, skyRadius: 1800, groundRadius: 700 },
+  },
+
   // ───────────────────────────── on foot (owner: src/walk) ─────────────────────
   // Walking in plane cabins / falling out / on the ground. splitCoupling: share of a SPLIT piece's acceleration you
   // feel (the rest: you fall faster than the wreck — cinematic); minFallG: a split/diving plane never lets you float

@@ -12,13 +12,14 @@ interface Frame {
   a: Float32Array | null; // the on-foot character
   vs: Float32Array | null; // the plane's visual damage state (torn caps, interiors, charring, crush…)
   fc: number; // the fx clock (fires born later stay dormant in the replay)
+  x: Float32Array | null; // extra objects (missiles): 17 floats each (world matrix + visible)
 }
 interface RecEvent {
   t: number;
   kind: EvKind;
   data: Record<string, unknown>;
 }
-type Shot = 'Chase' | 'Side' | 'Ground' | 'Orbit' | 'Tail' | 'Top' | 'You';
+type Shot = 'Missile' | 'Chase' | 'Side' | 'Ground' | 'Orbit' | 'Tail' | 'Top' | 'You';
 
 const _p = new THREE.Vector3();
 const _p2 = new THREE.Vector3();
@@ -92,9 +93,11 @@ export class Replay implements IReplay {
     ev.on('planeSpawned', () => {
       if (this.active) this.stop();
       this.clear();
+      this.watchVisual = null;
+      this.extras = [];
     });
     ev.on('modeChanged', ({ mode }) => {
-      if (mode !== 'plane') {
+      if (mode !== 'plane' && !this.watchVisual) {
         if (this.active) this.stop();
         this.clear();
       }
@@ -127,6 +130,26 @@ export class Replay implements IReplay {
     this.hadEvent = false;
   }
 
+  // a sky plane hit by your missiles (src/missiles): recorded instead of your plane, with the missiles
+  private watchVisual: PlaneVisual | null = null;
+  private extras: THREE.Object3D[] = [];
+  private extrasAdded: THREE.Object3D[] = [];
+
+  /** Record another plane (+ extra objects: the missiles) from now on, instead of yours. */
+  watch(visual: PlaneVisual, extra: THREE.Object3D[]): void {
+    if (this.active) this.stop();
+    if (visual !== this.watchVisual) {
+      this.clear();
+      this.watchVisual = visual;
+      this.visual = visual;
+    }
+    this.extras = [...extra];
+  }
+
+  addExtra(obj: THREE.Object3D): void {
+    if (this.watchVisual && !this.extras.includes(obj)) this.extras.push(obj);
+  }
+
   get canReplay(): boolean {
     const p = this.ctx.planes;
     return !this.active && this.frames.length > 45 && (p.crashed || this.hadEvent) && this.ctx.game.state === 'driving';
@@ -146,10 +169,12 @@ export class Replay implements IReplay {
     if (this.active) return;
     const { ctx } = this;
     const planes = ctx.planes;
-    if (ctx.game.mode !== 'plane' || !planes.active || !planes.visual || ctx.game.state !== 'driving') return;
-    if (planes.visual !== this.visual) {
+    if (ctx.game.state !== 'driving') return;
+    const subject = this.watchVisual ?? (ctx.game.mode === 'plane' && planes.active ? planes.visual : null);
+    if (!subject) return;
+    if (subject !== this.visual) {
       this.clear();
-      this.visual = planes.visual;
+      this.visual = subject;
     }
     this.recT += dt;
     this.acc += dt;
@@ -174,7 +199,16 @@ export class Replay implements IReplay {
       a.set(_m.elements);
     }
     const vs = this.visual.captureState?.(f?.vs) ?? null;
-    this.frames.push({ t: this.recT, m, a, vs, fc: ctx.fx.clock ?? 0 });
+    let x: Float32Array | null = null;
+    if (this.extras.length) {
+      x = f?.x && f.x.length === this.extras.length * 17 ? f.x : new Float32Array(this.extras.length * 17);
+      this.extras.forEach((o, i) => {
+        o.updateWorldMatrix(true, false);
+        x!.set(o.matrixWorld.elements, i * 17);
+        x![i * 17 + 16] = o.visible && !!o.parent ? 1 : 0;
+      });
+    }
+    this.frames.push({ t: this.recT, m, a, vs, fc: ctx.fx.clock ?? 0, x });
     while (this.events.length && this.recT - this.events[0].t > R.seconds + 1) this.events.shift();
   }
 
@@ -212,7 +246,16 @@ export class Replay implements IReplay {
     const idx = this.visual.parts.findIndex((p) => p.name === 'fuselageCenter');
     this.subjIdx = idx >= 0 ? idx : 0;
     this.subjectAt(this.t0, this.subj); // the streaming focus is valid from the first frame
-    this.shots = ['Chase'];
+    this.shots = this.extras.length ? ['Missile', 'Chase'] : ['Chase'];
+    // the missiles (removed from the scene after their impact) come back for the replay
+    this.extrasAdded = [];
+    for (const o of this.extras) {
+      o.matrixAutoUpdate = false;
+      if (!o.parent) {
+        ctx.engine.scene.add(o);
+        this.extrasAdded.push(o);
+      }
+    }
     if (this.frames.some((f) => f.a)) this.shots.push('You');
     this.shots.push('Side', 'Ground', 'Orbit');
     if (this.visual.partByName.fin || this.visual.partByName.tailCone) this.shots.push('Tail');
@@ -253,6 +296,9 @@ export class Replay implements IReplay {
       s.obj.updateMatrix();
     }
     this.saved = [];
+    for (const o of this.extras) o.matrixAutoUpdate = true;
+    for (const o of this.extrasAdded) o.removeFromParent();
+    this.extrasAdded = [];
     if (this.liveState && this.visual?.applyState) this.visual.applyState(this.liveState);
     this.liveState = null;
     this.appliedVs = null;
@@ -319,6 +365,20 @@ export class Replay implements IReplay {
       this.appliedVs = vs;
     }
     this.ctx.fx.replayClock?.(a.fc + (b.fc - a.fc) * u);
+    // the missiles
+    if (a.x && b.x) {
+      const n = Math.min(this.extras.length, a.x.length / 17, b.x.length / 17);
+      for (let i = 0; i < n; i++) {
+        const o = this.extras[i];
+        const vis = (u < 0.5 ? a.x : b.x)[i * 17 + 16] > 0.5;
+        o.visible = vis;
+        if (!vis) continue;
+        const A = a.x.subarray(i * 17, i * 17 + 16), B = b.x.subarray(i * 17, i * 17 + 16);
+        this.lerpMat(A, B, 0, u, _m);
+        o.matrix.copy(_m);
+        o.matrixWorldNeedsUpdate = true;
+      }
+    }
     // the character
     const avatar = (this.ctx.walker as unknown as { avatar?: { object?: THREE.InstancedMesh; play?: (c: string, f?: number) => void; update?: (dt: number) => void } }).avatar;
     if (avatar?.object) {
@@ -447,6 +507,29 @@ export class Replay implements IReplay {
         eye.addScaledVector(this.chaseDir, -S * 1.5).addScaledVector(UP, S * 0.35);
         smooth = 0.25;
         break;
+      case 'Missile': {
+        // behind the first missile still flying, looking at the plane; after the impacts: a chase of the wreck
+        const f0 = this.frames[this.fi], f1 = this.frames[Math.min(this.frames.length - 1, this.fi + 1)];
+        let k = -1;
+        if (f0?.x && f1?.x) for (let i = 0; i < f0.x.length / 17; i++) if (f0.x[i * 17 + 16] > 0.5 && f1.x[i * 17 + 16] > 0.5) {
+          k = i;
+          break;
+        }
+        if (k >= 0 && f0.x && f1.x) {
+          const mp = _s.set(f1.x[k * 17 + 12], f1.x[k * 17 + 13], f1.x[k * 17 + 14]);
+          const md = _s2.set(mp.x - f0.x[k * 17 + 12], mp.y - f0.x[k * 17 + 13], mp.z - f0.x[k * 17 + 14]);
+          if (md.lengthSq() < 1e-6) md.copy(this.chaseDir);
+          md.normalize();
+          eye.copy(mp).addScaledVector(md, -14).addScaledVector(UP, 3);
+          const d = eye.distanceTo(subj);
+          fov = clamp((2 * Math.atan((S * 1.2) / Math.max(1, d)) * 180) / Math.PI, 10, 62);
+          smooth = 0.06;
+        } else {
+          eye.addScaledVector(this.chaseDir, -S * 1.8).addScaledVector(UP, S * 0.5);
+          smooth = 0.3;
+        }
+        break;
+      }
       case 'Side':
       case 'Ground': {
         eye.copy(this.anchor);

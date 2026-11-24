@@ -257,6 +257,45 @@ export class ScatterRenderer {
     return mass;
   }
 
+  /** Nuke: every drawn tree within radius of a LOCAL ground point: smashed in the inner 45 %, knocked outward beyond. */
+  blastTrees(center: THREE.Vector3, radius: number, offX: number, offZ: number): number {
+    const ax = center.x + offX, az = center.z + offZ;
+    const c0 = Math.floor((ax - radius) / CH), c1 = Math.floor((ax + radius) / CH);
+    const r0 = Math.floor((az - radius) / CH), r1 = Math.floor((az + radius) / CH);
+    let n = 0;
+    for (let cz = r0; cz <= r1; cz++) {
+      for (let cx = c0; cx <= c1; cx++) {
+        const D = this.chunks.get(ck(cx, cz))?.data;
+        if (!D) continue;
+        for (const type of [ST.pine, ST.round] as const) {
+          const cnt = D.counts[type];
+          const off = D.offsets[type];
+          const H = TREE_H[type === ST.pine ? 0 : 1];
+          for (let i = 0; i < cnt; i++) {
+            const o = (off + i) * ST_MAT;
+            const M2 = D.mats;
+            if (M2[o + 5] === 0) continue;
+            const tx = cx * CH + M2[o + 12], tz = cz * CH + M2[o + 14];
+            const dx = tx - ax, dz = tz - az;
+            const d = Math.hypot(dx, dz);
+            if (d > radius) continue;
+            this.broken.add(cx + ',' + cz + ',' + type + ',' + i);
+            _m2.fromArray(M2, o);
+            const sy = M2[o + 5];
+            for (let e = 0; e < 11; e++) M2[o + e] = 0;
+            if (d > radius * 0.45 && n < 400) {
+              _b.set(dx / (d || 1), 0, dz / (d || 1)).multiplyScalar(40);
+              this.addFallen(type === ST.pine ? 0 : 1, tx - offX, M2[o + 13], tz - offZ, _m2, _b, H * sy, 60);
+            }
+            n++;
+          }
+        }
+      }
+    }
+    if (n) for (const b of this.buckets) if (b.type === ST.pine || b.type === ST.round) b.dirty = true;
+    return n;
+  }
+
   private addFallen(type: 0 | 1, x: number, y: number, z: number, m: THREE.Matrix4, vel: THREE.Vector3, len: number, speed: number): void {
     const list = this.fallen[type];
     const max = CONFIG.terrain.scatter.fallenMax;

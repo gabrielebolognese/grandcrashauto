@@ -233,6 +233,12 @@ export class Terrain implements ITerrain {
     return n;
   }
 
+  blastTrees(center: THREE.Vector3, radius: number): number {
+    if (!this.ready) return 0;
+    const off = this.ctx.origin.offset;
+    return this.scatter.blastTrees(center, radius, off.x, off.z);
+  }
+
   hitTrees(center: THREE.Vector3, quat: THREE.Quaternion, half: THREE.Vector3, vel: THREE.Vector3): number {
     if (!this.ready) return 0;
     const off = this.ctx.origin.offset;
