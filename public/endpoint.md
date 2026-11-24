@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 9 · 2026-11-24
+Endpoint version: 10 · 2026-11-24
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -113,6 +113,11 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
   - Without a lock the missile flies straight and the keys steer it. Its seeker locks on if the plane comes in front of it.
   - Each S fires again. BACK returns to your car or plane while the missiles keep going.
   - The replay shows the missile run and the plane going down. Flying, you can also RAM a sky plane on autopilot, or just crash into one.
+- **Towers:** 7 crashable towers in the countryside around the city, each a teleport place:
+  - **Medieval:** `tower-keep` Old Keep (round, battlements, red flag) · `tower-watch` Watchtower (square, timber lookout) · `tower-redroof` Red Roof Tower.
+  - **Fantasy:** `tower-wizard` Wizard's Spire (purple hat, floating glowing crystal) · `tower-crystal` Crystal Spire (glowing prisms) · `tower-moon` Moon Tower (white and gold, floating rings) · `tower-sky` Sky Citadel Spire (about 210 m, a landmark with a beacon).
+  - A plane crash, a missile, a nuke or a car blast close by brings one down: everything above the hit topples the way the hit was going, and a low hit drops the whole tower.
+  - Fantasy crystals and beacons glow, much brighter at night.
 - **The beach concert** (west end of the beach) has a big crowd and a band. A crash there knocks people flying and sends the rest running and screaming, and the stage collapses: it is no longer an indestructible block.
 - **Cockpit and wing views** look freely in 360° (drag), and stay where you looked.
 - **Passengers and crew** (airliner, jumbo, private jet):
@@ -223,7 +228,7 @@ Plane numbers change every session, so scripted scenes should use `nearest`. Tur
 | Command | Effect |
 |---|---|
 | `fly jumbo target concert` | spawns the plane on a straight dive that **crashes into the target**. A homing autopilot keeps steering into it, so it really hits. Options: `in 14` (seconds until impact, default 14) · `from s` (approach direction n/e/s/w or degrees; default: from the sea for coastal targets, else from the east) · `speed 110` · `agl 200` (start height, which sets how steep the dive is; default about a 10° dive) |
-| targets | `concert` (between the stage and the crowd: takes both) · `stage` · `crowd` · `city` (downtown) · `beach` · `airport` · `park` · `garage` · `highway` · `jump` · any place from `places` · or `x z` absolute coordinates |
+| targets | towers (`wizard`, `keep`, `moon`, `sky citadel` …: aimed at 60 % of their height, so the top comes down) · `concert` (between the stage and the crowd: takes both) · `stage` · `crowd` · `city` (downtown) · `beach` · `airport` · `park` · `garage` · `highway` · `jump` · any place from `places` · or `x z` absolute coordinates |
 | `target concert` | already flying: home on a target from where you are (it dives into it) |
 | `target off` | stop homing |
 
@@ -360,6 +365,8 @@ want to cut it short.
 | Octo salvo | `shoot nearest from octo all spread` | 20 s | 8 small missiles streak up and hit all over the plane |
 | Nuke a jumbo | `shoot nearest from nuke` | 30 s | the nuke leaves the turret, then a blinding flash and a fireball; every plane nearby breaks apart |
 | Mid-air ram | `fly jumbo agl 1700 speed 170; wait 2; ram nearest` | 30–40 s | your jumbo hunts a sky plane and they collide |
+| Jumbo into the Wizard's Spire | `fly jumbo target wizard in 10` | 20 s | the jumbo hits the spire high up, the purple-hatted top topples with its glowing crystal |
+| Night crash into the Sky Citadel | `night; fly jumbo target sky citadel in 14` | 25 s | the glowing 210 m spire lit up at night, the jumbo slices through it |
 | Jumbo into the concert | `fly jumbo target concert in 12` | 20 s | in from the sea, slams into the beach concert: the stage collapses, the crowd is thrown, the band falls |
 | Tail off over the city | `fly airliner agl 250 over city; wait 4; tail; wait 1; cam` | 20 s | the tail goes, and the plane falls into the city |
 
@@ -457,6 +464,10 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v10 · 2026-11-24:** towers.
+  - 3 medieval towers (Old Keep, Watchtower, Red Roof Tower) and 4 fantasy towers (Wizard's Spire, Crystal Spire, Moon Tower, Sky Citadel Spire), all teleport places, all crashable (they topple from where they are hit).
+  - Crash set-ups (`fly … target <tower>`) aim at 60 % of a tower's height.
 
 - **v9 · 2026-11-24:** missiles smoother.
   - Firing no longer lags: the world keeps streaming around the turret instead of chasing the missile, trails are lighter, and each missile is one mesh.

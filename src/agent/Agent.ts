@@ -908,7 +908,7 @@ export class Agent implements IAgent {
     if (!t) return 'error: target <concert | stage | crowd | city | beach | airport | park | place id | x z>  ("places" lists them)';
     if (!this.flying) return 'error: no plane flying — use "fly <type> target <place> [in s] [from n|e|s|w]"';
     const o = this.ctx.origin.offset;
-    this.ap.target = { x: t.x, z: t.z, y: this.groundY(t.x - o.x, t.z - o.z), name: t.name };
+    this.ap.target = { x: t.x, z: t.z, y: this.ctx.towers?.aimAt(t.x, t.z) ?? this.groundY(t.x - o.x, t.z - o.z), name: t.name };
     this.ap.alt = null;
     this.ap.heading = null;
     this.ap.bank = null;
@@ -1027,7 +1027,7 @@ export class Agent implements IAgent {
     const cruise: Record<string, number> = { prop: 55, bizjet: 120, airliner: 110, jumbo: 110 };
     const spIn = get('speed');
     const sp = spIn ? parseSpeed(spIn, w[w.indexOf('speed') + 2]) : cruise[type];
-    const ty = this.groundY(t.x - o.x, t.z - o.z);
+    const ty = ctx.towers?.aimAt(t.x, t.z) ?? this.groundY(t.x - o.x, t.z - o.z);
     // approach direction: from the sea for targets on the coast, else from the east (or as asked)
     const from = get('from');
     let hd = HEADINGS[from ?? ''] ?? parseFloat(from ?? '');

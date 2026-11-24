@@ -167,6 +167,7 @@ export class Nav implements INav {
     // air-defence sites (missiles): always known, always teleportable
     try {
       for (const p of ctx.missiles?.pois ?? []) add(p.id, p.name, p.icon, p.pose, 'city');
+      for (const p of ctx.towers?.pois ?? []) add(p.id, p.name, p.icon, p.pose, 'city');
     } catch {
       /* missiles not ready */
     }

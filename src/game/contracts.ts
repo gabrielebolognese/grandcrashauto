@@ -71,6 +71,8 @@ export interface GameContext {
   replay: IReplay;
   /** Agent mode (?agent): text view + forecasts + tap-to-hold controls + command API (window.gca) for AI agents. */
   agent?: IAgent;
+  /** Medieval + fantasy towers (src/towers): teleport places, crashable. */
+  towers?: GameSystem & { readonly pois: { id: string; name: string; icon: string; pose: Pose }[]; aimAt(ax: number, az: number): number | null };
   /** Missiles, nukes, air-defence sites and the perpetual sky traffic (src/missiles). */
   missiles?: IMissiles;
   /** Part 3: floating origin (absolute = local + origin.offset), endless terrain, highway network. */
