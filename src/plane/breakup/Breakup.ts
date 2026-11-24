@@ -944,6 +944,7 @@ export class Breakup implements IBreakup {
     const group = new THREE.Group();
     group.name = `wreck-${rt.type}`;
     engine.scene.add(group);
+    group.userData.wreckGroup = true; // fx: fires on it are re-homed onto one of its parts in the crash replay
     const asm = new Assembly(nextId++, body, false, s.parts.length, parts, group);
     asm.gScale = parent.gScale;
     asm.mp.mass = mp.mass;

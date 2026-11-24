@@ -34,6 +34,11 @@ export class FireEmitter {
   readonly prev = new THREE.Vector3();
   readonly vel = new THREE.Vector3();
   hasPrev = false;
+  /** fx clock at start (crash replay: dormant until the replay reaches it). */
+  born = 0;
+  /** Crash replay: the plane part (and offset in it) this fire follows while the replayed parts are posed. */
+  rTarget: THREE.Object3D | null = null;
+  readonly rOffset = new THREE.Vector3();
   private accF = 0;
   private accS = 0;
   private accE = 0;
@@ -258,6 +263,8 @@ export class CpuEmitter {
   onWater = false;
   level = 0;
   seed = 0;
+  /** fx clock at start (crash replay: dormant until the replay reaches it). */
+  born = 0;
 
   update(kit: FxKit, dt: number): void {
     if (this.kind === EmKind.Streamer) this.streamer(kit, dt);

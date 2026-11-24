@@ -1140,6 +1140,9 @@ export const CONFIG = {
       // holdBank / holdRate: a stabiliser that fights the torn wing at first and fades to nothing at spinAfterS
       spinAfterS: 30, rollStart: 0.15, rollEnd: 2.6, yawPull: 0.3, liftLoss: 0.55, controlLoss: 0.85, holdBank: 6.5, holdRate: 4.5,
       spin: { pitch: 0.35, yaw: 1.1, roll: 2.1, gain: 2.5, lift: 0.12 },
+      // fire at the break (user request): a lost tip burns tipFireS s then fades; a wing torn in half keeps burning;
+      // the piece that falls away burns pieceFireS s
+      tipFireS: 15, pieceFireS: 8,
     },
     // Menu "click and fly" start (absolute x/z, height above ground, heading): east of the city, west along the coast.
     quickFly: { x: 1500, z: 170, agl: 380, dirX: -1, dirZ: 0 },

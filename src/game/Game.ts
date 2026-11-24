@@ -299,7 +299,9 @@ export class Game implements GameActions {
     // Streaming / shadow focus follows what the player controls (car or plane/wreck), else the camera.
     const target = this.mode === 'plane' ? ctx.planes.cameraTarget?.object : null;
     const onFoot = ctx.walker.focus;
-    if (onFoot) this.focus.copy(onFoot);
+    const replayAt = ctx.replay.active ? ctx.replay.focus : null;
+    if (replayAt) this.focus.copy(replayAt);
+    else if (onFoot) this.focus.copy(onFoot);
     else if (target) target.getWorldPosition(this.focus);
     else if (ctx.vehicle.active && ctx.vehicle.object) this.focus.copy(ctx.vehicle.state.position);
     else this.focus.copy(ctx.engine.camera.position);

@@ -252,6 +252,8 @@ export interface IReplay extends GameSystem {
   nextCam(): void;
   /** Per frame while replaying (Game calls it instead of the simulation). */
   play(realDt: number): void;
+  /** While replaying: where the world should stream around (the replayed plane), else null. */
+  readonly focus?: THREE.Vector3 | null;
 }
 
 /** The player on foot (walking in plane cabins, falling out, landing): owner core/lead (src/walk). */
@@ -466,6 +468,10 @@ export interface IFx extends GameSystem {
   mist?(position: THREE.Vector3, velocity: THREE.Vector3, size: number): void;
   /** Scorch decal on a building facade (vertical surface). */
   scorch?(position: THREE.Vector3, normal: THREE.Vector3, size: number): void;
+  /** The fx clock (crash replay records it). */
+  readonly clock?: number;
+  /** Crash replay rewind: the fx clock of the replayed moment, or null when the replay ends (see Fx.replayClock). */
+  replayClock?(fxClock: number | null, restart?: boolean): void;
 }
 
 export interface TrailHandle extends FireHandle {
@@ -538,6 +544,8 @@ export interface IPlaneSystem extends GameSystem {
   readonly boardCandidate: { type: PlaneTypeId; name: string } | null;
   /** True after a crash/destruction; UI shows Back to car / Respawn plane / Retry in air when crashTime > 3 s. */
   readonly crashed: boolean;
+  /** Crashed OR otherwise wrecked (gear collapsed in a hard landing, split, hit the ground): no more engine blasts. */
+  readonly wrecked?: boolean;
   readonly crashTime: number;
   /** In the explode-middle cockpit sequence (camera free-look, Skip button). */
   readonly inCockpitSequence: boolean;

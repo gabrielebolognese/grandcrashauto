@@ -106,6 +106,7 @@ export class PlaneVisualImpl implements PlaneVisual {
       U.uPartOff.value[p.index].set(p.offset.x, p.offset.y, p.offset.z, 0);
       const obj = new THREE.Group();
       obj.name = p.name;
+      obj.userData.planePart = true; // fx: replay fires follow the part, not the wreck group
       obj.position.copy(p.offset);
       const mesh = new THREE.Mesh(p.geo[0], this.mats.main);
       mesh.name = `${p.name}-mesh`;
@@ -252,6 +253,76 @@ export class PlaneVisualImpl implements PlaneVisual {
   setInteriorVisible(on: boolean): void {
     this.interiorsOn = on;
     for (const r of this.rt) if (r.interior) r.interior.visible = on || r.capsShown > 0 || !!r.tpl.interiorAlways;
+  }
+
+  /** Crash replay: the visual damage state as numbers (see PlaneVisual.captureState). */
+  captureState(out?: Float32Array | null): Float32Array {
+    const U = this.mats.uniforms;
+    const n = this.joints.length * 2 + this.rt.length * 3 + 4 + U.uCharV.value.length * 4 + 4 + 4 + 1 + 4 + 1 + 1 + 4;
+    const s = out && out.length === n ? out : new Float32Array(n);
+    let i = 0;
+    for (const j of this.joints) {
+      s[i++] = j.capA?.visible ? 1 : 0;
+      s[i++] = j.capB?.visible ? 1 : 0;
+    }
+    for (const r of this.rt) {
+      s[i++] = r.info.object.visible ? 1 : 0;
+      s[i++] = r.interior?.visible ? 1 : 0;
+      s[i++] = r.capsShown;
+    }
+    U.uDmg.value.toArray(s, i);
+    i += 4;
+    for (const v of U.uCharV.value) {
+      v.toArray(s, i);
+      i += 4;
+    }
+    U.uCrush.value.toArray(s, i);
+    i += 4;
+    U.uCrushDir.value.toArray(s, i);
+    i += 4;
+    s[i++] = U.uCrushR.value;
+    U.uFlags.value.toArray(s, i);
+    i += 4;
+    s[i++] = U.uCabin.value;
+    s[i++] = this.broken ? 1 : 0;
+    for (let k = 0; k < 4; k++) s[i++] = this.damaged[k] ? 1 : 0;
+    return s;
+  }
+
+  applyState(s: Float32Array): void {
+    const U = this.mats.uniforms;
+    let i = 0;
+    for (const j of this.joints) {
+      if (j.capA) j.capA.visible = s[i] > 0.5;
+      i++;
+      if (j.capB) j.capB.visible = s[i] > 0.5;
+      i++;
+    }
+    for (const r of this.rt) {
+      r.info.object.visible = s[i++] > 0.5;
+      const iv = s[i++] > 0.5;
+      if (r.interior) r.interior.visible = iv || this.interiorsOn;
+      r.capsShown = s[i++];
+    }
+    U.uDmg.value.fromArray(s, i);
+    i += 4;
+    for (const v of U.uCharV.value) {
+      v.fromArray(s, i);
+      i += 4;
+    }
+    U.uCrush.value.fromArray(s, i);
+    i += 4;
+    U.uCrushDir.value.fromArray(s, i);
+    i += 4;
+    U.uCrushR.value = s[i++];
+    const time = U.uFlags.value.z;
+    U.uFlags.value.fromArray(s, i);
+    U.uFlags.value.z = time; // the shader clock keeps running
+    i += 4;
+    U.uCabin.value = s[i++];
+    this.broken = s[i++] > 0.5;
+    for (let k = 0; k < 4; k++) this.damaged[k] = s[i++] > 0.5;
+    this.applyLod();
   }
 
   showBreak(jointId: string): void {

@@ -132,6 +132,12 @@ export interface PlaneVisual {
   readonly cabin?: PlaneCabin | null;
   /** Show every cabin interior (walking inside), or back to "only when torn open". */
   setInteriorVisible?(on: boolean): void;
+  /**
+   * Crash replay: snapshot / restore of the visual damage state — torn-edge caps, interiors, part visibility, charring,
+   * crush dent, engine damage, emergency lighting — so a replayed plane looks intact until the moment it broke.
+   */
+  captureState?(out?: Float32Array | null): Float32Array;
+  applyState?(s: Float32Array): void;
   readonly livery: string; // fictional operator name
   /** Control surfaces / gear / props animation. Values in -1..1 (flaps & gear 0..1). propAngle per engine (rad). */
   setControls(c: { aileron: number; elevator: number; rudder: number; flaps: number; gear: number; propAngle?: number[] }): void;

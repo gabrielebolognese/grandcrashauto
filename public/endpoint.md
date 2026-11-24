@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 1 · 2026-11-24
+Endpoint version: 2 · 2026-11-24
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -194,8 +194,8 @@ With the stick centred, the assists hold the flight path and keep the wings leve
 |---|---|
 | `split` | the plane breaks in half at the middle |
 | `tail` | blows the tail off. A fire then grows and explodes the plane later; the TIMERS line counts it down |
-| `engine 1` … `engine 4` | blows up that engine |
-| `wing left half` · `wing right far` | tears the wing in half (an unrecoverable spin after about 30 s; TIMERS counts it) · tears off just the tip |
+| `engine 1` … `engine 4` | blows up that engine. Only while the plane is still flying: after a crash or a hard landing it does nothing |
+| `wing left half` · `wing right far` | tears the wing in half (an unrecoverable spin after about 30 s; TIMERS counts it) · tears off just the tip. The break catches fire, with smoke and light: a lost tip burns about 15 s, a wing torn in half keeps burning, and the falling piece burns about 8 s |
 | `explode` | one big explosion |
 | `gear up` · `gear down` | landing gear |
 | `respawn` · `retry` | reset · retry in the air |
@@ -236,8 +236,8 @@ want to cut it short.
 
 | Command | Effect |
 |---|---|
-| `replay` | after a crash, replays the last ~14 s from rotating angles, each about 2.8 s: Chase, Flyby, You (when walking), Cockpit, Ground, Orbit, Tail, Top. Slow motion around the key moments |
-| `replay next` · `replay restart` · `replay stop` | next angle · from the start · stop |
+| `replay` | after a crash, replays the last ~14 s. **One camera per pass, complete**: the whole clip plays from one camera, and the next pass switches to the next camera. Order: Chase, You (only if you were walking), Side (a spectator beside the big moment), Ground (a spectator on the ground near the crash site), Orbit, Tail, Top. The plane looks intact until the moment it broke, and fires appear only when they started. Slow motion around the main moments (engine blasts, the split / tail / total explosion, the first hard impact) |
+| `replay next` · `replay restart` · `replay stop` | next camera, starting the clip again from the beginning · the same camera from the start · stop |
 
 **Time**
 
@@ -291,7 +291,7 @@ want to cut it short.
 | "in a storm", "foggy", "snowing" | `weather storm` · `weather fog` · `weather snow` |
 | "slow motion" | `slowmo 0.3 3` at the moment it should start |
 | "from the cockpit" / "wing view" | `cam cockpit` / `cam wing`, sent before the crash |
-| "show it again from another angle" | `replay` after the crash, and film long enough for it |
+| "show it again from another angle" | `replay` after the crash; one pass is about 14–20 s (longer with slow motion), so film long enough. For a specific angle, add `replay next` the right number of times right after `replay` (Chase is first) |
 | "someone walking inside while it crashes" | `walk` (airliner or jumbo) a few seconds before the destruction |
 | "car jump" / "barrel roll" | car scenes are less proven than plane scenes, so rehearse them. `car`, then `gas` / `turbo` / `steer`, and `barrel left` while airborne. The city has one ramp you can always teleport to: `car; teleport jump` (Big Jump). The bigger Mega Jumps are out on the highways and need driving there first |
 
@@ -400,6 +400,14 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v2 · 2026-11-24:** replay reworked.
+  - One camera for a whole pass instead of cutting every 2.8 s. The cockpit shot is gone, and Side and Ground are new fixed spectators. `replay next` restarts the clip from the next camera.
+  - The plane looks intact until it actually broke: no torn edges early, no charring before the fire.
+  - Fires appear only from the moment they started, and follow the falling pieces. A crash fire is no longer burning from the first frame.
+  - Slow motion only around the main moments.
+  - Engines can no longer be blown up after a crash or a hard landing (the buttons grey out).
+  - Wing breaks now catch fire with smoke and light: a tip burns about 15 s, a half wing keeps burning.
 
 - **v1 · 2026-11-24:** first endpoint.
   - Agent mode (`?agent`): text view, ghost-physics forecast, latched keys, timed commands, freeze and step.

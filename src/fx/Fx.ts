@@ -49,6 +49,7 @@ const _v2 = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _c = new THREE.Color();
+const _m4 = new THREE.Matrix4();
 
 export class Fx implements IFx, FxKit, StreamerSink {
   readonly name = 'fx';
@@ -157,6 +158,7 @@ export class Fx implements IFx, FxKit, StreamerSink {
     this.u = {
       uFxTime: { value: 0 },
       uClear: { value: -1 },
+      uCut: { value: new THREE.Vector2(0, 0) },
       uRamp: { value: ramps },
       uAtlas: { value: atlas },
       uNearFade: { value: new THREE.Vector2(0.25, 1.4) },
@@ -316,8 +318,12 @@ export class Fx implements IFx, FxKit, StreamerSink {
     } catch (err) {
       reportError('[fx] vehicle fx failed', err);
     }
-    for (const f of this.fires) if (f.active) f.update(this, dt);
-    for (const e of this.emitters) if (e.kind !== EmKind.None) e.update(this, dt);
+    const cut = this.rpClock;
+    for (const l of this.fireLog) if (l.died === Infinity && (!l.em.active || l.em.gen !== l.gen)) l.died = this.time;
+    if (cut === null) {
+      for (const f of this.fires) if (f.active) f.update(this, dt);
+    } else this.replayFires(cut, dt);
+    for (const e of this.emitters) if (e.kind !== EmKind.None && (cut === null || e.born <= cut)) e.update(this, dt);
     this.updateLights();
 
     const weather = this.ctx.env?.weather;
@@ -344,13 +350,19 @@ export class Fx implements IFx, FxKit, StreamerSink {
       const warm = f.b < f.g;
       L.request(f.x, f.y, f.z, I, f.r, warm ? f.g * (0.75 + 0.25 * e) : f.g, warm ? f.b * (0.55 + 0.45 * e) : f.b, f.dist);
     }
+    const cut = this.rpClock;
     for (const f of this.fires) {
-      if (!f.active) continue;
+      if (!f.active || (cut !== null && f.born > cut)) continue;
       const I = f.glow(this.time);
       L.request(f.cur.x, f.cur.y + 0.8 * f.size, f.cur.z, I, 1, 0.5, 0.18, 16 * f.size);
     }
+    if (cut !== null)
+      for (const g of this.ghosts) {
+        if (!g.active) continue;
+        L.request(g.cur.x, g.cur.y + 0.8 * g.size, g.cur.z, g.glow(this.time), 1, 0.5, 0.18, 16 * g.size);
+      }
     for (const e of this.emitters) {
-      if (e.kind !== EmKind.FuelFire) continue;
+      if (e.kind !== EmKind.FuelFire || (cut !== null && e.born > cut)) continue;
       const I = e.glow(this.time);
       if (I <= 0) continue;
       e.patchPos(_v2);
@@ -393,7 +405,11 @@ export class Fx implements IFx, FxKit, StreamerSink {
   }
 
   private freeEmitter(): CpuEmitter | null {
-    for (const e of this.emitters) if (e.kind === EmKind.None) return e;
+    for (const e of this.emitters)
+      if (e.kind === EmKind.None) {
+        e.born = this.time;
+        return e;
+      }
     return null;
   }
 
@@ -540,6 +556,22 @@ export class Fx implements IFx, FxKit, StreamerSink {
     let f = this.fires.find((e) => !e.active);
     if (!f) f = this.fires.find((e) => e.auto) ?? this.fires.reduce((a, b) => (a.age > b.age ? a : b));
     f.start(target, offset, fire, smoke, size, auto);
+    f.born = this.time;
+    // crash replay: a fire on a wreck group follows one of its plane parts (the replay poses parts, not groups)
+    f.rTarget = target;
+    f.rOffset.copy(f.offset);
+    if (target.userData.wreckGroup) {
+      const p = target.children.find((c) => c.userData.planePart);
+      if (p) {
+        p.updateMatrix();
+        f.rTarget = p;
+        f.rOffset.copy(f.offset).applyMatrix4(_m4.copy(p.matrix).invert());
+      }
+    }
+    if (!auto) {
+      this.fireLog.push({ target: f.rTarget, offset: f.rOffset.clone(), fire, smoke, size, born: this.time, died: Infinity, em: f, gen: f.gen, ghost: null });
+      if (this.fireLog.length > 64) this.fireLog = this.fireLog.filter((l) => l.died === Infinity || l.died > this.time - 40).slice(-64);
+    }
     return f;
   }
 
@@ -994,6 +1026,81 @@ export class Fx implements IFx, FxKit, StreamerSink {
       this.main.emit(s, this.time);
     }
     if (hard) this.sparks(_v.set(pos.x, gy + 0.2, pos.z), UP, 0.8);
+  }
+
+  // ─────────────────────────────── crash replay (rewind) ───────────────────────────────
+  private rpClock: number | null = null; // the replayed moment (fx clock); fires / fuel fires born later are dormant
+  private rpFrom = 0; // fx clock of the start of the replayed window
+  private rpBegan = 0; // fx clock when the replay began
+
+  private fireLog: { target: THREE.Object3D; offset: THREE.Vector3; fire: number; smoke: number; size: number; born: number; died: number; em: FireEmitter; gen: number; ghost: FireEmitter | null }[] = [];
+  private ghosts: FireEmitter[] = [];
+
+  /**
+   * Fires during the crash replay: live ones that started before the replayed moment burn on the replayed part they
+   * belong to; ones that have gone out since are re-lit as "ghosts" for the stretch of the replay they burned in.
+   */
+  private replayFires(cut: number, dt: number): void {
+    for (const f of this.fires) {
+      if (!f.active || f.born > cut) continue;
+      if (f.rTarget && f.rTarget !== f.target) {
+        const t = f.target!;
+        _v2.copy(f.offset);
+        f.target = f.rTarget;
+        f.offset.copy(f.rOffset);
+        f.update(this, dt);
+        if (f.active) {
+          f.target = t;
+          f.offset.copy(_v2);
+        }
+      } else f.update(this, dt);
+    }
+    for (const l of this.fireLog) {
+      const live = l.em.active && l.em.gen === l.gen;
+      const want = !live && l.born <= cut && cut < l.died && !!l.target.parent;
+      if (want && !l.ghost) {
+        let g = this.ghosts.find((e) => !e.active);
+        if (!g && this.ghosts.length < 12) this.ghosts.push((g = new FireEmitter()));
+        if (g) {
+          g.start(l.target, l.offset, l.fire, l.smoke, l.size, false);
+          l.ghost = g;
+        }
+      } else if (!want && l.ghost) {
+        l.ghost.kill();
+        l.ghost = null;
+      }
+    }
+    for (const g of this.ghosts) if (g.active) g.update(this, dt);
+  }
+
+  /** The fx clock (the crash replay records it with every frame). */
+  get clock(): number {
+    return this.time;
+  }
+
+  /**
+   * Crash replay: fxClock = the fx time of the moment being replayed (null = the replay is over). Particles born
+   * between the replayed window start and the replay start are hidden; fires and burning slicks born after the
+   * replayed moment stay dormant until the replay reaches them (so a crash fire is not "already there").
+   * restart = the replay looped: the previous pass's particles go too.
+   */
+  replayClock(fxClock: number | null, restart = false): void {
+    const cut = this.u?.uCut.value;
+    if (fxClock === null) {
+      // back to live: the original particles return, the ones the replay re-spawned are hidden
+      if (this.rpClock !== null && cut) cut.set(this.rpBegan, this.time);
+      this.rpClock = null;
+      for (const g of this.ghosts) g.kill();
+      for (const l of this.fireLog) l.ghost = null;
+      return;
+    }
+    if (this.rpClock === null) {
+      this.rpBegan = this.time;
+      this.rpFrom = fxClock;
+      restart = true;
+    }
+    if (restart && cut) cut.set(this.rpFrom, this.time);
+    this.rpClock = fxClock;
   }
 
   // ─────────────────────────────── reset ───────────────────────────────

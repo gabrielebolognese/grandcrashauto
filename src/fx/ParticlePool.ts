@@ -100,6 +100,7 @@ const VERT = /* glsl */ `
 #define RAMP_ROWS ${RAMP_ROWS.toFixed(1)}
 uniform float uFxTime;
 uniform float uClear;
+uniform vec2 uCut;
 uniform sampler2D uRamp;
 uniform vec2 uNearFade;
 uniform float uMinSize;
@@ -118,7 +119,7 @@ varying float vFloor;
 
 void main() {
   float age = uFxTime - a0.w;
-  if (age < 0.0 || age >= a1.w || a0.w < uClear) {
+  if (age < 0.0 || age >= a1.w || a0.w < uClear || (a0.w > uCut.x && a0.w < uCut.y)) {
     gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
     vUv = vec2(0.0);
     vCorner = vec2(0.0);
@@ -273,6 +274,8 @@ void main() {
 export interface FxSharedUniforms {
   uFxTime: { value: number };
   uClear: { value: number };
+  /** Crash replay rewind: particles born in (x, y) are hidden (x = the replayed window start, y = replay start). */
+  uCut: { value: THREE.Vector2 };
   uRamp: { value: THREE.Texture };
   uAtlas: { value: THREE.Texture };
   uNearFade: { value: THREE.Vector2 };

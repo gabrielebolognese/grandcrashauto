@@ -357,15 +357,16 @@ export class FlightHud {
     // Engine buttons.
     const n = ps.engines.length;
     if (n !== this.engineBtns.length) this.buildEngines(n);
+    const wrecked = crashed || !!planes.wrecked; // no engine blasts after a crash (hard landings included)
     for (let i = 0; i < n; i++) {
       const st: PlaneEngineStatus = ps.engines[i].status;
-      const key = `${st}|${crashed}`;
+      const key = `${st}|${wrecked}`;
       if (key === this.engineState[i]) continue;
       this.engineState[i] = key;
       const b = this.engineBtns[i];
       b.dataset.status = st;
       const dead = st === 'destroyed' || st === 'detached';
-      b.disabled = dead || crashed;
+      b.disabled = dead || wrecked;
       const ic = b.querySelector('.eng-ic') as HTMLElement;
       ic.innerHTML = '';
       if (st === 'fire') ic.append(icon('flame'));

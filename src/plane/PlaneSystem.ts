@@ -764,6 +764,7 @@ export class PlaneSystem implements IPlaneSystem {
       } catch (err) {
         reportError('[planes] breakWing failed', err);
       }
+      this.wingBreakFire(visual, joint, mode);
       if (!this.body) return;
     }
     const name = side === 'L' ? 'Left' : 'Right';
@@ -778,6 +779,43 @@ export class PlaneSystem implements IPlaneSystem {
       ctx.events.emit('toast', { text: `✂ ${name} wingtip gone — hold it level!`, ms: 2000 });
     }
   }
+
+  /**
+   * Fire + smoke + light where a wing was torn (user request): on the stub that stays on the plane — fades after
+   * ~15 s for a lost tip, keeps burning for a wing torn in half — and a short-lived one on the piece that falls away.
+   */
+  private wingBreakFire(visual: PlaneVisual, joint: { a: string; b: string; position: THREE.Vector3 }, mode: 'far' | 'half'): void {
+    const fx = this.ctx.fx;
+    if (!fx.attachTrail) return;
+    const size = clamp(visual.dims.span * 0.022, 0.35, 1.5);
+    const W = CONFIG.planes.wingBreak;
+    for (const [name, stub] of [[joint.a, true], [joint.b, false]] as const) {
+      const part = visual.partByName[name];
+      if (!part) continue;
+      const local = joint.position.clone().sub(part.com);
+      const h = fx.attachTrail(part.object, local, { fire: stub ? 1 : 0.8, smoke: 1, size: stub ? size : size * 0.7 });
+      const life = stub ? (mode === 'far' ? W.tipFireS : Infinity) : W.pieceFireS;
+      this.looseFires.push({ h, t: 0, life, fade: stub ? 3 : 2.5, fire: stub ? 1 : 0.8, size: stub ? size : size * 0.7 });
+    }
+  }
+
+  /** Fires that live on their own clock (wing breaks): fade at the end of their life, outlive the flight a while. */
+  private updateLooseFires(dt: number): void {
+    if (!this.looseFires.length) return;
+    for (const f of this.looseFires) {
+      f.t += dt;
+      if (f.t > f.life) {
+        const k = Math.max(0, 1 - (f.t - f.life) / f.fade);
+        f.h.setIntensity(f.fire * k, 0.3 + 0.7 * k, f.size * (0.5 + 0.5 * k));
+        if (k <= 0) {
+          f.h.stop();
+          f.t = -1;
+        }
+      }
+    }
+    this.looseFires = this.looseFires.filter((f) => f.t >= 0);
+  }
+  private looseFires: { h: TrailHandle; t: number; life: number; fade: number; fire: number; size: number }[] = [];
 
   /** Wing failure effects on the flight inputs (before the flight model step). Returns lift scale multiplier. */
   private wingFailInputs(dt: number, fi: { pitch: number; roll: number; yaw: number; assistFactor: number; rollAssist: number; controlScale: THREE.Vector3 }): number {
@@ -1049,11 +1087,16 @@ export class PlaneSystem implements IPlaneSystem {
     }
   }
 
+  /** Crashed or otherwise wrecked (user: no engine blasts after a crash, hard landings included). */
+  get wrecked(): boolean {
+    return this.crashed || this.split || this.gearCollapsed || this.wreckImpact;
+  }
+
   explodeEngine(index: number, failure = false): void {
     const { ctx } = this;
     const body = this.body;
     const visual = this.visual;
-    if (!this.active || !body || !visual || this.split || (this.crashed && !failure)) return;
+    if (!this.active || !body || !visual || this.split || (this.wrecked && !failure)) return;
     const e = this.engines[index - 1];
     if (!e) return;
     // already burning: pressing again fans the fire (fire point) instead of a new explosion
@@ -1797,6 +1840,7 @@ export class PlaneSystem implements IPlaneSystem {
   update(dt: number, alpha: number): void {
     const { ctx } = this;
     const realDt = ctx.engine.realDt;
+    this.updateLooseFires(dt);
     // Real airport appeared after init → drop the temporary airfield and re-park.
     if (this.tempField && ctx.world.data?.airport?.stands?.length) {
       this.setupAirfield();

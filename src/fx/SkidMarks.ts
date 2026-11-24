@@ -12,6 +12,7 @@ import type { FxSharedUniforms } from './ParticlePool';
 const VERT = /* glsl */ `
 uniform float uFxTime;
 uniform float uClear;
+uniform vec2 uCut;
 uniform float uFade;
 uniform float uGougeFade;
 attribute vec4 aSkid;
@@ -22,7 +23,7 @@ void main() {
   float fade = type > 0.5 ? uGougeFade : uFade;
   float age = uFxTime - aSkid.z;
   float a = aSkid.w * (1.0 - smoothstep(fade * 0.5, fade, age));
-  if (aSkid.z < uClear || a <= 0.002) {
+  if (aSkid.z < uClear || (aSkid.z > uCut.x && aSkid.z < uCut.y) || a <= 0.002) {
     gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
     vS = vec4(0.0);
     #ifdef USE_FOG
@@ -156,6 +157,7 @@ export class SkidMarks {
     this.uniforms = {
       uFxTime: shared.uFxTime,
       uClear: shared.uClear,
+      uCut: shared.uCut,
       uDim: shared.uDim,
       uFade: { value: 20 },
       uGougeFade: { value: 60 },

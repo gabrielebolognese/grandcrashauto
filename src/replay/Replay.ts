@@ -10,13 +10,15 @@ interface Frame {
   t: number;
   m: Float32Array; // world matrix per plane part
   a: Float32Array | null; // the on-foot character
+  vs: Float32Array | null; // the plane's visual damage state (torn caps, interiors, charring, crush…)
+  fc: number; // the fx clock (fires born later stay dormant in the replay)
 }
 interface RecEvent {
   t: number;
   kind: EvKind;
   data: Record<string, unknown>;
 }
-type Shot = 'Chase' | 'Flyby' | 'Cockpit' | 'Ground' | 'Orbit' | 'Tail' | 'Top' | 'You';
+type Shot = 'Chase' | 'Side' | 'Ground' | 'Orbit' | 'Tail' | 'Top' | 'You';
 
 const _p = new THREE.Vector3();
 const _p2 = new THREE.Vector3();
@@ -31,11 +33,14 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 /**
  * CRASH REPLAY (user request): always records the last ~14 s of the flown plane — every part's world matrix (so split
- * pieces, tumbling wings and the falling cockpit are all in it), the on-foot character, and the explosion / impact
- * events. After a crash (or any explosion) REPLAY plays it back with the simulation frozen: parts are posed from the
- * recording, the explosions are re-fired (effects + sound only), slow motion around the big moments, and an
- * auto-director cuts between cameras — chase, fly-by, cockpit, ground spectator, orbit, tail, top-down, you —
- * NEXT CAM switches by hand.
+ * pieces, tumbling wings and the falling cockpit are all in it), its visual damage state (torn edges, open cabins,
+ * charring), the fx clock, the on-foot character and the explosion / impact events. After a crash (or any explosion)
+ * REPLAY plays it back with the simulation frozen: parts are posed from the recording, the plane looks intact until
+ * the moment it broke, fires appear only when they started (the fx rewind), explosions are re-fired (effects + sound),
+ * slow motion around the big moments.
+ * ONE camera per pass, complete (user request): chase → side spectator → ground spectator → orbit → tail → top
+ * (→ you, when you were walking); each pass plays the whole clip from one camera, the next pass switches; NEXT CAM
+ * switches and restarts the clip. No cockpit shot (that is a normal game view).
  */
 export class Replay implements IReplay {
   readonly name = 'replay';
@@ -55,17 +60,20 @@ export class Replay implements IReplay {
   private evIdx = 0;
   private shots: Shot[] = [];
   private shot = 0;
-  private shotT = 0;
-  private manual = false;
   private saved: { obj: THREE.Object3D; inv: THREE.Matrix4; i: number }[] = [];
   private keyEvents: RecEvent[] = [];
   private camSaved: { fov: number; near: number } | null = null;
+  private liveState: Float32Array | null = null;
+  private appliedVs: Float32Array | null = null;
   private anchor = new THREE.Vector3();
-  private anchorSet = false;
   private orbitA = 0;
   private subj = new THREE.Vector3();
   private subjVel = new THREE.Vector3();
+  private chaseDir = new THREE.Vector3(0, 0, 1);
+  private camPos = new THREE.Vector3();
+  private camSet = false;
   private size = 30;
+  private subjIdx = 0;
 
   constructor(private ctx: GameContext) {}
 
@@ -107,6 +115,7 @@ export class Replay implements IReplay {
         if (p?.isVector3) p.sub(delta);
       }
       this.anchor.sub(delta);
+      this.camPos.sub(delta);
     });
   }
 
@@ -125,6 +134,11 @@ export class Replay implements IReplay {
 
   get camName(): string {
     return this.shots[this.shot] ?? '';
+  }
+
+  /** While replaying: the replayed plane (the world streams around it, not around the wreck). */
+  get focus(): THREE.Vector3 | null {
+    return this.active ? this.subj : null;
   }
 
   // ───────────────────────────── recording ─────────────────────────────
@@ -159,7 +173,8 @@ export class Replay implements IReplay {
       av.getMatrixAt(0, _m);
       a.set(_m.elements);
     }
-    this.frames.push({ t: this.recT, m, a });
+    const vs = this.visual.captureState?.(f?.vs) ?? null;
+    this.frames.push({ t: this.recT, m, a, vs, fc: ctx.fx.clock ?? 0 });
     while (this.events.length && this.recT - this.events[0].t > R.seconds + 1) this.events.shift();
   }
 
@@ -171,8 +186,16 @@ export class Replay implements IReplay {
     const last = this.frames[this.frames.length - 1].t;
     this.t1 = last + 1.2;
     this.t0 = Math.max(this.frames[0].t, last - CONFIG.replay.seconds);
-    // start a few seconds before the first big moment if there is one
-    this.keyEvents = this.events.filter((e) => e.kind !== 'planeImpact' || (e.data.outcome as string) !== 'landing');
+    // start a few seconds before the first big moment if there is one; slow motion only around the main moments
+    // (engine blasts, the split / tail / total explosion, the first hard impact) — not every secondary pop
+    let impact = false;
+    this.keyEvents = this.events.filter((e) => {
+      if (e.kind === 'engineExplode') return true;
+      if (e.kind === 'planeExplosion') return (e.data.kind as string) !== 'secondary';
+      if ((e.data.outcome as string) === 'landing' || impact) return false;
+      impact = true;
+      return true;
+    });
     const first = this.keyEvents.find((e) => e.t >= this.t0);
     if (first) this.t0 = Math.max(this.t0, first.t - CONFIG.replay.leadIn);
     this.saved = [];
@@ -183,19 +206,22 @@ export class Replay implements IReplay {
       this.saved.push({ obj: o, inv: new THREE.Matrix4().copy(o.parent.matrixWorld).invert(), i });
       o.matrixAutoUpdate = false;
     });
-    const has = (n: string) => !!this.visual?.partByName[n];
-    this.shots = ['Chase', 'Flyby'];
-    if (has('cockpit')) this.shots.push('Cockpit');
-    this.shots.push('Ground', 'Orbit');
-    if (has('fin') || has('tailCone')) this.shots.push('Tail');
+    this.liveState = this.visual.captureState?.() ?? null;
+    this.appliedVs = null;
+    const idx = this.visual.parts.findIndex((p) => p.name === 'fuselageCenter');
+    this.subjIdx = idx >= 0 ? idx : 0;
+    this.subjectAt(this.t0, this.subj); // the streaming focus is valid from the first frame
+    this.shots = ['Chase'];
+    if (this.frames.some((f) => f.a)) this.shots.push('You');
+    this.shots.push('Side', 'Ground', 'Orbit');
+    if (this.visual.partByName.fin || this.visual.partByName.tailCone) this.shots.push('Tail');
     this.shots.push('Top');
-    if (this.frames.some((f) => f.a)) this.shots.splice(2, 0, 'You');
     this.shot = 0;
     this.size = clamp(this.visual.dims.length, 10, 75);
-    this.restart();
     const cam = ctx.engine.camera;
     this.camSaved = { fov: cam.fov, near: cam.near };
-    ctx.events.emit('toast', { text: '🎬 Replay — NEXT CAM to switch angles', ms: 1800 });
+    this.restart();
+    ctx.events.emit('toast', { text: '🎬 Replay — NEXT CAM for another angle', ms: 1800 });
   }
 
   restart(): void {
@@ -203,16 +229,18 @@ export class Replay implements IReplay {
     this.fi = 0;
     this.evIdx = this.events.findIndex((e) => e.t >= this.t0);
     if (this.evIdx < 0) this.evIdx = this.events.length;
-    this.shotT = 0;
-    this.anchorSet = false;
+    this.camSet = false;
+    this.orbitA = 0;
+    this.placeAnchor();
+    // fx rewind: everything that happened after the start of the clip goes (and the previous pass's re-fired blasts)
+    if (this.active) this.ctx.fx.replayClock?.(this.fcAt(this.t0), true);
   }
 
+  /** Next camera: the clip starts again from the beginning, complete, from the new angle. */
   nextCam(): void {
     if (!this.active) return;
     this.shot = (this.shot + 1) % this.shots.length;
-    this.shotT = 0;
-    this.anchorSet = false;
-    this.manual = true;
+    this.restart();
   }
 
   stop(): void {
@@ -224,6 +252,10 @@ export class Replay implements IReplay {
       s.obj.updateMatrix();
     }
     this.saved = [];
+    if (this.liveState && this.visual?.applyState) this.visual.applyState(this.liveState);
+    this.liveState = null;
+    this.appliedVs = null;
+    ctx.fx.replayClock?.(null);
     const av = (ctx.walker as unknown as { avatar?: { object?: THREE.Object3D } }).avatar?.object;
     if (av && !ctx.walker.active) av.visible = false;
     const cam = ctx.engine.camera;
@@ -233,7 +265,6 @@ export class Replay implements IReplay {
       cam.updateProjectionMatrix();
       this.camSaved = null;
     }
-    this.manual = false;
     try {
       ctx.cameraRig.snap();
     } catch {
@@ -263,9 +294,9 @@ export class Replay implements IReplay {
     this.speed = slow;
     this.t += realDt * slow;
     if (this.t > this.t1) {
-      // loop with the next camera
+      // the pass is complete: play it again from the next camera
+      this.shot = (this.shot + 1) % this.shots.length;
       this.restart();
-      if (!this.manual) this.shot = (this.shot + 1) % this.shots.length;
     }
     // frame pair around t
     const F = this.frames;
@@ -280,6 +311,13 @@ export class Replay implements IReplay {
       s.obj.matrix.multiplyMatrices(s.inv, _m);
       s.obj.matrixWorldNeedsUpdate = true;
     }
+    // the plane looks the way it did then (intact until it broke, no charring before the fire…)
+    const vs = u < 0.5 ? a.vs : b.vs;
+    if (vs && vs !== this.appliedVs && this.visual?.applyState) {
+      this.visual.applyState(vs);
+      this.appliedVs = vs;
+    }
+    this.ctx.fx.replayClock?.(a.fc + (b.fc - a.fc) * u);
     // the character
     const avatar = (this.ctx.walker as unknown as { avatar?: { object?: THREE.InstancedMesh; play?: (c: string, f?: number) => void; update?: (dt: number) => void } }).avatar;
     if (avatar?.object) {
@@ -288,7 +326,6 @@ export class Replay implements IReplay {
         avatar.object.setMatrixAt(0, _m);
         avatar.object.instanceMatrix.needsUpdate = true;
         avatar.object.visible = true;
-        _p.setFromMatrixPosition(_m);
         _p2.set(b.a[12] - a.a[12], b.a[13] - a.a[13], b.a[14] - a.a[14]);
         avatar.play?.(_p2.length() * CONFIG.replay.hz > 4 ? 'tumble' : 'idle', 0.2);
         avatar.update?.(realDt * slow);
@@ -301,8 +338,55 @@ export class Replay implements IReplay {
       for (const k of Object.keys(data)) if ((data[k] as THREE.Vector3)?.isVector3) data[k] = (data[k] as THREE.Vector3).clone();
       this.ctx.events.emit(e.kind, data as never);
     }
-    this.updateSubject(a, b, u);
+    this.updateSubject(a, b, u, realDt);
     this.direct(realDt);
+  }
+
+  private fcAt(t: number): number {
+    const F = this.frames;
+    if (!F.length) return this.ctx.fx.clock ?? 0;
+    let i = 0;
+    while (i < F.length - 2 && F[i + 1].t < t) i++;
+    const a = F[i], b = F[Math.min(F.length - 1, i + 1)];
+    const u = b.t > a.t ? clamp((t - a.t) / (b.t - a.t), 0, 1) : 0;
+    return a.fc + (b.fc - a.fc) * u;
+  }
+
+  /** The camera subject (centre fuselage) at recording time t. */
+  private subjectAt(t: number, out: THREE.Vector3): THREE.Vector3 {
+    const F = this.frames;
+    let i = 0;
+    while (i < F.length - 2 && F[i + 1].t < t) i++;
+    const a = F[i], b = F[Math.min(F.length - 1, i + 1)];
+    const u = b.t > a.t ? clamp((t - a.t) / (b.t - a.t), 0, 1) : 0;
+    const o = this.subjIdx * 16;
+    if (o + 16 > a.m.length || o + 16 > b.m.length) return out.set(0, 0, 0);
+    return out.set(a.m[o + 12], a.m[o + 13], a.m[o + 14]).lerp(_s2.set(b.m[o + 12], b.m[o + 13], b.m[o + 14]), u);
+  }
+
+  /** Fixed spectator positions for this pass (side: by the big moment; ground: by where it all ended). */
+  private placeAnchor(): void {
+    const shot = this.shots[this.shot];
+    if (shot !== 'Side' && shot !== 'Ground') return;
+    const S = this.size;
+    const key = this.keyEvents.find((e) => e.t >= this.t0);
+    const tk = shot === 'Side' ? (key ? key.t : (this.t0 + this.t1) / 2) : this.frames[this.frames.length - 1].t;
+    const at = this.subjectAt(tk, new THREE.Vector3());
+    const before = this.subjectAt(Math.max(this.t0, tk - 1.5), new THREE.Vector3());
+    const dir = at.clone().sub(before).setY(0);
+    if (dir.lengthSq() < 1) dir.set(0, 0, 1);
+    dir.normalize();
+    const side = new THREE.Vector3().crossVectors(dir, UP).normalize();
+    if (shot === 'Side') {
+      // beside the path where the big moment happens, a little ahead and above
+      this.anchor.copy(at).addScaledVector(dir, S * 0.8).addScaledVector(side, S * 2 + 40).addScaledVector(UP, S * 0.25 + 6);
+      const gy = this.ground(this.anchor.x, this.anchor.z) + 2;
+      if (this.anchor.y < gy) this.anchor.y = gy;
+    } else {
+      // a spectator standing on the ground off to the side of the crash site
+      this.anchor.copy(at).addScaledVector(side, -(S * 2.5 + 70)).addScaledVector(dir, -S);
+      this.anchor.y = this.ground(this.anchor.x, this.anchor.z) + 1.7;
+    }
   }
 
   private lerpMat(A: Float32Array, B: Float32Array, o: number, u: number, out: THREE.Matrix4): void {
@@ -314,18 +398,21 @@ export class Replay implements IReplay {
     out.compose(_p, _q, _s);
   }
 
-  /** What the cameras look at: the cockpit / centre fuselage (else the first part), velocity from the recording. */
-  private updateSubject(a: Frame, b: Frame, u: number): void {
-    const vis = this.visual!;
-    const idx = vis.parts.findIndex((p) => p.name === 'fuselageCenter');
-    const i = idx >= 0 ? idx : 0;
-    const o = i * 16;
+  /** What the cameras look at: the centre fuselage (else the first part), velocity from the recording. */
+  private updateSubject(a: Frame, b: Frame, u: number, realDt: number): void {
+    const o = this.subjIdx * 16;
     _p.set(a.m[o + 12], a.m[o + 13], a.m[o + 14]);
     _p2.set(b.m[o + 12], b.m[o + 13], b.m[o + 14]);
     this.subj.copy(_p).lerp(_p2, u);
     const dt = Math.max(1e-3, b.t - a.t);
     _v.subVectors(_p2, _p).divideScalar(dt);
     if (_v.lengthSq() > 0.01) this.subjVel.lerp(_v, 0.25);
+    // the chase direction turns slowly (a tumbling piece does not whip the camera around)
+    _v.copy(this.subjVel).setY(this.subjVel.y * 0.5);
+    if (_v.lengthSq() > 4) {
+      _v.normalize();
+      this.chaseDir.lerp(_v, 1 - Math.exp(-realDt * 1.5)).normalize();
+    }
   }
 
   private partPos(name: string, out: THREE.Vector3): THREE.Vector3 | null {
@@ -346,63 +433,31 @@ export class Replay implements IReplay {
 
   private direct(realDt: number): void {
     const { ctx } = this;
-    const R = CONFIG.replay;
-    this.shotT += realDt;
-    if (!this.manual && this.shotT > R.shotSeconds) {
-      this.shot = (this.shot + 1) % this.shots.length;
-      this.shotT = 0;
-      this.anchorSet = false;
-    }
     const cam = ctx.engine.camera;
     const S = this.size;
     const subj = this.subj;
-    const vel = this.subjVel;
-    const dir = _v.copy(vel);
-    if (dir.lengthSq() < 1) dir.set(0, 0, 1);
-    dir.normalize();
     const shot = this.shots[this.shot];
     const eye = _p.copy(subj);
     const look = _p2.copy(subj);
     let fov = 55;
+    let smooth = 0; // seconds of position smoothing (0 = locked)
     switch (shot) {
       case 'Chase':
-        eye.addScaledVector(dir, -S * 1.5).addScaledVector(UP, S * 0.35);
+        eye.addScaledVector(this.chaseDir, -S * 1.5).addScaledVector(UP, S * 0.35);
+        smooth = 0.25;
         break;
-      case 'Flyby':
+      case 'Side':
       case 'Ground': {
-        if (!this.anchorSet) {
-          this.anchorSet = true;
-          const side = _s.crossVectors(dir, UP).normalize();
-          if (shot === 'Flyby') {
-            // ahead of the subject along its path, off to the side
-            this.anchor.copy(subj).addScaledVector(vel, 1.6).addScaledVector(side, S * 1.3).addScaledVector(UP, S * 0.15);
-          } else {
-            // a spectator on the ground below / ahead of where the plane is going (telephoto)
-            const ahead = _s2.copy(subj).addScaledVector(vel, 2.5);
-            this.anchor.copy(ahead).addScaledVector(side, S * 2.5 + 60);
-            this.anchor.y = this.ground(this.anchor.x, this.anchor.z) + 1.7;
-          }
-        }
         eye.copy(this.anchor);
         // long lens: keep the plane a good size in frame however far it is
         const d = eye.distanceTo(subj);
-        fov = clamp((2 * Math.atan((S * 0.9) / Math.max(1, d)) * 180) / Math.PI, 6, shot === 'Ground' ? 50 : 60);
-        break;
-      }
-      case 'Cockpit': {
-        const p = this.visual?.partByName.cockpit;
-        if (p) {
-          p.object.updateWorldMatrix(true, false);
-          eye.copy(this.visual!.cockpitEye).sub(p.com).applyMatrix4(p.object.matrixWorld);
-          p.object.matrixWorld.decompose(_s, _q, _s2);
-          look.set(0, 0, 30).applyQuaternion(_q).add(eye);
-          fov = 70;
-        }
+        fov = clamp((2 * Math.atan((S * 0.9) / Math.max(1, d)) * 180) / Math.PI, 3, shot === 'Ground' ? 50 : 58);
         break;
       }
       case 'Orbit':
-        this.orbitA += realDt * 0.45;
+        this.orbitA += realDt * 0.35;
         eye.set(subj.x + Math.cos(this.orbitA) * S * 1.6, subj.y + S * 0.45, subj.z + Math.sin(this.orbitA) * S * 1.6);
+        smooth = 0.15;
         break;
       case 'Tail': {
         const tp = this.partPos('fin', _s) ?? this.partPos('tailCone', _s);
@@ -416,21 +471,26 @@ export class Replay implements IReplay {
       }
       case 'Top':
         eye.set(subj.x + S * 0.4, subj.y + S * 3.2, subj.z + S * 0.4);
+        smooth = 0.2;
         break;
       case 'You': {
         const f = this.frames[this.fi];
         if (f?.a) {
           look.set(f.a[12], f.a[13] + 1, f.a[14]);
-          eye.copy(look).addScaledVector(dir, -5).addScaledVector(UP, 2);
+          eye.copy(look).addScaledVector(this.chaseDir, -5).addScaledVector(UP, 2);
           fov = 62;
+          smooth = 0.15;
         }
         break;
       }
     }
     const gy = this.ground(eye.x, eye.z) + 1;
     if (eye.y < gy) eye.y = gy;
-    cam.position.copy(eye);
-    _m.lookAt(eye, look, UP);
+    if (!this.camSet || smooth <= 0) this.camPos.copy(eye);
+    else this.camPos.lerp(eye, 1 - Math.exp(-realDt / smooth));
+    this.camSet = true;
+    cam.position.copy(this.camPos);
+    _m.lookAt(this.camPos, look, UP);
     cam.quaternion.setFromRotationMatrix(_m);
     if (Math.abs(cam.fov - fov) > 0.01 || cam.near !== 0.1) {
       cam.fov = fov;
@@ -438,12 +498,5 @@ export class Replay implements IReplay {
       cam.updateProjectionMatrix();
     }
     cam.updateMatrixWorld();
-  }
-
-  private lastSubject(out: THREE.Vector3): THREE.Vector3 {
-    const f = this.frames[this.frames.length - 1];
-    const vis = this.visual!;
-    const idx = Math.max(0, vis.parts.findIndex((p) => p.name === 'fuselageCenter'));
-    return out.set(f.m[idx * 16 + 12], f.m[idx * 16 + 13], f.m[idx * 16 + 14]);
   }
 }
