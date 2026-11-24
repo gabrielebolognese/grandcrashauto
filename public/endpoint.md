@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 3 · 2026-11-24
+Endpoint version: 4 · 2026-11-24
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -207,7 +207,7 @@ With the stick centred, the assists hold the flight path and keep the wings leve
 
 | Command | Effect |
 |---|---|
-| `walk` | leave the seat and walk in the cabin |
+| `walk` | leave the seat and walk in the cabin. Walking is about 3.6 m/s inside (5.4 running) and twice that outside the plane. In first person the view bobs with each step and your hand swings in the lower right, Minecraft-style, and shows in the footage. To walk with commands, use `hold moveY 1 3` (forward 3 s; −1 = back) and `hold moveX 1 2` (right; −1 = left) |
 | `window` | look out of the window |
 | `view` | switch between first and third person |
 | `pilot` | interact or sit |
@@ -403,6 +403,12 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v4 · 2026-11-24:** on foot.
+  - Faster walking: the old sprint is the walk now, and speed doubles outside the plane.
+  - First person has a head bob and a visible blocky hand that swings with each step.
+  - Anti-noclip in the cabin: the body and the eye stay inside the curved walls, bins and ceiling, with no tunnelling through seats, even when thrown around.
+  - Fixed: the commands `hold moveX` / `hold moveY` were rejected before.
 
 - **v3 · 2026-11-24:** trees break and wrecks stay.
   - Trees break: plane parts and wreck pieces clipping trees knock them over in the direction of travel, and fast low hits smash them.

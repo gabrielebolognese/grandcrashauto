@@ -5,6 +5,7 @@ import { GLOBAL_UNIFORMS } from '../core/uniforms';
 import type { ControlState } from '../core/Input';
 import type { AvatarHandle, GameContext, IWalker } from '../game/contracts';
 import type { PlaneCabin, PlaneTypeId, PlaneVisual, TrackedPlane } from '../plane/types';
+import { FpHand } from './FpHand';
 
 type Mode = 'off' | 'cabin' | 'fall' | 'ground';
 const G = 9.81;
@@ -78,6 +79,11 @@ export class Walker implements IWalker {
   private shakeT = 0;
   private shakeK = 0;
   private focusV = new THREE.Vector3();
+  // first person: head bob + the hand (user request)
+  private hand: FpHand | null = null;
+  private bob = 0;
+  private bobK = 0;
+  private floatK = 0;
 
   constructor(private ctx: GameContext) {}
 
@@ -89,6 +95,8 @@ export class Walker implements IWalker {
     } catch {
       this.avatar = null;
     }
+    this.hand = new FpHand();
+    ctx.engine.scene.add(this.hand.root);
     ctx.events.on('planeSpawned', () => this.active && this.stop(false));
     ctx.events.on('modeChanged', ({ mode }) => mode !== 'plane' && this.active && this.stop(false));
     ctx.events.on('originShift', ({ delta }) => {
@@ -174,6 +182,7 @@ export class Walker implements IWalker {
     const { ctx } = this;
     if (!this.active) return;
     this.mode = 'off';
+    this.setHandVisible(false);
     this.visual?.setInteriorVisible?.(false);
     ctx.planes.walking = false;
     if (this.avatar) this.avatar.visible = false;
@@ -212,6 +221,11 @@ export class Walker implements IWalker {
 
   toggleView(): void {
     this.firstPerson = !this.firstPerson;
+  }
+
+  /** The crash replay hides the first-person hand (the walker is not updated while it plays). */
+  setHandVisible(on: boolean): void {
+    if (this.hand) this.hand.root.visible = on;
   }
 
   lookOutWindow(): void {
@@ -330,6 +344,7 @@ export class Walker implements IWalker {
     if (this.mode === 'fall' || this.mode === 'ground') this.updateWorld(dt, inp);
     if ((this.mode as Mode) === 'off') return;
     this.updateAvatar(dt);
+    this.updateBob(dt);
     this.updateCamera(dt);
   }
 
@@ -352,7 +367,6 @@ export class Walker implements IWalker {
     const g = this.gApp;
     const floorY = cab.floorY;
     const ceil = this.sample(cab.ceil, this.p.z);
-    const hw = this.sample(cab.halfW, this.p.z);
     const headroom = Math.min(1.75, ceil - floorY - 0.02);
 
     // grab = hold a seat (sit down in the nearest one); window seats stay until you move
@@ -414,8 +428,12 @@ export class Walker implements IWalker {
         }
       }
       if (this.v.length() > W.maxSpeed) this.v.setLength(W.maxSpeed);
-      this.p.addScaledVector(this.v, dt);
-      if (this.collide(floorY, ceil, hw, headroom)) return;
+      // anti-noclip: small sub-steps, colliding after each one (no tunnelling through seats, walls or the ends)
+      const n = Math.min(12, Math.max(1, Math.ceil((this.v.length() * dt) / 0.08)));
+      for (let i = 0; i < n; i++) {
+        this.p.addScaledVector(this.v, dt / n);
+        if (this.collide(floorY, headroom)) return;
+      }
     }
     this.jumpHeld = inp.jump;
     this.sec = clamp(this.secAt(this.p.z), this.chain.front, this.chain.back);
@@ -424,8 +442,9 @@ export class Walker implements IWalker {
   }
 
   /** Cabin collisions; returns true when you went out of an open end (now falling). */
-  private collide(floorY: number, ceil: number, hw: number, headroom: number): boolean {
+  private collide(floorY: number, headroom: number): boolean {
     const p = this.p, v = this.v, c = this.chain;
+    const ceil = this.sample(this.cabin!.ceil, p.z);
     const beyond = (c.openFront && p.z > c.zMax) || (c.openRear && p.z < c.zMin);
     if (!beyond) {
       if (p.y < floorY) {
@@ -437,12 +456,13 @@ export class Walker implements IWalker {
         p.y = Math.max(floorY, ceil - top);
         if (v.y > 0) v.y *= -0.2;
       }
-      const lim = Math.max(0.05, hw - R);
+      // the whole body (feet, waist, head) stays inside the curved walls and under the overhead bins
+      const lim = this.wallLimit(p.z, p.y, top);
       if (Math.abs(p.x) > lim) {
         p.x = Math.sign(p.x) * lim;
         v.x *= -0.25;
       }
-      if (p.y < floorY + 0.75) this.pushOutOfSeats();
+      if (p.y < floorY + 1.1) this.pushOutOfSeats(floorY);
     }
     if (!c.openFront && p.z > c.zMax - R - 0.05) {
       p.z = c.zMax - R - 0.05;
@@ -459,13 +479,24 @@ export class Walker implements IWalker {
     return false;
   }
 
-  private pushOutOfSeats(): void {
+  /** Max |x| of the body centre at (z, feet y) for a body `top` m tall: inside the hull and the bins at every height. */
+  private wallLimit(z: number, y: number, top: number): number {
+    const cab = this.cabin!;
+    const f = cab.halfWidthAt;
+    if (!f) return Math.max(0.05, this.sample(cab.halfW, z) - R);
+    const w = Math.min(f(z, y + 0.1), f(z, y + top * 0.5), f(z, y + Math.max(0.2, top - 0.05)));
+    return Math.max(0.05, w - R);
+  }
+
+  private pushOutOfSeats(floorY: number): void {
     const seats = this.cabin!.seats;
     const p = this.p;
     const hx = 0.23;
+    // below the seat pans the whole seat blocks; up to the top of the backs only the (tilted) back rest
+    const low = p.y < floorY + 0.5;
     for (const s of seats) {
       if (Math.abs(s.z - p.z) > 0.9 || Math.abs(s.x - p.x) > 0.8) continue;
-      const x0 = s.x - hx, x1 = s.x + hx, z0 = s.z - 0.24, z1 = s.z + 0.3;
+      const x0 = s.x - hx, x1 = s.x + hx, z0 = low ? s.z - 0.24 : s.z - 0.33, z1 = low ? s.z + 0.3 : s.z - 0.1;
       const cx = clamp(p.x, x0, x1), cz = clamp(p.z, z0, z1);
       const dx = p.x - cx, dz = p.z - cz;
       const d2 = dx * dx + dz * dz;
@@ -674,7 +705,7 @@ export class Walker implements IWalker {
         wv.z = approach(wv.z, 0, 8 * dt);
         mx = mz = 0;
       }
-      const speed = (inp.run ? W.run : W.walk) * (this.inWater ? 0.5 : 1);
+      const speed = (inp.run ? W.run : W.walk) * W.outsideMul * (this.inWater ? 0.5 : 1);
       if (this.landStage === 0) {
         wv.x = approach(wv.x, mx * speed, W.accel * dt);
         wv.z = approach(wv.z, mz * speed, W.accel * dt);
@@ -805,6 +836,18 @@ export class Walker implements IWalker {
       if (this.firstPerson) {
         const ey = this.seat >= 0 ? W.sitEye : this.floating ? 0.9 : Math.min(W.eye, headroom - 0.1);
         eye.copy(this.p).setY(this.p.y + ey).addScaledVector(dir, this.seat >= 0 ? 0.02 : 0.1);
+        this.applyBob(eye);
+        // anti-noclip: the eye never leaves the cabin (walls, bins, ceiling, floor, closed ends)
+        const c = this.chain;
+        if (!c.openFront) eye.z = Math.min(eye.z, c.zMax - 0.12);
+        if (!c.openRear) eye.z = Math.max(eye.z, c.zMin + 0.12);
+        const inside = (c.openFront || eye.z < c.zMax) && (c.openRear || eye.z > c.zMin) && eye.z <= cab.frontZ && eye.z >= cab.rearZ;
+        if (inside) {
+          eye.y = Math.min(eye.y, this.sample(cab.ceil, eye.z) - 0.1);
+          eye.y = Math.max(eye.y, cab.floorY + 0.25);
+          const lim = (cab.halfWidthAt ? cab.halfWidthAt(eye.z, eye.y) : this.sample(cab.halfW, eye.z)) - 0.04;
+          if (Math.abs(eye.x) > lim) eye.x = Math.sign(eye.x) * Math.max(0, lim);
+        }
       } else {
         const tgt = _v3.copy(this.p).setY(this.p.y + (this.seat >= 0 ? 1.0 : 1.35));
         const c = this.chain;
@@ -815,7 +858,7 @@ export class Walker implements IWalker {
           const hw = this.sample(cab.halfW, zc);
           const top = this.sample(cab.ceil, zc) - 0.12;
           // overhead bins hang over the seats: high up, stay toward the aisle
-          const lim = eye.y > cab.floorY + 1.4 ? hw * 0.55 : hw - 0.2;
+          const lim = cab.halfWidthAt ? cab.halfWidthAt(zc, eye.y) - 0.15 : eye.y > cab.floorY + 1.4 ? hw * 0.55 : hw - 0.2;
           const insideZ = (c.openFront || eye.z < c.zMax - 0.2) && (c.openRear || eye.z > c.zMin + 0.2);
           if (Math.abs(eye.x) < lim && eye.y < top && eye.y > cab.floorY + 0.3 && insideZ) break;
         }
@@ -831,6 +874,7 @@ export class Walker implements IWalker {
       if (this.firstPerson) {
         const ey = lying ? 0.35 : this.mode === 'fall' ? 0.9 : this.inWater ? 1.4 : W.eye;
         eye.copy(this.wp).setY(this.wp.y + ey).addScaledVector(dir, 0.1);
+        this.applyBob(eye);
       } else {
         const tgt = _v3.copy(this.wp).setY(this.wp.y + 1.2);
         eye.copy(tgt).addScaledVector(dir, -W.tpDistWorld);
@@ -857,9 +901,44 @@ export class Walker implements IWalker {
       cam.updateProjectionMatrix();
     }
     cam.updateMatrixWorld();
+    // the first-person hand
+    const hand = this.hand;
+    if (hand) {
+      const show = this.firstPerson && this.seat < 0 && !(this.mode === 'ground' && this.landStage > 0);
+      hand.root.visible = show;
+      if (show) {
+        const sp = this.mode === 'cabin' ? Math.hypot(this.v.x, this.v.z) : Math.hypot(this.wv.x, this.wv.z);
+        const runK = clamp((sp - W.walk * 1.05) / (W.walk * 0.5), 0, 1);
+        const night = GLOBAL_UNIFORMS.uNight.value;
+        const fill = this.mode === 'cabin' ? 0.1 + 0.6 * smoothstep(0.12, 0.6, night) : 0.22 * night;
+        hand.update(cam, dt, this.bob, this.bobK, runK, this.floatK, fill);
+      }
+    }
+  }
+
+  /** Head bob while walking (user request): one up-down per step, a gentle side sway per stride. */
+  private applyBob(eye: THREE.Vector3): void {
+    if (this.bobK < 0.01) return;
+    const k = this.bobK;
+    const r = _v3.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
+    eye.y += Math.sin(this.bob * 2) * 0.035 * k;
+    eye.addScaledVector(r, Math.sin(this.bob) * 0.025 * k);
+  }
+
+  /** Walk cycle for the bob and the hand: steps of ~0.9 m, at most ~5.5 steps a second. */
+  private updateBob(dt: number): void {
+    const cabin = this.mode === 'cabin';
+    const sp = cabin ? Math.hypot(this.v.x, this.v.z) : Math.hypot(this.wv.x, this.wv.z);
+    const grounded = cabin ? this.seat < 0 && !this.floating && !this.stumbling : this.mode === 'ground' && this.onGround && this.landStage === 0;
+    const want = grounded ? clamp(sp / 2.2, 0, 1) : 0;
+    this.bobK += (want - this.bobK) * Math.min(1, dt * 6);
+    this.bob += dt * Math.PI * Math.min(sp / 0.9, 5.5);
+    const fl = cabin ? (this.floating || this.stumbling ? 1 : 0) : this.mode === 'fall' ? 1 : 0;
+    this.floatK += (fl - this.floatK) * Math.min(1, dt * 4);
   }
 
   dispose(): void {
     this.avatar?.dispose();
+    this.hand?.dispose();
   }
 }

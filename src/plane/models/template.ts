@@ -843,6 +843,23 @@ function buildCabin(D: Design, zr: Record<string, [number, number]>, com: THREE.
   const aisles: number[] = [];
   for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] > 0.62) aisles.push((xs[i] + xs[i - 1]) / 2 - com.x);
   if (!aisles.length) aisles.push(0);
+  // walkable half-width at any height: the fuselage curve, and the overhead bins along both walls
+  const R = Math.max(0.5, P.w((P.zNose + P.zTail) / 2));
+  const bins = D.type !== 'prop';
+  const halfWidthAt = (zr: number, yr: number): number => {
+    const z = clamp3(zr + com.z, zRear, zFront);
+    const y = yr + com.y;
+    let w = widthAt(P, z, y) - 0.12;
+    if (bins) {
+      const pa = profileAt(P, z);
+      const by = pa.mid + pa.top * 0.5;
+      if (y > by - R * 0.11 - 0.05 && y < by + R * 0.11 + 0.05) {
+        const inner = widthAt(P, z, by) - R * 0.2 - R * 0.16 - 0.06;
+        if (inner > 0.4) w = Math.min(w, inner);
+      }
+    }
+    return Math.max(0.12, w);
+  };
   return {
     floorY: fy - com.y,
     sections: (['fuselageFwd', 'fuselageCenter', 'fuselageRear'] as const).map((p) => ({ part: p, z0: zr[p][0] - com.z, z1: zr[p][1] - com.z })),
@@ -854,7 +871,12 @@ function buildCabin(D: Design, zr: Record<string, [number, number]>, com: THREE.
     seats: seatsD.map((s) => ({ x: s.x - com.x, y: s.y - com.y, z: s.z - com.z })),
     pitch: D.seatPitch,
     aisles,
+    halfWidthAt,
   };
+}
+
+function clamp3(v: number, a: number, b: number): number {
+  return v < a ? a : v > b ? b : v;
 }
 
 function cloneBuilder(b: GeoBuilder): GeoBuilder {

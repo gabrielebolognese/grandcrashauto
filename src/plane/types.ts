@@ -107,6 +107,11 @@ export interface PlaneCabin {
   /** Seat pitch (m) and aisle centre lines (root x). */
   pitch: number;
   aisles: number[];
+  /**
+   * Walkable half-width at any root height y (fuselage curve + overhead bins, 0.12 m in from the skin): the walker
+   * keeps its whole body and its eye inside the cabin with it (anti-noclip).
+   */
+  halfWidthAt?(z: number, y: number): number;
 }
 
 /** Procedural plane visual built by the planemodels module. */

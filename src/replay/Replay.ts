@@ -207,6 +207,7 @@ export class Replay implements IReplay {
       o.matrixAutoUpdate = false;
     });
     this.liveState = this.visual.captureState?.() ?? null;
+    (ctx.walker as unknown as { setHandVisible?: (on: boolean) => void }).setHandVisible?.(false);
     this.appliedVs = null;
     const idx = this.visual.parts.findIndex((p) => p.name === 'fuselageCenter');
     this.subjIdx = idx >= 0 ? idx : 0;

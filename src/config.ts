@@ -775,7 +775,8 @@ export const CONFIG = {
   // feel (the rest: you fall faster than the wreck — cinematic); minFallG: a split/diving plane never lets you float
   // up (min downward pull, × g). suction: m/s² pull toward a torn-open end at speed (within suctionRange m).
   walk: {
-    walk: 1.6, run: 3.6, accel: 12, jump: 3.4, eye: 1.62, sitEye: 1.16, friction: 0.85, minSupport: 2.5,
+    // user: the old sprint is the walk now; outside the plane everything is twice as fast (room to walk around)
+    walk: 3.6, run: 5.4, outsideMul: 2, accel: 14, jump: 3.4, eye: 1.62, sitEye: 1.16, friction: 0.85, minSupport: 2.5,
     splitCoupling: 0.35, minFallG: 0.35, maxFrameAccel: 60, suction: 14, suctionRange: 9, maxSpeed: 26,
     airDrag: 0.0036, skydiveSteer: 4, hardLanding: 9, lookSens: 0.0024, touchLook: 1.9,
     tpDist: 2.4, tpDistWorld: 4.2, fovFP: 74, fovTP: 66,

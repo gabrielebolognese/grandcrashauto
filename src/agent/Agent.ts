@@ -536,9 +536,9 @@ export class Agent implements IAgent {
           return `rudder ${dir}`;
         }
         case 'hold': {
-          const axis = w[1] as Axis;
           const ok: Axis[] = ['pitch', 'roll', 'yaw', 'throttle', 'brake', 'steer', 'handbrake', 'turbo', 'moveX', 'moveY'];
-          if (!ok.includes(axis)) return `error: hold <${ok.join('|')}> <value -1..1> <seconds>`;
+          const axis = ok.find((a) => a.toLowerCase() === w[1]); // commands are lowercased (moveX → movex)
+          if (!axis) return `error: hold <${ok.join('|')}> <value -1..1> <seconds>`;
           this.hold(axis, clamp(num(2, 1), -1, 1), num(3, 1));
           return `holding ${axis} ${num(2, 1)} for ${t1(num(3, 1))} s`;
         }
