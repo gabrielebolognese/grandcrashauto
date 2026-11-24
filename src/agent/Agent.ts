@@ -514,7 +514,7 @@ export class Agent implements IAgent {
           if (!M.controlling || Number.isFinite(id)) {
             if (!Number.isFinite(id)) return 'error: shoot <plane #> [from <site>] [2 | all] [spread] [aim nose|tail|left|right|middle]  ("traffic" lists the planes)';
             const fi = w.indexOf('from');
-            const want = fi >= 0 ? w[fi + 1] ?? '' : '';
+            const want = this.turretAlias(fi >= 0 ? w[fi + 1] ?? '' : '');
             const p = M.sky.find((q) => q.id === id);
             if (!p) return `error: no plane #${id}`;
             const sites = [...M.sites].filter((s) => s.ready > 0 && (!want || s.id === want || s.id.includes(want) || s.kind.toLowerCase().includes(want) || s.name.toLowerCase().includes(want)));
@@ -558,7 +558,7 @@ export class Agent implements IAgent {
         case 'nuke': {
           const M = ctx.missiles;
           if (!M) return 'error: no silo';
-          const id = w[1] === 'nearest' ? this.nearestSky('silo') : parseInt((w[1] ?? '').replace('#', ''), 10);
+          const id = w[1] === 'nearest' ? this.nearestSky('nuke') : parseInt((w[1] ?? '').replace('#', ''), 10);
           if (Number.isFinite(id) && !Number.isFinite(parseFloat(w[2] ?? ''))) return M.nuke(id);
           const t = this.findTarget(w.slice(1));
           if (!t) return 'error: nuke <plane #> | nuke <place> | nuke <x z>';
@@ -920,9 +920,16 @@ export class Agent implements IAgent {
   }
 
 /** The sky plane nearest to a site (by id / kind / name, '' = any ready site, 'silo', or 'me' = your position). */
+  /** Turret names the commands accept (old names too): twin / duo, quad, octo, nuke / silo. */
+  private turretAlias(w: string): string {
+    const A: Record<string, string> = { titan: 'twin', duo: 'twin', lancer: 'quad', hornet: 'octo', swarm: 'octo', pike: 'quad', silo: 'nuke', doom: 'nuke' };
+    return A[w] ?? w;
+  }
+
   private nearestSky(from: string): number {
     const M = this.ctx.missiles;
     if (!M) return NaN;
+    from = this.turretAlias(from);
     const o = this.ctx.origin.offset;
     const pts: { x: number; z: number }[] = [];
     if (from === 'me') {

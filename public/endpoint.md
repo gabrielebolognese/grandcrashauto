@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 7 · 2026-11-24
+Endpoint version: 8 · 2026-11-24
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -99,14 +99,18 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
   one (often the rear half), then rises into an aerial view of the wreck. Usually the best footage comes from
   leaving it alone.
 - **Sky traffic:** jumbos, airliners, private jets and a few prop planes always fly across the area in different directions, at their own heights. They show on the map, and each one is a real plane that breaks apart, falls and crashes when hit.
-- **Missiles and nukes:** 7 air-defence sites, each one a teleport place. In the city: Park (Quad Lancer), Beach (Hornet Swarm), Airport (Hexa Pike). In the mountains: Ridge Titans, Peak Swarm, Pass Lancer, and the Doomsday Silo. Five kinds:
-  - **Twin Titan:** 2 huge missiles, fire one or both.
-  - **Quad Lancer:** 4 medium missiles.
-  - **Hornet Swarm:** 8 small missiles, one at a time, the whole salvo, or spread over the plane.
-  - **Hexa Pike:** 6 missiles fired in pairs.
-  - **Doomsday Silo:** 1 nuke that wrecks everything flying within about 1.8 km and flattens the trees below.
+- **Missiles and nukes:** 6 air-defence **turrets**, all up in the mountains north and east of the city (none in the city), each a teleport place. A turret is a pedestal with a rotating head and a launcher box:
+  - **Twin turret:** 2 big missiles side by side; S fires one, ALL fires both.
+  - **Quad turret:** 4 missiles in a square.
+  - **Octo turret:** 8 small missiles in a 4×2 block. ALL fires the salvo, and SPREAD makes them hit different spots.
+  - **Nuke turret:** 2 nukes side by side. Everything flying within about 1.8 km of the hit goes, and the trees below are flattened.
 
-  On the map, tap a plane, then SHOOT and pick a site, and you are in its **control room**: the view from behind the launcher, the target marked from any distance. Aim roughly at it and press S. **Missiles always hit**; while one flies you steer where (nose, tail, a wing, an engine). Each S fires again, and BACK returns to your car or plane while the missiles keep homing. The replay shows the missile run and the plane going down. Flying, you can also RAM a sky plane on autopilot, or just crash into one.
+  **How to shoot:** on the map, tap a plane, then SHOOT. The map zooms out and the turrets glow with a line to the target; **tap a turret on the map** and you are in its control room, looking from behind it.
+  - Aim with drag, A/D/W or the arrows, and press S to fire. **No lock is needed.**
+  - Aimed at the red marker, it locks and **always hits**; the same keys then pick where (nose, tail, a wing, an engine).
+  - Without a lock the missile flies straight and the keys steer it. Its seeker locks on if the plane comes in front of it.
+  - Each S fires again. BACK returns to your car or plane while the missiles keep going.
+  - The replay shows the missile run and the plane going down. Flying, you can also RAM a sky plane on autopilot, or just crash into one.
 - **The beach concert** (west end of the beach) has a big crowd and a band. A crash there knocks people flying and sends the rest running and screaming, and the stage collapses: it is no longer an indestructible block.
 - **Cockpit and wing views** look freely in 360° (drag), and stay where you looked.
 - **Passengers and crew** (airliner, jumbo, private jet):
@@ -202,15 +206,15 @@ With the stick centred, the assists hold the flight path and keep the wings leve
 | Command | Effect |
 |---|---|
 | `traffic` | lists the sky planes: #number, type, height, heading, speed, distance |
-| `sites` | lists the air-defence sites: id, kind, missiles ready |
-| `shoot nearest` · `shoot 3` | into the control room of the best site (nearest ready site, or `from <site id | kind>`, e.g. `from titan` or `from silo`), aimed and locked, and fires. Options: `2` (missiles) · `all` (salvo) · `spread` (different spots) · `aim nose|front|middle|rear|tail|left|right|engine` (where the first one hits). The camera rides behind the first missile, then watches the plane go down |
+| `sites` | lists the turrets: id, kind, missiles ready |
+| `shoot nearest` · `shoot 3` | into the control room of the best turret (the nearest ready one, or `from twin|quad|octo|nuke` or a turret id), aimed and locked, and fires. Options: `2` (missiles) · `all` (salvo) · `spread` (different spots) · `aim nose|front|middle|rear|tail|left|right|engine` (where the first one hits). The camera rides behind the first missile, then watches the plane go down |
 | `shoot` (already in a control room) | fires again with the same rule |
 | `steer <u> <v>` | moves the first missile's hit point: u = −1 left wing … +1 right wing, v = −1 tail … +1 nose |
 | `back` | leaves the control room (missiles keep homing) |
 | `ram nearest` · `ram 3` · `ram off` | flying: your plane's autopilot flies into that sky plane. It turns into you near the end, so a ram really connects |
-| `nuke nearest` · `nuke 3` · `nuke beach` · `nuke x z` | a nuke from the Doomsday Silo at a sky plane, or an airburst over a place. The silo reloads in 150 s |
+| `nuke nearest` · `nuke 3` · `nuke beach` · `nuke x z` | a nuke from the Nuke turret at a sky plane, or an airburst over a place. Each of its 2 tubes reloads in 120 s |
 
-Plane numbers change every session, so scripted scenes should use `nearest`. Sites reload tube by tube (Titan 40 s, Lancer 25 s, Pike 18 s, Hornet 12 s).
+Plane numbers change every session, so scripted scenes should use `nearest`. Turrets reload tube by tube (Twin 35 s, Quad 22 s, Octo 12 s, Nuke 120 s).
 
 **Crash on a target** (the easy way to aim a crash)
 
@@ -351,8 +355,8 @@ want to cut it short.
 | Engines one by one | `fly jumbo; engine 1; wait 3; engine 2; wait 3; engine 3; wait 3; engine 4` | 20 s | four separate explosions, then a powerless glide |
 | Walk while it splits | `fly jumbo agl 500; walk; wait 4; split` | 15 s | in the cabin when it tears open |
 | Shoot down the nearest plane | `shoot nearest aim left; wait 14; replay` | 30 s | missile cam from launch to impact (left wing), the airliner breaks and falls burning, then the replay |
-| Hornet salvo | `shoot nearest from hornet all spread` | 20 s | 8 small missiles streak up and hit all over the plane |
-| Nuke a jumbo | `shoot nearest from silo` | 30 s | the nuke climbs out of the silo, then a blinding flash and a fireball; every plane nearby breaks apart |
+| Octo salvo | `shoot nearest from octo all spread` | 20 s | 8 small missiles streak up and hit all over the plane |
+| Nuke a jumbo | `shoot nearest from nuke` | 30 s | the nuke leaves the turret, then a blinding flash and a fireball; every plane nearby breaks apart |
 | Mid-air ram | `fly jumbo agl 1700 speed 170; wait 2; ram nearest` | 30–40 s | your jumbo hunts a sky plane and they collide |
 | Jumbo into the concert | `fly jumbo target concert in 12` | 20 s | in from the sea, slams into the beach concert: the stage collapses, the crowd is thrown, the band falls |
 | Tail off over the city | `fly airliner agl 250 over city; wait 4; tail; wait 1; cam` | 20 s | the tail goes, and the plane falls into the city |
@@ -451,6 +455,13 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v8 · 2026-11-24:** shooting reworked.
+  - The launchers are now **turrets** in the mountains only: Twin (2 side by side), Quad (4 in a square), Octo (8 in 4×2) and Nuke (2 nukes). There are no trucks, silos or city launchers any more.
+  - The turret is picked **on the map** (tap it after SHOOT).
+  - Aiming works: the keys no longer also drive your car or plane.
+  - S fires **without a lock** too. Locked missiles always hit; unlocked ones fly straight and lock on if the plane crosses their seeker.
+  - Agent: `from twin|quad|octo|nuke`; the old names still work.
 
 - **v7 · 2026-11-24:** missiles, nukes and sky traffic.
   - Perpetual sky traffic (jumbos, airliners, jets, props) shown on the map.

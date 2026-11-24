@@ -52,7 +52,7 @@ export class MapScreen {
   private skyName!: HTMLDivElement;
   private skyMeta!: HTMLDivElement;
   private skyBody!: HTMLDivElement;
-  private skyMode: 'actions' | 'sites' = 'actions';
+  private skyMode: 'actions' | 'pick' = 'actions';
   private skyT = 0;
   private listOpen = false;
   private dirty = true;
@@ -457,9 +457,25 @@ export class MapScreen {
   }
 
   // ─────────────────────────────── selection / card ───────────────────────────────
+  /** The turret under a tap (its map marker), while picking one to shoot from. */
+  private pickTurret(x: number, y: number): string | null {
+    const R = this.renderer;
+    let best: string | null = null;
+    let bd = 34;
+    for (const s of this.ctx.missiles?.sites ?? []) {
+      const d = Math.hypot(R.sx(s.ax) - x, R.sy(s.az) - y);
+      if (d < bd) {
+        bd = d;
+        best = s.id;
+      }
+    }
+    return best;
+  }
+
   private selectSky(id: number | null): void {
     this.renderer.skySelected = id;
     this.skyMode = 'actions';
+    this.renderer.shootMode = false;
     this.sky.classList.toggle('visible', id !== null);
     this.root.classList.toggle('has-sky', id !== null);
     if (id !== null) this.fillSky(true);
@@ -495,7 +511,14 @@ export class MapScreen {
     };
     if (this.skyMode === 'actions') {
       btn('🎯 Shoot', 'btn btn-primary', () => {
-        this.skyMode = 'sites';
+        this.skyMode = 'pick';
+        this.renderer.shootMode = true;
+        // show the plane and every turret at once
+        const xs = [p.ax, ...M.sites.map((s) => s.ax)], zs = [p.az, ...M.sites.map((s) => s.az)];
+        const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+        const R = this.renderer;
+        const ppm = Math.min((R.W * 0.8) / Math.max(200, maxX - minX), (R.H * 0.62) / Math.max(200, maxZ - minZ));
+        this.flyTo((minX + maxX) / 2, (minZ + maxZ) / 2 + (maxZ - minZ) * 0.12, ppm);
         this.fillSky(true);
       });
       if (this.ctx.game.mode === 'plane' && this.ctx.planes.active && !this.ctx.planes.crashed) {
@@ -509,18 +532,9 @@ export class MapScreen {
         this.nav.dismissMap();
       });
     } else {
-      const sites = [...M.sites].sort((a, c) => Math.hypot(a.ax - p.ax, a.az - p.az) - Math.hypot(c.ax - p.ax, c.az - p.az));
-      for (const s of sites) {
-        const d = formatDistance(Math.hypot(s.ax - p.ax, s.az - p.az), units);
-        const e = btn(`${s.warhead === 'nuke' ? '☢️' : '🚀'} ${s.name} — ${s.kind} · ${s.ready}/${s.tubes} ready · ${d} from it`, 'btn nm-site', () => {
-          this.nav.dismissMap(); // the map paused the game: back to playing first
-          const err = M.enterControl(s.id, p.id);
-          if (err) this.ctx.events.emit('toast', { text: err, ms: 2000 });
-        });
-        e.title = s.blurb;
-        if (!s.ready) e.disabled = true;
-      }
-      btn('← Back', 'btn btn-ghost', () => {
+      b.append(el('div', 'nm-pick', 'Tap a glowing turret 🚀 on the map to fire from it'));
+      btn('Cancel', 'btn btn-ghost', () => {
+        this.renderer.shootMode = false;
         this.skyMode = 'actions';
         this.fillSky(true);
       });
@@ -715,8 +729,24 @@ export class MapScreen {
         this.vel.x = this.vel.y = 0;
         const dbl = now - this.lastTap.t < 320 && Math.hypot(ptr.x - this.lastTap.x, ptr.y - this.lastTap.y) < 30;
         this.lastTap = { t: now, x: ptr.x, y: ptr.y };
+        const M = this.ctx.missiles;
+        const picking = this.skyMode === 'pick' && this.renderer.skySelected !== null && M;
+        const tHit = picking ? this.pickTurret(ptr.x, ptr.y) : null;
+        if (picking && tHit) {
+          this.click();
+          const plane = this.renderer.skySelected!;
+          this.selectSky(null);
+          this.nav.dismissMap(); // the map paused the game: back to playing first
+          const err = M.enterControl(tHit, plane);
+          if (err) this.ctx.events.emit('toast', { text: err, ms: 2200 });
+          return;
+        }
         const skyHit = this.renderer.hitSky(ptr.x, ptr.y);
         const hit = skyHit === null ? this.renderer.hitPoi(ptr.x, ptr.y) : null;
+        if (picking && !tHit && skyHit === null) {
+          this.ctx.events.emit('toast', { text: 'Tap one of the glowing turrets 🚀', ms: 1400 });
+          return;
+        }
         if (skyHit !== null) {
           this.click();
           this.select(null);

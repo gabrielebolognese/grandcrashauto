@@ -1,15 +1,16 @@
 /**
- * Air-defence systems (user request: different launchers in the city and in the mountains, each one custom).
- * Tube positions are in the RACK frame (rack faces +Z, origin at the pivot); the silo's single tube is vertical.
+ * Air-defence TURRETS (user request): a pedestal turret with a launcher box of 2 missiles side by side, 4 in a square
+ * or 8 in a 4×2 block — up in the mountains only. Tube positions are in the RACK frame (rack faces +Z, origin at the
+ * pitch pivot).
  */
-export type LauncherKind = 'titan' | 'lancer' | 'hornet' | 'pike' | 'doom';
+export type LauncherKind = 'duo' | 'quad' | 'octo' | 'nuke';
 export type Warhead = 'big' | 'medium' | 'small' | 'nuke';
 
 export interface LauncherType {
   kind: LauncherKind;
   name: string;
-  /** How S / ALL fire: single = one per S, ALL = every tube; pairs = two per S; batch = one per S, ALL = salvo. */
-  salvo: 'single' | 'pairs' | 'batch' | 'one';
+  /** S fires one; ALL fires every ready tube (octo: the salvo, SPREAD = different spots). */
+  salvo: 'single' | 'batch';
   warhead: Warhead;
   /** Fireball radius (m) of one missile. */
   blast: number;
@@ -20,69 +21,62 @@ export interface LauncherType {
   missileR: number;
   /** Seconds to reload one tube. */
   reload: number;
-  tubes: [number, number, number][]; // rack-frame tube mouths
-  body: number; // vehicle / pad colour
-  rack: number; // rack colour
+  tubes: [number, number][]; // rack-frame (x, y) of each tube
+  box: [number, number]; // launcher box half width / half height
+  body: number; // pedestal / head colour
+  rack: number; // launcher box colour
   missile: number; // missile body colour
   tip: number; // nose / band colour
   blurb: string;
 }
 
-const grid = (cols: number, rows: number, dx: number, dy: number, z: number): [number, number, number][] => {
-  const out: [number, number, number][] = [];
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) out.push([(c - (cols - 1) / 2) * dx, (r - (rows - 1) / 2) * dy, z]);
+const grid = (cols: number, rows: number, dx: number, dy: number): [number, number][] => {
+  const out: [number, number][] = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) out.push([(c - (cols - 1) / 2) * dx, ((rows - 1) / 2 - r) * dy]);
   return out;
 };
 
 export const LAUNCHER_TYPES: Record<LauncherKind, LauncherType> = {
-  titan: {
-    kind: 'titan', name: 'Twin Titan', salvo: 'single', warhead: 'big', blast: 28, speed: 430, boost: 2.6,
-    missileLen: 9, missileR: 0.48, reload: 40, tubes: grid(2, 1, 1.9, 0, 4.6),
-    body: 0x56604a, rack: 0x6c7656, missile: 0xe9ebe4, tip: 0xc8423a,
-    blurb: '2 huge missiles — fire one (S) or both (ALL)',
+  duo: {
+    kind: 'duo', name: 'Twin turret', salvo: 'single', warhead: 'big', blast: 26, speed: 450, boost: 2.2,
+    missileLen: 6.4, missileR: 0.42, reload: 35, tubes: grid(2, 1, 1.25, 0), box: [1.35, 0.7],
+    body: 0x6b7058, rack: 0x7d8466, missile: 0xeceee6, tip: 0xc8423a,
+    blurb: '2 big missiles side by side — S fires one, ALL fires both',
   },
-  lancer: {
-    kind: 'lancer', name: 'Quad Lancer', salvo: 'single', warhead: 'medium', blast: 16, speed: 520, boost: 2.1,
-    missileLen: 5.6, missileR: 0.3, reload: 25, tubes: grid(2, 2, 1.1, 1.0, 3),
-    body: 0x6f6a58, rack: 0x8a8670, missile: 0xf1f2ee, tip: 0x2f3e66,
-    blurb: '4 medium missiles, one per S',
+  quad: {
+    kind: 'quad', name: 'Quad turret', salvo: 'single', warhead: 'medium', blast: 16, speed: 520, boost: 1.9,
+    missileLen: 4.6, missileR: 0.3, reload: 22, tubes: grid(2, 2, 0.85, 0.85), box: [0.95, 0.95],
+    body: 0x707262, rack: 0x8b8d78, missile: 0xf1f2ee, tip: 0x2f3e66,
+    blurb: '4 missiles in a square — S fires one, ALL fires all four',
   },
-  hornet: {
-    kind: 'hornet', name: 'Hornet Swarm', salvo: 'batch', warhead: 'small', blast: 8, speed: 620, boost: 1.5,
-    missileLen: 2.6, missileR: 0.15, reload: 12, tubes: grid(4, 2, 0.52, 0.52, 1.5),
-    body: 0x4f5a62, rack: 0x6c7880, missile: 0xf4f1e8, tip: 0xffb000,
-    blurb: '8 small missiles — S fires one, ALL fires the salvo; SPREAD hits different spots',
+  octo: {
+    kind: 'octo', name: 'Octo turret', salvo: 'batch', warhead: 'small', blast: 9, speed: 600, boost: 1.4,
+    missileLen: 2.8, missileR: 0.16, reload: 12, tubes: grid(4, 2, 0.5, 0.5), box: [1.15, 0.6],
+    body: 0x5a6266, rack: 0x707c82, missile: 0xf4f1e8, tip: 0xffb000,
+    blurb: '8 small missiles (4×2) — S fires one, ALL the salvo, SPREAD = different spots',
   },
-  pike: {
-    kind: 'pike', name: 'Hexa Pike', salvo: 'pairs', warhead: 'medium', blast: 12, speed: 560, boost: 1.8,
-    missileLen: 4.2, missileR: 0.24, reload: 18, tubes: grid(3, 2, 0.8, 0.8, 2.4),
-    body: 0x7a6e52, rack: 0x968a6a, missile: 0xeceae2, tip: 0x2a9d8f,
-    blurb: '6 missiles fired in pairs (S = 2)',
-  },
-  doom: {
-    kind: 'doom', name: 'Doomsday Silo', salvo: 'one', warhead: 'nuke', blast: 260, speed: 360, boost: 4,
-    missileLen: 14, missileR: 0.95, reload: 150, tubes: [[0, 0, 0]],
-    body: 0x8d8a82, rack: 0x5c5a55, missile: 0xf3f0e6, tip: 0xffd23f,
-    blurb: '1 NUKE — the whole sky around the target goes',
+  nuke: {
+    kind: 'nuke', name: 'Nuke turret', salvo: 'single', warhead: 'nuke', blast: 240, speed: 380, boost: 3,
+    missileLen: 7, missileR: 0.5, reload: 120, tubes: grid(2, 1, 1.4, 0), box: [1.5, 0.78],
+    body: 0x55524c, rack: 0x3f3d39, missile: 0xf3f0e6, tip: 0xffd23f,
+    blurb: '2 NUKES side by side — everything flying around the target goes',
   },
 };
 
-/** Where the systems stand: next to city places (offsets from a POI) or at ABSOLUTE spots in the mountains. */
+/** Where the turrets stand: ABSOLUTE spots in the mountains north and east of the city. */
 export interface LauncherSite {
   id: string;
   name: string;
   kind: LauncherKind;
-  near?: { poi: string; dx: number; dz: number };
-  at?: { x: number; z: number };
+  at: { x: number; z: number };
   yaw: number;
 }
 
 export const LAUNCHER_SITES: LauncherSite[] = [
-  { id: 'sam-park', name: 'Park Air Defence', kind: 'lancer', near: { poi: 'park', dx: 22, dz: 18 }, yaw: Math.PI },
-  { id: 'sam-beach', name: 'Beach Swarm', kind: 'hornet', near: { poi: 'beach', dx: 60, dz: 6 }, yaw: Math.PI },
-  { id: 'sam-airport', name: 'Airport Pike', kind: 'pike', near: { poi: 'airport', dx: -30, dz: 26 }, yaw: Math.PI / 2 },
-  { id: 'sam-ridge', name: 'Ridge Titans', kind: 'titan', at: { x: 2400, z: -6300 }, yaw: 0 },
-  { id: 'sam-peak', name: 'Peak Swarm', kind: 'hornet', at: { x: 4300, z: -5200 }, yaw: -Math.PI / 4 },
-  { id: 'sam-pass', name: 'Pass Lancer', kind: 'lancer', at: { x: 900, z: -4200 }, yaw: Math.PI / 6 },
-  { id: 'silo-north', name: 'Doomsday Silo', kind: 'doom', at: { x: -1300, z: -7400 }, yaw: 0 },
+  { id: 'aa-ridge', name: 'Ridge', kind: 'duo', at: { x: 2400, z: -6300 }, yaw: Math.PI },
+  { id: 'aa-pass', name: 'Pass', kind: 'quad', at: { x: 900, z: -4200 }, yaw: Math.PI },
+  { id: 'aa-peak', name: 'Peak', kind: 'octo', at: { x: 4300, z: -5200 }, yaw: Math.PI },
+  { id: 'aa-east', name: 'East Hills', kind: 'quad', at: { x: 5600, z: -2600 }, yaw: -Math.PI / 2 },
+  { id: 'aa-west', name: 'West Crag', kind: 'octo', at: { x: -900, z: -5200 }, yaw: Math.PI },
+  { id: 'aa-doom', name: 'Doom Summit', kind: 'nuke', at: { x: -1300, z: -7400 }, yaw: Math.PI },
 ];

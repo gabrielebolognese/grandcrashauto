@@ -17,7 +17,8 @@ interface Missile {
   speed: number;
   t: number;
   climb: number; // s of straight climb (silo)
-  target: SkyPlane | null;
+  target: SkyPlane | null; // locked on (always hits)
+  seek: SkyPlane | null; // fired without a lock: it locks on if this plane crosses its seeker
   ground: THREE.Vector3 | null; // nuke at a place (LOCAL)
   u: number; // aim offset on the target: + = its right wing, - = left
   v: number; // + = nose, - = tail
@@ -219,17 +220,21 @@ export class MissileSystem implements IMissiles {
     const c = this.control;
     if (!c) return 'not in a control room';
     const l = c.launcher;
-    if (!this.locked(c)) return 'aim closer to the target to lock on';
+    // a lock is not needed: locked = it always hits; no lock = it flies where the launcher points and locks on only
+    // if the plane crosses its seeker on the way
+    const locked = this.locked(c);
     const free = l.ready.map((r, i) => (r ? i : -1)).filter((i) => i >= 0);
     if (!free.length) return 'reloading…';
-    const t = l.type;
-    let count = n > 0 ? n : opts.all ? free.length : t.salvo === 'pairs' ? 2 : 1;
+    let count = n > 0 ? n : opts.all ? free.length : 1;
     count = Math.min(count, free.length);
     const spread = opts.spread ?? c.spread;
     for (let k = 0; k < count; k++) {
       const i = free[k];
-      const first = !c.first || c.first.done;
-      const m = this.launch(l, i, c.target, null, first ? c.u : spread ? (Math.random() * 2 - 1) * 0.9 : c.u, first ? c.v : spread ? (Math.random() * 2 - 1) * 0.9 : c.v, first, k * 0.18);
+      // the camera / your steering follow the newest locked missile if the current one flies blind
+      const first = !c.first || c.first.done || (locked && k === 0 && !c.first.target);
+      if (first && c.first && !c.first.done) c.first.controlled = false;
+      const m = this.launch(l, i, locked ? c.target : null, null, first ? c.u : spread ? (Math.random() * 2 - 1) * 0.9 : c.u, first ? c.v : spread ? (Math.random() * 2 - 1) * 0.9 : c.v, first, k * 0.18);
+      m.seek = c.target;
       if (first) {
         c.first = m;
         c.phase = 'missile';
@@ -241,7 +246,7 @@ export class MissileSystem implements IMissiles {
         }
       } else (this.ctx.replay as { addExtra?: (o: THREE.Object3D) => void }).addExtra?.(m.obj);
     }
-    return `fired ${count} (${l.ready.filter(Boolean).length} left)`;
+    return `${locked ? 'locked — ' : 'no lock — '}fired ${count} (${l.ready.filter(Boolean).length} left)`;
   }
 
   /** Steer the controlled missile's impact point: u = right wing (+) / left (-), v = nose (+) / tail (-), -1..1. */
@@ -272,10 +277,10 @@ export class MissileSystem implements IMissiles {
 
   /** Nuke a sky plane (from the Doomsday Silo, no control room) or an ABSOLUTE ground point. */
   nuke(planeId: number | null, at?: { x: number; z: number }): string {
-    const silo = this.launchers.list.find((l) => l.type.kind === 'doom');
-    if (!silo) return 'no silo';
+    const silo = this.launchers.list.find((l) => l.type.kind === 'nuke');
+    if (!silo) return 'no nuke turret';
     const i = silo.ready.findIndex(Boolean);
-    if (i < 0) return 'the silo is reloading';
+    if (i < 0) return 'the nuke turret is reloading';
     if (planeId !== null) {
       const p = this.traffic.planes.find((x) => x.id === planeId);
       if (!p) return 'that plane is gone';
@@ -327,7 +332,7 @@ export class MissileSystem implements IMissiles {
     obj.userData.noOriginShift = true;
     ctx.engine.scene.add(obj);
     const m: Missile = {
-      obj, type: t, pos, prev: pos.clone(), dir, speed: 30, t: -delay, climb: t.kind === 'doom' ? 2.2 : 0, target, ground,
+      obj, type: t, pos, prev: pos.clone(), dir, speed: 30, t: -delay, climb: 0, target, seek: target, ground,
       u, v, controlled, trail: null, done: false,
     };
     obj.position.copy(pos);
@@ -341,7 +346,7 @@ export class MissileSystem implements IMissiles {
   private ignite(m: Missile): void {
     const { ctx } = this;
     const t = m.type;
-    m.trail = ctx.fx.attachTrail?.(m.obj, new THREE.Vector3(0, 0, -t.missileLen * 0.48), { fire: 1, smoke: 1, size: Math.max(0.45, t.missileR * 4.5) }) ?? null;
+    m.trail = ctx.fx.attachTrail?.(m.obj, new THREE.Vector3(0, 0, -t.missileLen * 0.5), { fire: 0.75, smoke: 1, size: Math.max(0.3, t.missileR * 2.4) }) ?? null;
     ctx.fx.smoke(m.pos, t.warhead === 'nuke' ? 3 : 1.2);
     ctx.fx.flash?.(m.pos.x, m.pos.y, m.pos.z, 30, 6, 40);
   }
@@ -418,12 +423,22 @@ export class MissileSystem implements IMissiles {
     m.prev.copy(m.pos);
     let tp: THREE.Vector3 | null = null;
     let part = '';
+    if (!m.target && !m.ground && m.seek && !m.seek.hit && m.t > 0.4) {
+      // fired without a lock: the seeker picks the plane up if it comes into its cone
+      const to = _v2.subVectors(m.seek.pos, m.pos);
+      const d = to.length();
+      if (d < CONFIG.missiles.seekRange && to.normalize().dot(m.dir) > Math.cos(CONFIG.missiles.seekCone)) m.target = m.seek;
+    }
     if (m.target) {
       tp = _v;
       part = this.aimPoint(m.target, m.u, m.v, tp);
     } else if (m.ground) tp = _v.copy(m.ground);
     if (!tp) {
-      this.detonate(m, m.pos, null, '');
+      // unguided: straight on, a little gravity, self-destructs after a while (or on the ground)
+      m.dir.y -= 0.01 * dt;
+      m.dir.normalize();
+      m.pos.addScaledVector(m.dir, m.speed * dt);
+      if (m.t > CONFIG.missiles.unguidedS || (m.t > 1.2 && m.pos.y < this.groundAt(m.pos.x, m.pos.z) + 1)) this.detonate(m, m.pos, null, '');
       return;
     }
     const dist = tp.distanceTo(m.pos);
@@ -656,9 +671,14 @@ export class MissileSystem implements IMissiles {
       const l = c.launcher;
       l.aimYaw -= ax * dt * 0.9 + dx * 0.004;
       l.aimPitch = clamp(l.aimPitch + ay * dt * 0.6 - dy * 0.004, 0.02, 1.5);
-    } else if (c.phase === 'missile') {
-      // steering only moves the hit point across the plane (the missile always hits)
+    } else if (c.phase === 'missile' && c.first?.target) {
+      // locked on: steering only moves the hit point across the plane (the missile always hits)
       this.steer(c.u + ax * dt * 1.2 + dx * 0.006, c.v + ay * dt * 1.2 - dy * 0.006);
+    } else if (c.phase === 'missile' && c.first) {
+      // no lock: steer the missile itself toward the plane (its seeker locks once the plane is in front of it)
+      const m = c.first;
+      const right = _v3.crossVectors(m.dir, UP).normalize();
+      m.dir.applyAxisAngle(UP, -(ax * dt * 0.9 + dx * 0.004)).applyAxisAngle(right, ay * dt * 0.7 - dy * 0.004).normalize();
     } else {
       // after the impact: aim again for the next shot
       const l = c.launcher;
@@ -674,9 +694,11 @@ export class MissileSystem implements IMissiles {
     let fov = 58;
     if (c.phase === 'missile' && c.first && !c.first.done) {
       const m = c.first;
-      const back = m.type.missileLen * 2.4 + 6;
-      eye.copy(m.obj.position).addScaledVector(m.dir, -back).addScaledVector(UP, back * 0.18);
-      look.copy(c.target.pos);
+      const back = m.type.missileLen * 2.6 + 12;
+      eye.copy(m.obj.position).addScaledVector(m.dir, -back).addScaledVector(UP, back * 0.32);
+      // locked: keep the plane in frame; no lock: look where the missile goes (you steer it)
+      if (m.target) look.copy(c.target.pos);
+      else look.copy(m.obj.position).addScaledVector(m.dir, 400);
       const d = eye.distanceTo(look);
       fov = clamp((2 * Math.atan((c.target.visual.dims.span * 1.6) / Math.max(1, d)) * 180) / Math.PI, 12, 62);
     } else if (c.phase === 'impact') {
@@ -698,9 +720,8 @@ export class MissileSystem implements IMissiles {
       // the reticle (screen centre) where it points
       const p = this.launchers.pivot(l, _v3);
       const dir = this.aimDir(l, new THREE.Vector3());
-      const back = l.type.kind === 'doom' ? 30 : l.type.missileLen * 1.2 + 7;
-      if (l.type.kind === 'doom') eye.copy(p).addScaledVector(new THREE.Vector3(dir.x, 0, dir.z).normalize(), -back).addScaledVector(UP, 6);
-      else eye.copy(p).addScaledVector(dir, -back).addScaledVector(UP, 1.6 + back * 0.12);
+      const back = l.type.missileLen * 1.3 + 7;
+      eye.copy(p).addScaledVector(dir, -back).addScaledVector(UP, 1.4 + back * 0.1);
       look.copy(p).addScaledVector(dir, 3000);
       fov = 55;
     }
@@ -745,7 +766,7 @@ export class MissileSystem implements IMissiles {
         <button class="msl-b msl-replay" data-a="replay">REPLAY <kbd>C</kbd></button>
         <button class="msl-b msl-back" data-a="back">BACK <kbd>B</kbd></button>
       </div>
-      <div class="msl-hint">aim: drag / A D W ↑↓ · after launch the same keys pick WHERE it hits</div>`;
+      <div class="msl-hint">aim: drag / A D W ↑ ↓ ← → · S fires · locked: the same keys pick WHERE it hits · no lock: they steer the missile</div>`;
     const flash = document.createElement('div');
     flash.className = 'msl-flash';
     (document.getElementById('ui-root') ?? document.body).append(h, flash);
@@ -800,15 +821,16 @@ export class MissileSystem implements IMissiles {
     }
     const locked = this.locked(c);
     el.state.className = `msl-state ${c.phase === 'aim' ? (locked ? 'lock' : 'seek') : 'fly'}`;
-    el.state.textContent = c.phase === 'aim' ? (locked ? 'LOCKED — S to fire' : 'AIM AT THE TARGET') : c.phase === 'missile' ? 'MISSILE AWAY — steer where it hits' : p.hit ? 'TARGET HIT' : 'IMPACT';
-    if (c.phase === 'missile') {
+    const guided = !!c.first?.target;
+    el.state.textContent = c.phase === 'aim' ? (locked ? 'LOCKED — S fires, it will hit' : 'NO LOCK — S fires straight (aim at the red marker to lock)') : c.phase === 'missile' ? (guided ? 'LOCKED ON — steer where it hits' : 'NO LOCK — flying straight, seeking…') : p.hit ? 'TARGET HIT' : 'MISSED';
+    if (c.phase === 'missile' && c.first?.target) {
       const part = this.aimPoint(p, c.u, c.v, _v3);
       el.part.textContent = `HIT: ${partLabel(part)}`;
       el.part.style.display = 'block';
     } else el.part.style.display = 'none';
     el.ammo.innerHTML = l.ready.map((r, i) => `<i class="${r ? 'r' : ''}" style="--k:${r ? 1 : 1 - l.reloadT[i] / l.type.reload}"></i>`).join('');
-    el.all.style.display = l.type.salvo === 'one' ? 'none' : '';
-    el.spread.style.display = l.type.kind === 'hornet' || l.type.kind === 'pike' ? '' : 'none';
+    el.all.style.display = '';
+    el.spread.style.display = l.type.kind === 'octo' ? '' : 'none';
     el.spread.classList.toggle('active', c.spread);
     el.replay.style.display = this.ctx.replay.canReplay ? '' : 'none';
     this.msgT -= dt;

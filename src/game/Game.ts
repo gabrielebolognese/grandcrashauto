@@ -290,7 +290,8 @@ export class Game implements GameActions {
 
   private update(dt: number, alpha: number, realDt: number): void {
     const { ctx } = this;
-    ctx.input.enabled = this.state === 'driving';
+    // the air-defence control room owns the keys (your car / plane gets none while you aim)
+    ctx.input.enabled = this.state === 'driving' && !ctx.missiles?.controlling;
     ctx.input.mode = this.mode;
     ctx.input.walking = this.mode === 'plane' && ctx.walker.active;
     ctx.input.sensitivity = ctx.settings.values.steerSensitivity;

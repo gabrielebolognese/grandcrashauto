@@ -55,6 +55,8 @@ export class MapRenderer {
   selected: NavPoi | null = null;
   /** Sky traffic (missiles): the selected plane id and the hit boxes drawn this frame. */
   skySelected: number | null = null;
+  /** SHOOT picked: the turrets glow, a dashed line runs from each to the target plane — tap one to fire from it. */
+  shootMode = false;
   private skyHits: { id: number; x: number; y: number }[] = [];
   /** Player marker screen position from the last render (the screen positions a CSS pulse there). */
   playerX = -1e4;
@@ -119,6 +121,38 @@ export class MapRenderer {
     this.skyHits.length = 0;
     if (!list.length) return;
     const g = this.g;
+    const tgt = this.shootMode ? list.find((q) => q.id === this.skySelected) : null;
+    if (tgt) {
+      const tx = this.sx(tgt.ax), ty = this.sy(tgt.az);
+      const pulse = 0.5 + 0.5 * Math.sin(this.t * 0.006);
+      for (const s of this.ctx.missiles?.sites ?? []) {
+        const x = this.sx(s.ax), y = this.sy(s.az);
+        g.save();
+        g.setLineDash([8, 7]);
+        g.strokeStyle = s.ready ? 'rgba(255,77,61,0.75)' : 'rgba(150,150,150,0.5)';
+        g.lineWidth = 2;
+        g.beginPath();
+        g.moveTo(x, y);
+        g.lineTo(tx, ty);
+        g.stroke();
+        g.setLineDash([]);
+        g.beginPath();
+        g.arc(x, y, 22 + 8 * pulse, 0, Math.PI * 2);
+        g.strokeStyle = s.ready ? '#ff4d3d' : '#888';
+        g.lineWidth = 4;
+        g.stroke();
+        g.font = `700 12px ${FONT}`;
+        g.textAlign = 'center';
+        g.textBaseline = 'top';
+        const label = `${s.kind} · ${s.ready}/${s.tubes} · ${(Math.hypot(s.ax - tgt.ax, s.az - tgt.az) / 1000).toFixed(1)} km`;
+        g.lineWidth = 4;
+        g.strokeStyle = 'rgba(0,0,0,0.7)';
+        g.strokeText(label, x, y + 34);
+        g.fillStyle = '#fff';
+        g.fillText(label, x, y + 34);
+        g.restore();
+      }
+    }
     const col: Record<string, string> = { jumbo: '#ff7a6b', airliner: '#5cc8d6', bizjet: '#ffe39a', prop: '#9ee0c8' };
     for (const p of list) {
       const x = this.sx(p.ax), y = this.sy(p.az);
