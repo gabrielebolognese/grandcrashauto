@@ -6,6 +6,7 @@ import type { ControlState } from '../core/Input';
 import type { AvatarHandle, GameContext, IWalker } from '../game/contracts';
 import type { PlaneCabin, PlaneTypeId, PlaneVisual, TrackedPlane } from '../plane/types';
 import { FpHand } from './FpHand';
+import { CabinPeople } from './Cabin';
 
 type Mode = 'off' | 'cabin' | 'fall' | 'ground';
 const G = 9.81;
@@ -81,11 +82,15 @@ export class Walker implements IWalker {
   private focusV = new THREE.Vector3();
   // first person: head bob + the hand (user request)
   private hand: FpHand | null = null;
+  /** Passengers + flight attendants (user request). */
+  private people: CabinPeople;
   private bob = 0;
   private bobK = 0;
   private floatK = 0;
 
-  constructor(private ctx: GameContext) {}
+  constructor(private ctx: GameContext) {
+    this.people = new CabinPeople(ctx);
+  }
 
   init(): void {
     const { ctx } = this;
@@ -97,6 +102,7 @@ export class Walker implements IWalker {
     }
     this.hand = new FpHand();
     ctx.engine.scene.add(this.hand.root);
+    this.people.init();
     ctx.events.on('planeSpawned', () => this.active && this.stop(false));
     ctx.events.on('modeChanged', ({ mode }) => mode !== 'plane' && this.active && this.stop(false));
     ctx.events.on('originShift', ({ delta }) => {
@@ -226,6 +232,7 @@ export class Walker implements IWalker {
   /** The crash replay hides the first-person hand (the walker is not updated while it plays). */
   setHandVisible(on: boolean): void {
     if (this.hand) this.hand.root.visible = on;
+    this.people.setHidden(!on);
   }
 
   lookOutWindow(): void {
@@ -334,6 +341,7 @@ export class Walker implements IWalker {
 
   // ───────────────────────────── per frame ─────────────────────────────
   update(dtIn: number): void {
+    if (this.ctx.game.state === 'driving') this.people.update(Math.min(0.05, Math.max(0, dtIn)));
     if (this.mode === 'off' || this.ctx.game.state !== 'driving') return;
     const dt = Math.min(0.05, Math.max(0, dtIn));
     const inp = this.ctx.input.state;
@@ -539,6 +547,7 @@ export class Walker implements IWalker {
    * rigid body itself (not the interpolated visuals), so slow / irregular frames don't fake jolts.
    */
   fixedUpdate(dt: number): void {
+    if (this.ctx.game.state === 'driving') this.people.fixedUpdate(dt);
     if (this.mode !== 'cabin' || dt <= 0) return;
     const body = this.currentBody();
     if (!body) {
@@ -940,5 +949,6 @@ export class Walker implements IWalker {
   dispose(): void {
     this.avatar?.dispose();
     this.hand?.dispose();
+    this.people.dispose();
   }
 }

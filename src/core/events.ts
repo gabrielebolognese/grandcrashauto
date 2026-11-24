@@ -44,7 +44,7 @@ export interface GameEvents extends Record<string, unknown> {
   /** A pedestrian was knocked down by the car (npc). */
   npcHit: { position: THREE.Vector3; speed: number };
   /** Pedestrians were startled (npc) — audio plays short reactions. */
-  npcStartled: { position: THREE.Vector3; count: number; scream: boolean };
+  npcStartled: { position: THREE.Vector3; count: number; scream: boolean; /** loudness multiplier (plane passengers: mild) */ level?: number };
 
   /** Game state machine transitions (game). */
   stateChanged: { from: GameState; to: GameState };

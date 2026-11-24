@@ -15,6 +15,8 @@ import { HIP_H, LIE_H } from './rig';
 import { buildTestWorld, type TestWorld } from './testWorld';
 import { CrowdManager, type CrowdMemberRef, type CrowdSite } from './crowds';
 import { Avatar } from './Avatar';
+import { AvatarGroup } from './AvatarGroup';
+import { PART } from './model';
 
 /**
  * Pedestrian crowd (spec §8): pooled NPCs with a per-NPC state machine on the ped graph, groups, benches, bus stops,
@@ -1322,6 +1324,26 @@ export class NpcSystem implements INpcSystem {
     app.shoes = 0xf2f0ea;
     app.scale = 1;
     return new Avatar(this.clips, this.uniforms, app);
+  }
+
+  /** Plane passengers / flight attendants: deterministic looks per seed; travellers lose hats and bags, crew in uniform. */
+  createAvatarGroup(looks: ('passenger' | 'hostess')[], seed: number): AvatarGroup | null {
+    if (!this.uniforms || !this.clips.length) return null;
+    const rng = Rng.from(CONFIG.game.seed, 0x50415353, seed);
+    const strip = (1 << PART.cap) | (1 << PART.sunHat) | (1 << PART.bag) | (1 << PART.backpack) | (1 << PART.phone);
+    const apps = looks.map((k) => {
+      const a = randomAppearance(rng);
+      a.flags &= ~strip;
+      if (k === 'hostess') {
+        a.top = 0x24407a;
+        a.bottom = 0x24407a;
+        a.shoes = 0x1c1c22;
+        a.acc = 0xd23b3b;
+        a.scale = 1;
+      }
+      return a;
+    });
+    return new AvatarGroup(this.clips, this.uniforms, apps);
   }
 
   private crowdSpotList: { x: number; z: number; count: number; concert: boolean }[] = [];

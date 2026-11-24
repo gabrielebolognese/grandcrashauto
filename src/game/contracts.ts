@@ -195,9 +195,24 @@ export interface INpcSystem extends GameSystem {
   crowdSpots?(): readonly { x: number; z: number; count: number; concert: boolean }[];
   /** The player's on-foot character (same skinned mesh as the pedestrians). The caller adds .object to the scene. */
   createAvatar?(): AvatarHandle | null;
+  /** A group of animated people in one draw call (plane passengers / flight attendants), same seed = same people. */
+  createAvatarGroup?(looks: ('passenger' | 'hostess')[], seed: number): AvatarGroupHandle | null;
 }
 
 /** A single directly-driven pedestrian-style character (the player on foot). */
+/** Several independently animated people in one mesh (src/npc/AvatarGroup). Matrices are absolute world matrices. */
+export interface AvatarGroupHandle {
+  readonly object: THREE.Object3D;
+  readonly count: number;
+  play(i: number, clip: string, fade?: number, rate?: number, restart?: boolean): void;
+  clipDone(i: number): boolean;
+  setMatrix(i: number, m: THREE.Matrix4): void;
+  hide(i: number): void;
+  setFill(level: number): void;
+  update(dt: number): void;
+  dispose(): void;
+}
+
 export interface AvatarHandle {
   readonly object: THREE.Object3D;
   visible: boolean;

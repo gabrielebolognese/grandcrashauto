@@ -734,7 +734,7 @@ export class Sfx {
       p.x = e.position.x + rnd(-2, 2);
       p.y = e.position.y + 1.6;
       p.z = e.position.z + rnd(-2, 2);
-      this.vocal(p, kind, i * rnd(0.05, 0.2), i ? 0.8 : 1);
+      this.vocal(p, kind, i * rnd(0.05, 0.2), (i ? 0.8 : 1) * (e.level ?? 1));
     }
   }
 

@@ -44,6 +44,11 @@ export const CLIP = {
   clap: 26,
   jump: 27,
   sway: 28,
+  // plane passengers (user request): seated reactions
+  sitPanic: 29,
+  sitBrace: 30,
+  sitLookPX: 31,
+  sitLookNX: 32,
 } as const;
 export type ClipId = (typeof CLIP)[keyof typeof CLIP];
 
@@ -487,6 +492,38 @@ function sitPhone(t: number, p: Pose): void {
   p.set(BONE.UArmL, -24, 0, -8).set(BONE.LArmL, -84);
   p.set(BONE.Head, 30 + 2 * sin(2 * w * t), 4 * sin(w * t), 0);
   p.add(BONE.Chest, 5 + sin(2 * w * t), 0, 0);
+  solveLegIK(p);
+}
+
+/** Seated panic (plane passengers): arms flung up over the head, shaking, head darting, rocking in the seat. */
+function sitPanic(t: number, p: Pose): void {
+  sitPose(p);
+  const ph = TAU * t;
+  p.add(BONE.Spine, 4 + 3 * sin(ph * 2.5), 0, 0).add(BONE.Chest, -6 + 4 * sin(ph * 2.5 + 1), 0, 0);
+  p.set(BONE.Head, -8 + 6 * sin(ph * 3), 22 * sin(ph * 1.5), 0);
+  p.set(BONE.UArmL, -150 + 16 * sin(ph * 4), 0, 20 + 8 * sin(ph * 3)).set(BONE.LArmL, -40 + 20 * sin(ph * 4 + 1));
+  p.set(BONE.UArmR, -150 + 16 * sin(ph * 4 + 2), 0, -20 + 8 * sin(ph * 3)).set(BONE.LArmR, -40 + 20 * sin(ph * 4 + 3));
+  solveLegIK(p);
+}
+
+/** Brace position: folded forward over the knees, hands clasped on the head, trembling. */
+function sitBrace(t: number, p: Pose): void {
+  sitPose(p);
+  const tr = 1.5 * sin(TAU * t * 5);
+  p.set(BONE.Pelvis, 8).set(BONE.Spine, 30 + tr).set(BONE.Chest, 26).set(BONE.Head, 30);
+  p.set(BONE.UArmL, -125, 0, 30).set(BONE.LArmL, -120 + tr);
+  p.set(BONE.UArmR, -125, 0, -30).set(BONE.LArmR, -120 - tr);
+  solveLegIK(p);
+}
+
+/** Worried, staring out of the window on the model's +X side: turned, one hand gripping the armrest, the other at the mouth. */
+function sitLookPX(t: number, p: Pose): void {
+  sitPose(p);
+  const tr = sin(TAU * t * 4);
+  p.set(BONE.Spine, 3, 8, 0).set(BONE.Chest, 4, 14, 0);
+  p.set(BONE.Head, 6 + 2 * tr, 55 + 4 * sin(TAU * t * 0.5), 0);
+  p.set(BONE.UArmL, -28, 0, 14).set(BONE.LArmL, -50 + 2 * tr);
+  p.set(BONE.UArmR, -40, 0, -6).set(BONE.LArmR, -95 + 3 * tr);
   solveLegIK(p);
 }
 
@@ -1002,6 +1039,10 @@ function defs(): ClipDef[] {
     { id: CLIP.clap, name: 'clap', duration: 1, loop: true, fps: 24, fn: clap },
     { id: CLIP.jump, name: 'jump', duration: 1, loop: true, fps: 24, fn: jump },
     { id: CLIP.sway, name: 'sway', duration: 2, loop: true, fps: 20, fn: sway },
+    { id: CLIP.sitPanic, name: 'sitPanic', duration: 2, loop: true, fps: 24, fn: sitPanic },
+    { id: CLIP.sitBrace, name: 'sitBrace', duration: 2, loop: true, fps: 15, fn: sitBrace },
+    { id: CLIP.sitLookPX, name: 'sitLookPX', duration: 4, loop: true, fps: 15, fn: sitLookPX },
+    { id: CLIP.sitLookNX, name: 'sitLookNX', duration: 4, loop: true, fps: 15, fn: mirrored(sitLookPX) },
   ];
 }
 

@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 4 · 2026-11-24
+Endpoint version: 5 · 2026-11-24
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -98,6 +98,11 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
 - **The camera is automatic and cinematic after a crash.** It follows the pieces, swings to the most interesting
   one (often the rear half), then rises into an aerial view of the wreck. Usually the best footage comes from
   leaving it alone.
+- **Passengers and crew** (airliner, jumbo, private jet):
+  - About a third of the seats are taken, by the same people in the same seats every flight.
+  - Most wear seatbelts. Their reactions are fixed: after an engine blast, the window seats by that engine panic, stare at it and scream (mildly), and the rest of that side looks worried. A split, tail blast or explosion makes everyone panic, then brace. A spin or dive keeps them braced, with the odd scream.
+  - Two flight attendants walk the aisles, and a few passengers are out of their seats. They have your physics: they get thrown around in a spin, float in a dive, get sucked out of a torn end, and fall.
+  - Visible when you walk inside, or up close once the airframe is torn open.
 - **Cartoon tone:** people get knocked over comically and there is no gore. Keep requests in that spirit.
 
 | Plane | `fly` name | Engines | Stall speed | Cruise | Notes |
@@ -403,6 +408,11 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v5 · 2026-11-24:** passengers and crew.
+  - About 30 % of the seats are taken, by the same people every flight. Most are belted, with fixed reactions: engine blast (that side panics, looks out and screams mildly), split or explosion (panic then brace), spin or dive (brace and scream now and then).
+  - Two flight attendants walk the aisles. They and a few unbelted passengers get thrown around, sucked out and fall, with the same physics as you.
+  - Good shots: `fly jumbo agl 1500; walk; wait 3; engine 1` (first person, then `view` for third person) or `…; walk; wait 4; split`.
 
 - **v4 · 2026-11-24:** on foot.
   - Faster walking: the old sprint is the walk now, and speed doubles outside the plane.

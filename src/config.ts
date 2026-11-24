@@ -780,6 +780,9 @@ export const CONFIG = {
     splitCoupling: 0.35, minFallG: 0.35, maxFrameAccel: 60, suction: 14, suctionRange: 9, maxSpeed: 26,
     airDrag: 0.0036, skydiveSteer: 4, hardLanding: 9, lookSens: 0.0024, touchLook: 1.9,
     tpDist: 2.4, tpDistWorld: 4.2, fovFP: 74, fovTP: 66,
+    // passengers + crew (user request): share of seats taken, max per type, share out of their seats (unbelted),
+    // flight attendants, scream loudness (mild), crew walking speed, max camera distance to draw them when torn open
+    cabin: { share: 0.3, max: { prop: 0, bizjet: 3, airliner: 26, jumbo: 40 }, looseShare: 0.1, crew: 2, screamLevel: 0.55, crewSpeed: 1.1, showDist: 260 },
   },
 
   // ───────────────────────────── pedestrians (owner: src/npc) ───────────────────
