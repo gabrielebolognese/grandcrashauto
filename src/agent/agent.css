@@ -1,0 +1,19 @@
+/* Agent mode text view (bottom-left): what the agent reads — also in the DOM / accessibility tree and gca.state(). */
+.agent-panel {
+  position: absolute; left: calc(env(safe-area-inset-left, 0px) + 8px); bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)));
+  max-width: min(540px, 41vw); max-height: 64vh; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  pointer-events: none; z-index: 30;
+}
+.agent-head {
+  appearance: none; border: 0; cursor: pointer; pointer-events: auto; padding: 4px 9px; border-radius: 999px;
+  font: 900 10px/1 var(--font, system-ui); letter-spacing: .12em; color: #fff; background: rgba(24, 34, 60, 0.75);
+}
+.agent-text {
+  margin: 0; padding: 7px 9px; border-radius: 10px; overflow: hidden; white-space: pre-wrap; word-break: break-word;
+  font: 500 10px/1.34 ui-monospace, SFMono-Regular, Consolas, monospace; color: #eef4ff; background: rgba(12, 18, 34, 0.66);
+  box-shadow: 0 4px 14px rgba(10, 16, 30, 0.25);
+}
+.agent-panel.collapsed .agent-text { display: none; }
+#ui-root.is-mobile .agent-text { font-size: 8.5px; }
+#ui-root.is-mobile .agent-panel { max-width: 56vw; max-height: 58vh; }
+#ui-root:not([data-state='driving']) .agent-panel { max-height: 34vh; opacity: 0.9; }

@@ -20,6 +20,8 @@ conventions, ownership and how to verify your work.
   View screenshots with the Read tool. SwiftShader is a slow CPU renderer: fps numbers in smoke runs are NOT representative,
   but draw calls / triangles are. Don't loop smoke runs back-to-back; the machine is shared by several agents.
 - URL params: `?debug` (error overlay, `window.__game = {game, ctx, CONFIG}`, debug panel), `?autostart` (skip title/menu),
+  `?agent` (agent mode, src/agent: text view + ghost-physics forecast + latched keys + `window.gca` command API, first
+  in simSystems; `scripts/scenarios/agent*.mjs`), `?rec` (recording mode, src/ui/RecMode.ts),
   `?seed=N`, `?quality=low|medium|high`, `?car=<share code>`.
 
 ## Architecture (contract-first, stub-wired)

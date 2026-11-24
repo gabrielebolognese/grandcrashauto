@@ -29,6 +29,7 @@ import { WalkControls } from './touch/WalkControls';
 import { FlightHud } from './hud/FlightHud';
 import { Stunts } from './hud/Stunts';
 import { setWidgetSound } from './widgets';
+import { RecMode } from './RecMode';
 
 type SubScreen = { kind: 'settings' | 'credits'; parent: GameState };
 
@@ -61,6 +62,7 @@ export class UI implements IUI, UIHost {
   private rotate!: RotateOverlay;
   private debugPanel: DebugPanel | null = null;
   private nav!: MenuNav;
+  private rec!: RecMode;
 
   private inited = false;
   private state: GameState = 'boot';
@@ -178,12 +180,31 @@ export class UI implements IUI, UIHost {
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', () => window.setTimeout(onResize, 120));
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && this.state === 'driving') ctx.game.pause();
+      if (document.hidden && this.state === 'driving' && !ctx.agent) ctx.game.pause(); // agent mode keeps running
+    });
+
+    // ── recording mode: ?rec, U, the ● button in the top cluster ──
+    this.rec = new RecMode(root);
+    if (new URLSearchParams(location.search).has('rec')) this.setRecMode(true);
+    window.addEventListener('keydown', (e) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.code === 'KeyU' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) this.setRecMode(!this.rec.on);
     });
 
     this.applySettings();
     this.refreshTouchMode(true);
     this.applyState(ctx.game.state);
+  }
+
+  get recMode(): boolean {
+    return !!this.rec?.on;
+  }
+
+  setRecMode(on: boolean): void {
+    if (!this.rec || on === this.rec.on) return;
+    this.rec.set(on);
+    this.toast(on ? '● Recording mode — U to exit' : 'Recording mode off', 1200);
   }
 
   setLoading(progress: number, label: string): void {
@@ -403,6 +424,7 @@ export class UI implements IUI, UIHost {
       this.pause.el.classList.toggle('under-map', mapOpen);
     }
     this.hud.updateFps(dt);
+    this.rec.update(dt);
     this.debugPanel?.update(dt);
   }
 

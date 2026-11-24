@@ -54,7 +54,11 @@ npm run preview    # serve the production build
 ```
 
 Useful URL parameters: `?quality=low|medium|high`, `?seed=N`, `?car=<share code>`,
-`?plane=prop|bizjet|airliner|jumbo` (start in a plane) + `&air` (start flying), `?debug` (debug panel).
+`?plane=prop|bizjet|airliner|jumbo` (start in a plane) + `&air` (start flying), `?debug` (debug panel),
+`?rec` (recording mode: every button tiny in one corner, the screen clear — also the ● button or U),
+`?agent` (agent mode for AI players such as Claude in Chrome: a live text view with a physics forecast of the next
+seconds, keys where a tap = a 1 s hold, a timed command language — `gca.do("night; fly jumbo agl 22; wait 6; pitch up 2; wait 2; split")`,
+freeze / step with K and `.`; see `gca.help()`).
 
 ## Deploy
 

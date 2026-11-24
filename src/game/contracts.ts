@@ -69,6 +69,8 @@ export interface GameContext {
   walker: IWalker;
   /** Crash replay with many cameras. */
   replay: IReplay;
+  /** Agent mode (?agent): text view + forecasts + tap-to-hold controls + command API (window.gca) for AI agents. */
+  agent?: IAgent;
   /** Part 3: floating origin (absolute = local + origin.offset), endless terrain, highway network. */
   origin: Origin;
   terrain: ITerrain;
@@ -209,6 +211,32 @@ export interface AvatarHandle {
   setFill?(level: number): void;
   update(dt: number): void;
   dispose(): void;
+}
+
+/**
+ * Agent mode (src/agent, ?agent): lets an AI agent play from text. A live text view (state, held controls, autopilot,
+ * a forecast of the next seconds, queued commands), keys that latch (a tap = a timed hold), a command language with
+ * timing ("pitch up 2; wait 2; split") and a turn-based freeze. window.gca is the JS entry point.
+ */
+export interface IAgent extends GameSystem {
+  /** Simulation frozen (turn-based): fixed updates stop, the frame stays on screen. */
+  readonly frozen: boolean;
+  /** Run a command string; returns a report (results + the new forecast). */
+  run(cmds: string): string;
+  /** The current text view. */
+  text(): string;
+}
+
+/** Live flight internals for agent forecasts (the agent clones them; never mutate). */
+export interface FlightSnapshot {
+  model: unknown; // FlightModel
+  inputs: unknown; // FlightInputs
+  body: RAPIER.RigidBody;
+  rest: number; // wheel rest height below the body origin
+  throttle: number;
+  spool: number; // mean spool of the working engines
+  idle: number; // idle thrust fraction
+  tailExplodeIn: number | null;
 }
 
 /** Crash replay (src/replay): records the flown plane, plays the crash back from many cameras (sim frozen). */
@@ -467,6 +495,9 @@ export interface IUI extends GameSystem {
   /** Fade to black, run cb at full black, fade back (reset swap). */
   fade(cb: () => void): void;
   showFatal(message: string): void;
+  /** Recording mode: every button tiny and gathered in one corner, the rest of the screen clear. */
+  setRecMode?(on: boolean): void;
+  readonly recMode?: boolean;
 }
 
 // =============================== PART 2: planes, breakup, navigation ===============================
@@ -549,6 +580,14 @@ export interface IPlaneSystem extends GameSystem {
   readonly wingFailure?: { side: 'L' | 'R'; mode: 'far' | 'half'; t: number } | null;
   /** The pilot is walking in the cabin: neutral stick + assisted flight (autopilot). Set by the walker. */
   walking?: boolean;
+  /** Agent autopilot: flight-path angle (rad) the assists hold while the stick is neutral, or null (set every step). */
+  autopilotGamma?: number | null;
+  /** Agent: gear held up (0) / down (1) in the air instead of the automatic schedule, or null (reset per flight). */
+  gearLock?: 0 | 1 | null;
+  /** Agent forecasts: the live flight model / inputs / body. */
+  flightSnapshot?(): FlightSnapshot | null;
+  /** Agent: start in the air at local (x, z), agl m above the ground (wheels), heading (dirX, dirZ), speed m/s. */
+  spawnAir?(type: PlaneTypeId, x: number, z: number, agl: number, dirX: number, dirZ: number, speed?: number): void;
 }
 
 // --------------------------- breakup & crash physics (src/plane/breakup) ---------------------------

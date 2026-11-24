@@ -70,6 +70,8 @@ export class Input {
   mode: InputMode = 'car';
   /** Plane mode, on foot (set by Game while the walker is active): flight fields read zero, walk fields filled. */
   walking = false;
+  /** Agent mode (?agent): latched holds / autopilot values that override the merged state (only the keys present). */
+  agentOverride: Partial<ControlState> | null = null;
   private lookAccX = 0;
   private lookAccY = 0;
   lastDevice: InputDevice = 'keyboard';
@@ -152,6 +154,11 @@ export class Input {
 
   /** Called once per rendered frame by the game. */
   update(dt: number): void {
+    this.merge(dt);
+    if (this.enabled && this.agentOverride) Object.assign(this.state, this.agentOverride);
+  }
+
+  private merge(dt: number): void {
     const k = this.keys;
     const up = k.has('KeyW') || k.has('ArrowUp');
     const down = k.has('KeyS') || k.has('ArrowDown');

@@ -4,6 +4,7 @@ const svg = (body: string, extra = ''): string =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" ${extra}>${body}</svg>`;
 
 export const ICON = {
+  rec: svg('<rect x="3.2" y="5.5" width="17.6" height="13" rx="3.2"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>'),
   camera: svg('<path d="M3.5 8.5h3.2l1.8-2.8h7l1.8 2.8h3.2v10.3h-17z"/><circle cx="12" cy="13.3" r="3.4"/>'),
   horn: svg('<path d="M3.5 10v4h3.2l6.3 4.2V5.8L6.7 10z"/><path d="M16.3 9a4.4 4.4 0 0 1 0 6"/><path d="M18.8 6.4a8 8 0 0 1 0 11.2"/>'),
   pause: svg('<path d="M9 5.5v13M15 5.5v13" stroke-width="3"/>'),

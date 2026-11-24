@@ -1,0 +1,36 @@
+/* Recording mode: every button tiny and stacked in the top-left corner (RecMode.ts sets --rec-top), the rest hidden. */
+#ui-root.rec { --rec-s: 0.5; }
+#ui-root.rec.is-mobile { --rec-s: 0.5; }
+#ui-root.rec :is(.tb-cluster, .boom-wrap, .fl-engines, .fl-dock, .switch-part-btn, .airborne-btn, .skip-btn, .hud-prompts, .wk-context, .wk-actions, .rp-btns, .crash-panel) {
+  position: absolute !important;
+  left: calc(env(safe-area-inset-left, 0px) + 8px) !important;
+  right: auto !important;
+  bottom: auto !important;
+  top: calc(env(safe-area-inset-top, 0px) + 8px + var(--rec-top, 0px)) !important;
+  transform: scale(var(--rec-s)) !important;
+  transform-origin: 0 0 !important;
+  translate: none !important;
+  margin: 0 !important;
+  max-width: none !important;
+  width: max-content !important;
+  justify-content: flex-start !important;
+}
+#ui-root.rec .fl-dock { flex-direction: row !important; align-items: flex-start !important; }
+#ui-root.rec .boom-wrap { flex-direction: row !important; }
+#ui-root.rec .hud-prompts { flex-direction: row !important; }
+#ui-root.rec .crash-panel .cp-title { display: none !important; }
+/* everything that is not a button: gone */
+#ui-root.rec :is(.hud-tl, .speedo, .hud-hint, .cam-label, .fl-nudge, .fl-top, .toasts, .fps-counter, .wk-hint, .rp-top, .stunts, .speedlines, .boom-hint, .fire-meter) {
+  display: none !important;
+}
+#ui-root.rec :is(.tb-cluster, .boom-wrap, .fl-dock, .fl-engines, .wk-actions, .wk-context, .rp-btns, .crash-panel, .hud-prompts) kbd { display: none !important; }
+/* touch sticks / pedals / throttle stay where the thumbs are, as faint ghosts (still fully working) */
+#ui-root.rec :is(.touch-layer, .wk-zone) { opacity: 0.12 !important; }
+#ui-root.rec .touch-layer :is(.fc-btn, .steer-buttons) { opacity: 0.6; }
+/* the agent text panel stays readable for the agent (DOM / accessibility tree), invisible on screen */
+#ui-root.rec .agent-panel {
+  position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important;
+  clip-path: inset(50%) !important; opacity: 0 !important; pointer-events: none !important;
+}
+.tb-btn.rec-btn .ic { color: #e0367a; }
+#ui-root.rec .tb-btn.rec-btn { background: rgba(224, 54, 122, 0.18); }

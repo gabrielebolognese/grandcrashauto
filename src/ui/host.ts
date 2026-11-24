@@ -15,6 +15,9 @@ export interface UIHost {
   confirm(opts: ConfirmOpts): Promise<boolean>;
   toast(text: string, ms?: number): void;
   vibrate(pattern: number | number[]): void;
+  /** Recording mode (every button tiny in one corner). */
+  readonly recMode: boolean;
+  setRecMode(on: boolean): void;
 }
 
 export interface ConfirmOpts {

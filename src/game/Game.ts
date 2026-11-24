@@ -20,6 +20,7 @@ import { Props } from '../world/props/Props';
 import { NpcSystem } from '../npc/NpcSystem';
 import { Walker } from '../walk/Walker';
 import { Replay } from '../replay/Replay';
+import { Agent } from '../agent/Agent';
 import { CarFactory } from '../vehicle/models/CarFactory';
 import { PlayerVehicle } from '../vehicle/PlayerVehicle';
 import { CameraRig } from '../camera/CameraRig';
@@ -95,6 +96,7 @@ export class Game implements GameActions {
     ctx.cameraRig = new CameraRig(ctx);
     ctx.walker = new Walker(ctx);
     ctx.replay = new Replay(ctx);
+    if (params.has('agent')) ctx.agent = new Agent(ctx);
     ctx.fx = new Fx(ctx);
     ctx.audio = new Audio(ctx);
     ctx.garage = new Garage(ctx);
@@ -106,6 +108,8 @@ export class Game implements GameActions {
       ctx.cameraRig, ctx.walker, ctx.fx, ctx.audio, // walker after the rig: it drives the camera while on foot
       ctx.replay, // last: records the frame as rendered
     ];
+    // agent first: its latched holds / autopilot / queued commands act before the vehicle and planes step
+    if (ctx.agent) this.simSystems.unshift(ctx.agent);
 
     if (debug) (window as any).__game = { game: this, ctx, CONFIG };
   }
@@ -138,6 +142,7 @@ export class Game implements GameActions {
       [ctx.cameraRig, 'Framing the shot'],
       [ctx.walker, 'Stretching legs'],
       [ctx.replay, 'Loading the tape'],
+      ...(ctx.agent ? [[ctx.agent, 'Waking the agent'] as [GameSystem, string]] : []),
       [ctx.fx, 'Loading effects'],
       [ctx.audio, 'Tuning the engine'],
       [ctx.garage, 'Opening the garage'],
@@ -270,7 +275,7 @@ export class Game implements GameActions {
 
   // ─────────────────────────────── loop ───────────────────────────────
   private fixed(dt: number): void {
-    if (!this.simulating || this.ctx.replay.active) return; // replay: the world is frozen
+    if (!this.simulating || this.ctx.replay.active || this.ctx.agent?.frozen) return; // replay / agent freeze: the world holds still
     for (const s of this.simSystems) if (s.fixedUpdate) this.guard(s, 'fixedUpdate', () => s.fixedUpdate!(dt));
     try {
       this.ctx.physics.step();
@@ -305,11 +310,18 @@ export class Game implements GameActions {
     ctx.highways.setFocus?.(this.focus);
     ctx.env.setShadowFocus(this.focus);
 
-    if (this.simulating && ctx.replay.active) {
+    const agent = ctx.agent;
+    if (this.simulating && agent?.frozen && !ctx.replay.active) {
+      // agent freeze (turn-based): the world holds still; streaming, the agent view and sound stay alive
+      for (const s of [ctx.world, ctx.terrain, ctx.highways] as GameSystem[]) if (s.update) this.guard(s, 'update', () => s.update!(realDt, alpha));
+      this.guard(agent, 'update', () => agent.update?.(realDt, alpha));
+      this.guard(ctx.audio, 'update', () => ctx.audio.update?.(0, alpha));
+    } else if (this.simulating && ctx.replay.active) {
       // crash replay: frozen simulation; world streaming, effects and sound keep running, the replay poses + films
       const sp = ctx.replay.speed;
       for (const s of [ctx.env, ctx.world, ctx.terrain, ctx.highways] as GameSystem[]) if (s.update) this.guard(s, 'update', () => s.update!(realDt, alpha));
       this.guard(ctx.replay, 'play', () => ctx.replay.play(realDt));
+      if (agent) this.guard(agent, 'update', () => agent.update?.(realDt, alpha));
       this.guard(ctx.fx, 'update', () => ctx.fx.update?.(realDt * sp, alpha));
       this.guard(ctx.audio, 'update', () => ctx.audio.update?.(realDt * sp, alpha));
     } else if (this.simulating) {

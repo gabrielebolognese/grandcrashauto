@@ -117,6 +117,8 @@ export class TopBar {
     this.fsBtn = tap('fullscreen', 'Fullscreen', null, () => toggleFullscreen());
     if (!fullscreenSupported()) this.fsBtn.style.display = 'none';
     const pause = tap('pause', 'Pause', 'Esc', () => ctx.game.pause());
+    // Recording mode: every button tiny in one corner, the rest of the screen clear (U)
+    const rec = tap('rec', 'Recording mode', 'U', () => host.setRecMode(!host.recMode), 'rec-btn');
     // One-tap time of day: day → sunset → night → day (user request).
     const dayNight = tap('sun', 'Day / night', null, () => {
       const env = ctx.env;
@@ -144,7 +146,7 @@ export class TopBar {
     this.el = h(
       'div',
       { class: 'topbar', 'aria-hidden': 'true' },
-      h('div', { class: 'tb-cluster fade-ctl', role: 'toolbar', 'aria-label': 'Game controls' }, map, cam, dayNight, this.lightsBtn, horn, look, this.fsBtn, pause),
+      h('div', { class: 'tb-cluster fade-ctl', role: 'toolbar', 'aria-label': 'Game controls' }, map, cam, dayNight, this.lightsBtn, horn, look, this.fsBtn, rec, pause),
       h('div', { class: 'boom-wrap' }, this.midBtn, this.boom, this.tailBtn, more),
       this.camLabel,
     );

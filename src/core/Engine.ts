@@ -61,6 +61,10 @@ export class Engine {
   private width = 1;
   private height = 1;
   private hidden = false;
+  /** Agent mode: keep simulating while hidden / when rAF stalls (worker clock). */
+  private keepAlive = false;
+  private lastTickAt = 0;
+  private clock: Worker | null = null;
 
   constructor(container: HTMLElement, antialias: boolean) {
     this.canvas = document.createElement('canvas');
@@ -163,16 +167,36 @@ export class Engine {
     this.rafId = requestAnimationFrame(loop);
   }
 
+  /**
+   * Agent mode: keep the game running when the browser stops sending animation frames (window behind other windows,
+   * minimised): a worker clock ticks the loop whenever requestAnimationFrame has stalled for > 30 ms.
+   */
+  keepRunning(): void {
+    if (this.clock) return;
+    this.keepAlive = true;
+    try {
+      const src = 'setInterval(function () { postMessage(0); }, 16);';
+      this.clock = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      this.clock.onmessage = () => {
+        const now = performance.now();
+        if (this.running && now - this.lastTickAt > 30) this.tick(now);
+      };
+    } catch {
+      /* no workers: rAF only */
+    }
+  }
+
   stop(): void {
     this.running = false;
     cancelAnimationFrame(this.rafId);
   }
 
   private tick(now: number): void {
-    if (this.hidden) {
+    if (this.hidden && !this.keepAlive) {
       this.last = now;
       return;
     }
+    this.lastTickAt = performance.now();
     const realDt = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
     this.last = now;
     this.realDt = realDt;
@@ -197,7 +221,7 @@ export class Engine {
     this.time += scaled;
 
     this.onUpdate(scaled, alpha, realDt);
-    this.render(scaled);
+    if (!this.hidden) this.render(scaled);
   }
 
   render(dt = 0): void {

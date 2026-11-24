@@ -4,7 +4,7 @@ import { CONFIG } from '../config';
 import { RAPIER, G, groups, BodyInterpolator } from '../core/Physics';
 import { approach, clamp, damp, DEG, lerp, smoothstep } from '../core/math';
 import { reportError } from '../core/debugOverlay';
-import type { GameContext, IPlaneSystem, PlaneCameraTarget, TrailHandle } from '../game/contracts';
+import type { FlightSnapshot, GameContext, IPlaneSystem, PlaneCameraTarget, TrailHandle } from '../game/contracts';
 import {
   PLANE_TYPES, type CrashOutcome, type ImpactInfo, type ImpactSurface, type PlaneEngineInfo, type PlaneEngineState,
   type PlaneEngineStatus, type PlaneState, type PlaneTypeId, type PlaneVisual, type TrackedPlane, type WreckPiece,
@@ -489,6 +489,7 @@ export class PlaneSystem implements IPlaneSystem {
     this.firePoints = 0;
     this.fireSpotParts.clear();
     this.wingFail = null;
+    this.gearLock = null;
     this.breakNextT = Infinity;
     this.breakInterval = 0;
     this.breakCount = 0;
@@ -721,6 +722,10 @@ export class PlaneSystem implements IPlaneSystem {
 
   /** The pilot is walking in the cabin (set by the walker): neutral stick + assisted flight = autopilot. */
   walking = false;
+  /** Agent autopilot: flight-path angle (rad) held while the stick is neutral, or null. Set every step by the agent. */
+  autopilotGamma: number | null = null;
+  /** Agent: gear held up (0) / down (1) in the air instead of the automatic schedule, or null. Reset per flight. */
+  gearLock: 0 | 1 | null = null;
   /** Wing break button failure (null = none). */
   private wingFail: { side: 'L' | 'R'; mode: 'far' | 'half'; t: number; stage: number } | null = null;
 
@@ -863,6 +868,36 @@ export class PlaneSystem implements IPlaneSystem {
     const g = Math.max(0, this.groundAt(x, z, 2000));
     ctx.fx.clearAll();
     this.startFlight(type, 'air', { pos: new THREE.Vector3(x, g + Q.agl, z), dir: new THREE.Vector3(at ? at.dirX : Q.dirX, 0, at ? at.dirZ : Q.dirZ) });
+  }
+
+  /** Agent forecasts: the live flight model, inputs and body (the agent clones them and never mutates). */
+  flightSnapshot(): FlightSnapshot | null {
+    const body = this.body;
+    const model = this.model;
+    const visual = this.visual;
+    const cfg = this.cfg;
+    if (!this.active || !body || !model || !visual || !cfg || this.crashed) return null;
+    let spool = 0;
+    let n = 0;
+    for (const e of this.engines) {
+      if (e.st.status !== 'ok') continue;
+      spool += e.st.spool;
+      n++;
+    }
+    return {
+      model, inputs: this.inputs, body, rest: PlaneGear.restHeight(visual, cfg), throttle: this.throttle, spool: n ? spool / n : 0, idle: cfg.idle,
+      tailExplodeIn: this.tailLost && Number.isFinite(this.tailExplodeAt) ? Math.max(0, this.tailExplodeAt - this.tailT) : null,
+    };
+  }
+
+  /** Agent: straight into the air at local (x, z) with the wheels `agl` m above the ground/water, heading (dirX, dirZ). */
+  spawnAir(type: PlaneTypeId, x: number, z: number, agl: number, dirX: number, dirZ: number, speed?: number): void {
+    const rec = this.parked.get(type);
+    if (!rec) return;
+    const rest = PlaneGear.restHeight(rec.visual, planeCfg(type));
+    const g = Math.max(0, this.groundAt(x, z, 2500));
+    this.ctx.fx.clearAll();
+    this.startFlight(type, 'air', { pos: new THREE.Vector3(x, g + rest + Math.max(2, agl), z), dir: new THREE.Vector3(dirX, 0, dirZ), speed });
   }
 
   /** Swap planes mid-air (user request): same spot and heading, the new plane at its cruise speed. */
@@ -1414,6 +1449,7 @@ export class PlaneSystem implements IPlaneSystem {
       const nearGround = this.agl < A.autoGearNearAgl && V < 2 * model.vStall && vyPre < 0.5;
       if (this.gearTarget === 0 && (approachDown || nearGround)) this.gearTarget = 1;
     }
+    if (this.gearLock !== null && cfg.retractable && !this.gearCollapsed && !this.onGround) this.gearTarget = this.gearLock;
     if (!cfg.retractable) this.gearTarget = 1;
     if (this.onGround && !this.gearCollapsed) this.gearTarget = 1;
     this.gearPos = approach(this.gearPos, this.gearTarget, dt / (this.type === 'jumbo' ? 7 : 5));
@@ -1588,6 +1624,7 @@ export class PlaneSystem implements IPlaneSystem {
     fi.controlScale.set(0.3 + 0.7 * ht, fin, this.tailLost ? 0.6 + 0.3 * ht : 1);
     fi.rotationHelp = true;
     fi.liftScale *= this.wingFailInputs(dt, fi);
+    if (this.autopilotGamma !== null && fi.assisted && Math.abs(fi.pitch) < 0.06 && !this.onGround) model.gammaHold = this.autopilotGamma;
     model.step(dt, body, fi);
     this.wingFailTorque(dt, body);
 
