@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 11 · 2026-11-24
+Endpoint version: 12 · 2026-11-25
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -113,7 +113,7 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
   - Without a lock the missile flies straight and the keys steer it. Its seeker locks on if the plane comes in front of it.
   - Each S fires again. BACK returns to your car or plane while the missiles keep going.
   - The replay shows the missile run and the plane going down. Flying, you can also RAM a sky plane on autopilot, or just crash into one.
-  - **Camera switches (K or the buttons at the top):** **NUKE CAM / MISSILE CAM** rides your newest nuke or missile in flight (also one fired from the map with NUKE, or after BACK), then follows the plane it hits all the way down. **HIT PLANE CAM** follows the sky plane you just rammed, crashed into or shot. Your own plane waits in the air while you watch; K or BACK returns.
+  - **Camera switches (K or the camera buttons: flying, they join the button column on the right under PLANE / REPLAY; in the car, on the right under the speed card):** **NUKE CAM / MISSILE CAM** rides your newest nuke or missile in flight (also one fired from the map with NUKE, or after BACK), then follows the plane it hits all the way down. **HIT PLANE CAM** follows the sky plane you just rammed, crashed into or shot. Your own plane waits in the air while you watch; K or BACK returns. While you watch (and in the control room, and during a replay) the top menu bar and the Explode / Reset buttons are hidden, so nothing covers the view or the camera controls.
   - After a ram, the replay shows **both planes**, with a whole pass on the plane you hit (camera "Hit plane").
 - **Towers:** 7 crashable towers in the countryside around the city, each a teleport place:
   - **Medieval:** `tower-keep` Old Keep (round, battlements, red flag) · `tower-watch` Watchtower (square, timber lookout) · `tower-redroof` Red Roof Tower.
@@ -472,6 +472,8 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v12 · 2026-11-25:** no more overlapping buttons. The camera buttons (NUKE CAM / MISSILE CAM / HIT PLANE CAM) moved from the top centre into the right-hand button column (under the speed card in the car). While a camera is on, in the control room and in the replay, the top menu bar and Explode / Reset are hidden, so the replay buttons and the camera bar no longer cover them. The control-room key hints moved under its top line (hidden on phones).
 
 - **v11 · 2026-11-24:** throttle, camera switches, ram replay.
   - The throttle now changes the speed for real. Top speeds: jumbo 1050 km/h, airliner 980, private jet 920, prop 340. Full power reaches the top in about 15–20 s, and idle slows down like airbrakes.

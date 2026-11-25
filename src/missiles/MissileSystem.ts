@@ -343,6 +343,13 @@ export class MissileSystem implements IMissiles {
     return h.p;
   }
 
+  /** The cameras on offer (the plane HUD shows them as dock buttons, so they never cover the top bar). */
+  camOffer(): { missile: 'nuke' | 'missile' | null; hit: boolean } {
+    if (this.spec || this.control) return { missile: null, hit: false };
+    const m = this.watchable();
+    return { missile: m ? (m.type.warhead === 'nuke' ? 'nuke' : 'missile') : null, hit: !!this.hitWatchable() };
+  }
+
   /** Switch the view (user request): ride your missile / nuke, follow the plane you hit, or back (null). */
   spectate(kind: 'missile' | 'hit' | null): string {
     const { ctx } = this;
@@ -492,8 +499,9 @@ export class MissileSystem implements IMissiles {
   private drawSpecBar(): void {
     const { ctx } = this;
     const s = this.spec;
-    const m = !s && !this.control ? this.watchable() : null;
-    const hp = !s && !this.control ? this.hitWatchable() : null;
+    const offers = !s && !this.control && ctx.game.mode !== 'plane'; // flying: the dock buttons (FlightHud)
+    const m = offers ? this.watchable() : null;
+    const hp = offers ? this.hitWatchable() : null;
     const show = ctx.game.state === 'driving' && !ctx.replay.active && (!!s || !!m || !!hp);
     let key = '';
     if (show) {
@@ -532,6 +540,7 @@ export class MissileSystem implements IMissiles {
       if (hp) parts.push(`<button class="msl-b msl-lock" data-a="hcam">🎯 HIT PLANE CAM${m ? '' : ' <kbd>K</kbd>'}</button>`);
     }
     this.specBar.innerHTML = parts.join('');
+    this.specBar.classList.toggle('offer', !s);
     this.specBar.classList.add('on');
   }
 

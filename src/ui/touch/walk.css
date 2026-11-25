@@ -69,6 +69,9 @@
 .mm-fly-row button span.em { font-size: 18px; }
 .mm-fly-row button:active { transform: translateY(2px); box-shadow: 0 1px 0 #146c94; }
 /* Crash replay */
+.fl-camm { color: #fff; background: linear-gradient(180deg, #ff8a6b, #d6452f); box-shadow: 0 3px 0 #9c2a1c; }
+.fl-camh { color: #fff; background: linear-gradient(180deg, #4fd08a, #23935a); box-shadow: 0 3px 0 #146a3e; }
+.fl-camm kbd, .fl-camh kbd { background: rgba(255, 255, 255, 0.25); }
 .fl-replay { color: #fff; background: linear-gradient(180deg, #ff9784, #e0367a); box-shadow: 0 3px 0 #a3245a; }
 .replay-bar { position: absolute; inset: 0; pointer-events: none; }
 .replay-bar:not(.visible) { display: none; }
@@ -80,6 +83,8 @@
 .rp-next { color: #fff; background: linear-gradient(180deg, #5cc8d6, #2aa3c4); box-shadow: 0 3px 0 #146c94; min-width: 130px; }
 .rp-exit { color: #fff; background: linear-gradient(180deg, #ff9784, #ff7a6b); box-shadow: 0 3px 0 #c24a3e; }
 .flight-hud.replaying > :not(.replay-bar) { display: none !important; }
+/* the replay has its own buttons: the top bar and Reset / ⋯ would sit under them */
+#ui-root.replaying :is(.tb-cluster, .boom-wrap) { display: none !important; }
 .crash-btn.replay { background: linear-gradient(180deg, #ff9784, #e0367a) !important; color: #fff !important; }
 /* Wing break panel */
 .fl-wingbtn { color: #fff; background: linear-gradient(180deg, #ffb38a, #f08a4b); box-shadow: 0 3px 0 #b8622e; }

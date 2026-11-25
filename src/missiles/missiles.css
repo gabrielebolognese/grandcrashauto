@@ -1,7 +1,7 @@
 /* Air-defence control room (src/missiles/MissileSystem.ts) */
 .msl-hud { position: absolute; inset: 0; pointer-events: none; display: none; z-index: 30; font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; color: #e8fff0; }
 .msl-hud.on { display: block; }
-#ui-root.msl-control :is(.hud, .flight-hud, .touch-layer, .walk-layer, .hud-prompts, .speedo, .stunts, .boom-wrap) { display: none !important; }
+#ui-root.msl-control :is(.hud, .flight-hud, .touch-layer, .walk-layer, .hud-prompts, .speedo, .stunts, .boom-wrap, .tb-cluster) { display: none !important; }
 .msl-hud::after { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 20, 10, 0.45) 100%); }
 .msl-top { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); background: rgba(8, 24, 16, 0.72); border: 1px solid rgba(120, 255, 170, 0.35); border-radius: 8px; padding: 6px 12px; font-size: 12px; white-space: nowrap; display: flex; gap: 10px; }
 .msl-site { color: #9dffbf; letter-spacing: 0.04em; }
@@ -31,15 +31,20 @@
 .msl-fire { background: rgba(160, 30, 24, 0.9); border-color: #ff6b5b; padding: 14px 22px; font-size: 15px; }
 .msl-b.active { background: rgba(40, 120, 70, 0.95); }
 .msl-lock { background: rgba(20, 90, 50, 0.92); border-color: #6bff9c; }
-/* spectator cameras: NUKE CAM / HIT PLANE CAM / BACK (top centre, above the HUD) */
+/* spectator cameras: what you watch + BACK (top centre: the top bar is hidden while watching). Flying, the camera
+   buttons are in the plane dock (FlightHud); in the car they sit on the right under the speed card. */
 .msl-spec { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 30;
   display: none; gap: 8px; align-items: center; pointer-events: auto; }
 .msl-spec.on { display: flex; }
+.msl-spec.offer { left: auto; right: var(--gr); transform: none; top: calc(var(--gt) + 108px); flex-direction: column; align-items: flex-end; }
+#ui-root.is-touch .msl-spec.offer { flex-direction: row; } /* phones: one row, clear of the TURBO button */
 #ui-root.replaying .msl-spec { display: none; }
 .msl-spec .msl-b { font-size: 13px; padding: 7px 12px; }
 .msl-spec-t { color: #fff; font: 700 13px system-ui, sans-serif; text-shadow: 0 1px 3px #000a; background: rgba(10, 14, 22, 0.6);
   padding: 7px 12px; border-radius: 10px; white-space: nowrap; }
-.msl-hint { position: absolute; left: 50%; bottom: max(6px, env(safe-area-inset-bottom)); transform: translateX(-50%); font-size: 10px; opacity: 0.6; white-space: nowrap; }
+/* key hints: under the top line (at the bottom they ran under the buttons); phones have no keys */
+.msl-hint { position: absolute; left: 50%; top: calc(max(10px, env(safe-area-inset-top)) + 34px); transform: translateX(-50%); font-size: 10px; opacity: 0.6; white-space: nowrap; text-shadow: 0 1px 2px #000; }
+#ui-root.is-touch .msl-hint { display: none; }
 .msl-flash { position: absolute; inset: 0; background: #fffbe8; opacity: 0; pointer-events: none; z-index: 40; }
 #ui-root.rec .msl-hint, #ui-root.rec .msl-top { display: none; }
 @media (max-width: 700px) { .msl-top { font-size: 10px; } .msl-b { padding: 8px 10px; font-size: 11px; } .msl-fire { padding: 12px 16px; } }

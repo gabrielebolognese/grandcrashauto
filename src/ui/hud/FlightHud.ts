@@ -81,6 +81,10 @@ export class FlightHud {
   private planeBtn: HTMLButtonElement;
   private walkBtn: HTMLButtonElement;
   private replayBtn: HTMLButtonElement;
+  private camMBtn: HTMLButtonElement;
+  private camMText: HTMLSpanElement;
+  private camHBtn: HTMLButtonElement;
+  private camHKey: HTMLElement;
   private wingsBtn: HTMLButtonElement;
   private wingsPanel: HTMLDivElement;
   private replayBar: HTMLDivElement;
@@ -200,6 +204,18 @@ export class FlightHud {
       uiSound('confirm');
       ctx.replay.start();
     });
+    // Camera switches (user request): ride your nuke / missile, follow the plane you hit — in the dock, never on the top bar
+    const spec = (kind: 'missile' | 'hit') => {
+      uiSound('confirm');
+      const t = ctx.missiles?.spectate?.(kind);
+      if (t) ctx.events.emit('toast', { text: t, ms: 1600 });
+    };
+    this.camMText = h('span', { text: '☢ NUKE CAM' });
+    this.camMBtn = h('button', { class: 'fl-dock-btn fl-camm', type: 'button', 'aria-label': 'Ride your missile' }, this.camMText, h('kbd', { text: 'K' }));
+    this.camMBtn.addEventListener('click', () => spec('missile'));
+    this.camHKey = h('kbd', { text: 'K' });
+    this.camHBtn = h('button', { class: 'fl-dock-btn fl-camh', type: 'button', 'aria-label': 'Follow the plane you hit' }, h('span', { text: '🎯 HIT PLANE CAM' }), this.camHKey);
+    this.camHBtn.addEventListener('click', () => spec('hit'));
     // Wing break buttons: per wing, break FAR (wingtip: hard to fly) or HALF (fades into a stall + spin in 30 s)
     this.wingsPanel = h('div', { class: 'fl-wings' });
     for (const side of ['L', 'R'] as const) {
@@ -227,6 +243,8 @@ export class FlightHud {
       h('div', { style: 'display:flex;gap:6px;align-items:flex-start' }, this.wingsPanel, this.wingsBtn),
       this.walkBtn,
       this.replayBtn,
+      this.camMBtn,
+      this.camHBtn,
     );
     // replay bar (while replaying)
     const rb = (label: string, cls: string, fn: () => void) => {
@@ -331,6 +349,11 @@ export class FlightHud {
     if (crashed) this.wingsPanel.classList.remove('open');
     const rp = ctx.replay;
     setVisible(this.replayBtn, !!rp?.canReplay);
+    const offer = rp?.active ? null : (ctx.missiles?.camOffer?.() ?? null);
+    setVisible(this.camMBtn, !!offer?.missile);
+    if (offer?.missile) setText(this.camMText, offer.missile === 'nuke' ? '☢ NUKE CAM' : '🚀 MISSILE CAM');
+    setVisible(this.camHBtn, !!offer?.hit);
+    this.camHKey.style.display = offer?.missile ? 'none' : ''; // K rides the missile first
     setVisible(this.replayBar, !!rp?.active);
     this.el.classList.toggle('replaying', !!rp?.active);
     if (rp?.active) setText(this.replayCam, `CAM · ${rp.camName}${rp.speed < 0.9 ? ' · SLOW-MO' : ''}`);

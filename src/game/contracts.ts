@@ -251,6 +251,8 @@ export interface IMissiles extends GameSystem {
   readonly viewing?: boolean;
   /** Switch the view: 'missile' = ride your newest missile / nuke in flight, 'hit' = the plane you just hit, null = back. */
   spectate?(kind: 'missile' | 'hit' | null): string;
+  /** The cameras on offer right now (plane HUD dock buttons): your nuke / missile in flight, the plane you hit. */
+  camOffer?(): { missile: 'nuke' | 'missile' | null; hit: boolean };
   /** Replay: the other plane worth recording with yours (the ram target, the plane you hit, else the nearest). */
   coSubject?(): unknown;
 }
