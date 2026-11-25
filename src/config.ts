@@ -774,7 +774,9 @@ export const CONFIG = {
   missiles: {
     // perpetual traffic: planes kept in the sky per quality, spawn ring / despawn distance (m), wrecks kept (s)
     traffic: { count: { low: 6, medium: 10, high: 14 }, spawnR: 5600, despawnR: 7600, wreckKeepS: 150 },
-    lockCone: 0.35, // rad between the aim and the target for a lock-on (no lock needed to fire)
+    // rad between the aim and the target for a lock-on (no lock needed to fire). The reticle circle is drawn exactly this
+    // big, so "the box inside the circle" = locked (it was 0.35: you started locked, aiming changed nothing you could see)
+    lockCone: 0.15,
     seekCone: 0.45, // rad: an unlocked missile's seeker picks the plane up inside this cone…
     seekRange: 6000, // …within this distance (m)
     unguidedS: 18, // s an unlocked missile flies before self-destructing

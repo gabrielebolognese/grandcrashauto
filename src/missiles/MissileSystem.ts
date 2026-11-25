@@ -101,6 +101,14 @@ export class MissileSystem implements IMissiles {
   private specAnchor = new THREE.Vector3();
   private specOff = new THREE.Vector3();
   private specSide = new THREE.Vector3(1, 0, 0);
+  // the camera while we have it (control room / spectator cams). The FOV is OUR value: the camera rig stays off, and
+  // blending from cam.fov (which the rig rewrote every frame) made the zoom pump = the "flicker" (user report)
+  private camFov = 60;
+  private camDir = new THREE.Vector3(0, 0, 1); // the chase direction, turned smoothly (guidance corrections don't swing it)
+  private camOff = new THREE.Vector3();
+  private camAnch = false;
+  private igniteT = -9; // last launch flash (a salvo flashes once, not 8 strobes)
+  private boomT = -9; // last impact light
   private clock = 0;
   private flashT = 0;
   private focusV = new THREE.Vector3();
@@ -384,7 +392,7 @@ export class MissileSystem implements IMissiles {
   }
 
   /** Replay: the other plane to record with yours — the ram target, the plane you hit, else the nearest within 3 km. */
-  coSubject(): PlaneVisual | null {
+  coSubject(fallback: PlaneVisual | null = null): PlaneVisual | null {
     const T = this.traffic.planes;
     if (this.ramId !== null) {
       const r = T.find((x) => x.id === this.ramId);
@@ -392,6 +400,7 @@ export class MissileSystem implements IMissiles {
     }
     const h = this.lastHit;
     if (h && this.clock - h.t < 30 && T.includes(h.p)) return h.p.visual;
+    if (fallback) return fallback; // the plane you shot at (replay)
     const me = this.ctx.planes.currentTracked?.visual?.root ?? null;
     if (!me || this.ctx.game.mode !== 'plane') return null;
     me.getWorldPosition(_v);
@@ -439,18 +448,25 @@ export class MissileSystem implements IMissiles {
     }
     const cam = ctx.engine.camera;
     const eye = _v.set(0, 0, 0), look = _v2.set(0, 0, 0);
+    const first = !this.camSet;
     let fov = 55;
     if (s.m) {
       // a three-quarter chase from the side: the nuke big in frame, its trail streaming away (never through the lens)
       const m = s.m;
       const back = m.type.missileLen * 3 + 15;
-      const side = _v3.crossVectors(m.dir, UP);
-      if (side.lengthSq() > 1e-3) this.specSide.lerp(side.normalize(), 0.1).normalize(); // climbing straight up: keep the last side
+      if (first) this.camDir.copy(m.dir);
+      else this.camDir.lerp(m.dir, 1 - Math.exp(-dt / 0.3)).normalize();
+      const md = this.camDir;
+      const side = _v3.crossVectors(md, UP);
+      if (side.lengthSq() > 1e-3) {
+        if (first) this.specSide.copy(side.normalize());
+        else this.specSide.lerp(side.normalize(), 1 - Math.exp(-dt / 0.5)).normalize(); // climbing straight up: keep the last side
+      }
       this.specAnchor.copy(m.obj.position);
       // beside it and a touch ahead: the fire trail streams AWAY from the lens (close to it, it washes the frame out)
-      eye.copy(m.obj.position).addScaledVector(m.dir, back * 0.15).addScaledVector(this.specSide, back * 1.1).addScaledVector(UP, back * 0.35);
+      eye.copy(m.obj.position).addScaledVector(md, back * 0.15).addScaledVector(this.specSide, back * 1.1).addScaledVector(UP, back * 0.35);
       // look just ahead of its nose (the nuke near the centre of the frame), a touch toward where it is going
-      look.copy(m.obj.position).addScaledVector(m.dir, back * 0.45);
+      look.copy(m.obj.position).addScaledVector(md, back * 0.45);
       const tgt = m.target ?? m.seek;
       const goal = tgt ? tgt.pos : m.ground;
       if (goal) look.lerp(_v3.subVectors(goal, m.obj.position).normalize().multiplyScalar(back * 0.45).add(m.obj.position), 0.15);
@@ -488,11 +504,18 @@ export class MissileSystem implements IMissiles {
     cam.position.copy(this.camPos);
     _m.lookAt(this.camPos, look, UP);
     cam.quaternion.setFromRotationMatrix(_m);
-    if (Math.abs(cam.fov - fov) > 0.05) {
-      cam.fov += (fov - cam.fov) * Math.min(1, dt * 6);
+    this.setFov(fov, dt, first);
+    cam.updateMatrixWorld();
+  }
+
+  /** Our FOV, smoothed on our own value (never read back from cam.fov), written every frame we have the camera. */
+  private setFov(fov: number, dt: number, snap: boolean): void {
+    const cam = this.ctx.engine.camera;
+    this.camFov = snap ? fov : this.camFov + (fov - this.camFov) * (1 - Math.exp(-dt / 0.2));
+    if (Math.abs(cam.fov - this.camFov) > 1e-4) {
+      cam.fov = this.camFov;
       cam.updateProjectionMatrix();
     }
-    cam.updateMatrixWorld();
   }
 
   /** The small bar with the camera buttons (NUKE CAM / MISSILE CAM / HIT PLANE CAM / BACK). */
@@ -611,7 +634,10 @@ export class MissileSystem implements IMissiles {
     m.trail = ctx.fx.attachTrail?.(m.obj, new THREE.Vector3(0, 0, -t.missileLen * 0.5), { fire: 0.7, smoke: 0.5, size: Math.max(0.3, t.missileR * 2.2), cap: 2 }) ?? null;
     m.obj.add(this.flare(t));
     ctx.fx.smoke(m.pos, t.warhead === 'nuke' ? 3 : 1.2);
-    ctx.fx.flash?.(m.pos.x, m.pos.y, m.pos.z, 30, 6, 40);
+    if (this.clock - this.igniteT > 0.6) {
+      this.igniteT = this.clock;
+      ctx.fx.flash?.(m.pos.x, m.pos.y, m.pos.z, 18, 6, 40);
+    }
   }
 
   /** The exhaust flare: an additive glow at the tail, always a few pixels big, brighter at night (user request). */
@@ -777,7 +803,9 @@ export class MissileSystem implements IMissiles {
       this.nukeBlast(pos);
     } else {
       const vel = target ? target.vel.clone() : new THREE.Vector3();
-      ctx.fx.explosionEx?.({ position: pos, velocity: vel, radius: t.blast, kind: t.warhead === 'small' ? 'engine' : 'plane', light: true });
+      const light = this.clock - this.boomT > 0.4; // a salvo hitting one after another: one light flash, not a strobe
+      if (light) this.boomT = this.clock;
+      ctx.fx.explosionEx?.({ position: pos, velocity: vel, radius: t.blast, kind: t.warhead === 'small' ? 'engine' : 'plane', light });
       ctx.events.emit('planeExplosion', { position: pos, velocity: vel, radius: t.blast, kind: 'missile' });
       if (target) this.hitPlane(target, pos, part, t.warhead);
     }
@@ -983,9 +1011,11 @@ export class MissileSystem implements IMissiles {
       const fl = m.obj.getObjectByName('missile-flare') as THREE.Sprite | undefined;
       if (!fl) continue;
       const d = cam.distanceTo(m.obj.position);
-      // the flare is for seeing it from far away; close up the fire trail shows it
-      fl.visible = d > 100;
-      const k = Math.max(fl.userData.base as number, d * 0.012) * (0.8 + 1.2 * night) * (0.9 + 0.2 * Math.random());
+      // the flare is for seeing it from far away; close up the fire trail shows it. It grows in between 80 and 200 m
+      // (no on/off pop) and no longer jitters every frame (a big additive sprite jittering = the screen flickering)
+      const fade = clamp((d - 80) / 120, 0, 1);
+      fl.visible = fade > 0;
+      const k = Math.max(fl.userData.base as number, d * 0.012) * (0.8 + 1.2 * night) * fade;
       fl.scale.set(k, k, 1);
     }
   }
@@ -1020,18 +1050,25 @@ export class MissileSystem implements IMissiles {
     const cam = this.ctx.engine.camera;
     const l = c.launcher;
     const eye = _v.set(0, 0, 0), look = _v2.set(0, 0, 0);
+    const first = !this.camSet;
     let fov = 58;
+    let anchor: THREE.Vector3 | null = null; // riding a moving object: only the offset from it is smoothed
     if (c.phase === 'missile' && c.first && !c.first.done) {
       const m = c.first;
+      // the chase direction turns smoothly: the guidance's small corrections no longer swing the camera
+      if (first || !this.camAnch) this.camDir.copy(m.dir);
+      else this.camDir.lerp(m.dir, 1 - Math.exp(-dt / 0.25)).normalize();
+      const md = this.camDir;
       // behind, above and a little to the side: never looking down its own smoke trail
       const back = m.type.missileLen * 2.6 + 12;
-      const side = _v3.crossVectors(m.dir, UP);
+      const side = _v3.crossVectors(md, UP);
       if (side.lengthSq() < 1e-4) side.set(1, 0, 0);
       side.normalize();
-      eye.copy(m.obj.position).addScaledVector(m.dir, -back).addScaledVector(UP, back * 0.35).addScaledVector(side, back * 0.22);
+      anchor = m.obj.position;
+      eye.copy(anchor).addScaledVector(md, -back).addScaledVector(UP, back * 0.35).addScaledVector(side, back * 0.22);
       // locked: keep the plane in frame; no lock: look where the missile goes (you steer it)
       if (m.target) look.copy(c.target.pos);
-      else look.copy(m.obj.position).addScaledVector(m.dir, 400);
+      else look.copy(anchor).addScaledVector(md, 400);
       fov = 55;
     } else if (c.phase === 'impact') {
       c.impactT += dt;
@@ -1059,16 +1096,24 @@ export class MissileSystem implements IMissiles {
     }
     const gy = this.groundAt(eye.x, eye.z) + 1.5;
     if (eye.y < gy) eye.y = gy;
-    if (!this.camSet) this.camPos.copy(eye);
+    if (anchor) {
+      // a 500 m/s missile: smoothing the camera's world position left it 25–50 m behind, by an amount that changed
+      // with every frame's length — the missile pumped back and forth on screen. Smooth the offset instead.
+      _v4.subVectors(eye, anchor);
+      if (first) this.camOff.copy(_v4);
+      else if (!this.camAnch) this.camOff.subVectors(this.camPos, anchor); // carry on from where the camera is
+      this.camOff.lerp(_v4, first ? 1 : 1 - Math.exp(-dt / 0.12));
+      this.camPos.copy(anchor).add(this.camOff);
+    } else if (first) this.camPos.copy(eye);
     else this.camPos.lerp(eye, 1 - Math.exp(-dt / 0.08));
+    this.camAnch = !!anchor;
+    const cy = this.groundAt(this.camPos.x, this.camPos.z) + 1.5;
+    if (this.camPos.y < cy) this.camPos.y = cy;
     this.camSet = true;
     cam.position.copy(this.camPos);
     _m.lookAt(this.camPos, look, UP);
     cam.quaternion.setFromRotationMatrix(_m);
-    if (Math.abs(cam.fov - fov) > 0.05) {
-      cam.fov += (fov - cam.fov) * Math.min(1, dt * 6);
-      cam.updateProjectionMatrix();
-    }
+    this.setFov(fov, dt, first);
     cam.updateMatrixWorld();
   }
 
@@ -1085,6 +1130,7 @@ export class MissileSystem implements IMissiles {
     h.innerHTML = `
       <div class="msl-top"><b class="msl-site"></b><span class="msl-tgt"></span></div>
       <div class="msl-reticle"><i></i><i></i><i></i><i></i></div>
+      <div class="msl-guide"></div>
       <div class="msl-mark"><div class="msl-ring"></div><div class="msl-mlabel"></div></div>
       <div class="msl-edge">➤</div>
       <div class="msl-state"></div>
@@ -1107,6 +1153,7 @@ export class MissileSystem implements IMissiles {
     const q = (s: string) => h.querySelector(s) as HTMLElement;
     this.el = {
       site: q('.msl-site'), tgt: q('.msl-tgt'), mark: q('.msl-mark'), mlabel: q('.msl-mlabel'), edge: q('.msl-edge'), state: q('.msl-state'),
+      ring: q('.msl-ring'), ret: q('.msl-reticle'), guide: q('.msl-guide'),
       part: q('.msl-part'), msg: q('.msl-msg'), ammo: q('.msl-ammo'), all: q('.msl-all'), spread: q('.msl-spread'), replay: q('.msl-replay'), flash,
     };
     h.addEventListener('click', (e) => {
@@ -1132,16 +1179,41 @@ export class MissileSystem implements IMissiles {
     const d = this.launchers.pivot(l, _v).distanceTo(p.pos);
     el.site.textContent = `${l.name} · ${l.type.name}`;
     el.tgt.textContent = `target: ${p.name} · ${(d / 1000).toFixed(1)} km · ${Math.round(p.pos.y)} m${p.hit ? ' · HIT' : ''}`;
-    // the target marker (lit from any distance): a ring on screen, or an arrow at the edge
-    _v2.copy(p.pos).project(cam);
+    // the target box (from any distance): a square around the plane on screen, red = no lock, green = locked; off
+    // screen an arrow at the edge. The reticle circle is the lock cone itself: box inside the circle = locked.
+    const locked = this.locked(c);
+    const aiming = c.phase === 'aim' || (c.phase === 'impact' && !c.first);
     const W = window.innerWidth, H = window.innerHeight;
+    const tanH = Math.tan((cam.fov * Math.PI) / 360);
+    const rPx = clamp((Math.tan(CONFIG.missiles.lockCone) / tanH) * (H / 2), 30, H * 0.45);
+    el.ret.style.width = el.ret.style.height = `${Math.round(rPx * 2)}px`;
+    this.hud?.style.setProperty('--rr', `${Math.round(rPx)}px`);
+    el.ret.classList.toggle('lock', aiming && locked);
+    el.ret.style.opacity = aiming ? '1' : '0.35';
+    _v2.copy(p.pos).project(cam);
     const on = _v2.z < 1 && Math.abs(_v2.x) < 1 && Math.abs(_v2.y) < 1;
     if (on) {
+      const sx = ((_v2.x + 1) / 2) * W, sy = ((1 - _v2.y) / 2) * H;
+      const dc = Math.max(1, cam.position.distanceTo(p.pos));
+      const box = clamp(((p.visual.dims.span * 1.25) / dc / tanH) * (H / 2), 30, 260);
       el.mark.style.display = 'block';
       el.edge.style.display = 'none';
-      el.mark.style.transform = `translate(${((_v2.x + 1) / 2) * W}px, ${((1 - _v2.y) / 2) * H}px)`;
-      el.mlabel.textContent = `${p.name.split(' · ')[0]} · ${(d / 1000).toFixed(1)} km`;
+      el.mark.style.transform = `translate(${sx}px, ${sy}px)`;
+      el.ring.style.width = el.ring.style.height = `${Math.round(box)}px`;
+      el.ring.style.left = el.ring.style.top = `${-Math.round(box / 2)}px`;
+      el.mlabel.style.left = `${Math.round(box / 2) + 8}px`;
+      el.mlabel.style.top = `${-Math.round(box / 2)}px`;
+      el.mark.classList.toggle('lock', locked || !!c.first?.target);
+      el.mlabel.textContent = `${locked && aiming ? 'LOCKED · ' : ''}${p.name.split(' · ')[0]} · ${(d / 1000).toFixed(1)} km`;
+      // aiming without a lock: a dashed line from the reticle to the box (drag / steer along it)
+      const gx = sx - W / 2, gy = sy - H / 2, gl = Math.hypot(gx, gy);
+      if (aiming && !locked && gl > rPx + 4) {
+        el.guide.style.display = 'block';
+        el.guide.style.width = `${Math.round(gl - rPx - box / 2)}px`;
+        el.guide.style.transform = `translate(${W / 2 + (gx / gl) * rPx}px, ${H / 2 + (gy / gl) * rPx}px) rotate(${Math.atan2(gy, gx)}rad)`;
+      } else el.guide.style.display = 'none';
     } else {
+      el.guide.style.display = 'none';
       el.mark.style.display = 'none';
       el.edge.style.display = 'block';
       let x = _v2.x, y = _v2.y;
@@ -1153,10 +1225,9 @@ export class MissileSystem implements IMissiles {
       const r = Math.min(W, H) * 0.42;
       el.edge.style.transform = `translate(${W / 2 + Math.cos(a) * r}px, ${H / 2 + Math.sin(a) * r}px) rotate(${a}rad)`;
     }
-    const locked = this.locked(c);
     el.state.className = `msl-state ${c.phase === 'aim' ? (locked ? 'lock' : 'seek') : 'fly'}`;
     const guided = !!c.first?.target;
-    el.state.textContent = c.phase === 'aim' ? (locked ? 'LOCKED — S fires, it will hit' : 'NO LOCK — S fires straight (aim at the red marker to lock)') : c.phase === 'missile' ? (guided ? 'LOCKED ON — steer where it hits' : 'NO LOCK — flying straight, seeking…') : p.hit ? 'TARGET HIT' : 'MISSED';
+    el.state.textContent = c.phase === 'aim' ? (locked ? 'LOCKED — S fires, it will hit' : 'NO LOCK — bring the red box into the circle (or AUTO LOCK)') : c.phase === 'missile' ? (guided ? 'LOCKED ON — steer where it hits' : 'NO LOCK — flying straight, seeking…') : p.hit ? 'TARGET HIT' : 'MISSED';
     if (c.phase === 'missile' && c.first?.target) {
       const part = this.aimPoint(p, c.u, c.v, _v3);
       el.part.textContent = `HIT: ${partLabel(part)}`;

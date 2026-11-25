@@ -84,7 +84,7 @@
 .rp-exit { color: #fff; background: linear-gradient(180deg, #ff9784, #ff7a6b); box-shadow: 0 3px 0 #c24a3e; }
 .flight-hud.replaying > :not(.replay-bar) { display: none !important; }
 /* the replay has its own buttons: the top bar and Reset / ⋯ would sit under them */
-#ui-root.replaying :is(.tb-cluster, .boom-wrap) { display: none !important; }
+#ui-root.replaying :is(.tb-cluster, .boom-wrap, .hud-prompts) { display: none !important; }
 .crash-btn.replay { background: linear-gradient(180deg, #ff9784, #e0367a) !important; color: #fff !important; }
 /* Wing break panel */
 .fl-wingbtn { color: #fff; background: linear-gradient(180deg, #ffb38a, #f08a4b); box-shadow: 0 3px 0 #b8622e; }

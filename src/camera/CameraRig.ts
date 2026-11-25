@@ -299,6 +299,9 @@ export class CameraRig implements ICameraRig {
   // ───────────────────────────── per frame ─────────────────────────────
   update(_dt: number, _alpha: number): void {
     const ctx = this.ctx;
+    // the control room / NUKE CAM / HIT PLANE CAM own the camera (they snap() it back when they let go): writing the
+    // rig's FOV + pose under them every frame made their zoom pump (the missile "flicker")
+    if (ctx.missiles?.controlling || ctx.missiles?.viewing) return;
     const c = CONFIG.camera;
     const dt = Math.min(0.1, Math.max(0, ctx.engine.realDt));
     const f = this.frame;

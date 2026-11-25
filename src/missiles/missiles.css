@@ -5,22 +5,28 @@
 .msl-hud::after { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 20, 10, 0.45) 100%); }
 .msl-top { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); background: rgba(8, 24, 16, 0.72); border: 1px solid rgba(120, 255, 170, 0.35); border-radius: 8px; padding: 6px 12px; font-size: 12px; white-space: nowrap; display: flex; gap: 10px; }
 .msl-site { color: #9dffbf; letter-spacing: 0.04em; }
-.msl-reticle { position: absolute; left: 50%; top: 50%; width: 88px; height: 88px; transform: translate(-50%, -50%); border: 2px solid rgba(160, 255, 190, 0.85); border-radius: 50%; box-shadow: 0 0 12px rgba(80, 255, 140, 0.35); }
+/* the reticle circle = the lock cone (sized every frame); green and solid when the target box is inside it */
+.msl-reticle { position: absolute; left: 50%; top: 50%; width: 88px; height: 88px; transform: translate(-50%, -50%); border: 2px dashed rgba(220, 240, 230, 0.7); border-radius: 50%; transition: border-color 0.15s, opacity 0.2s; }
+.msl-reticle.lock { border: 3px solid #6bff9c; box-shadow: 0 0 14px rgba(80, 255, 140, 0.5); }
 .msl-reticle i { position: absolute; background: rgba(160, 255, 190, 0.9); }
 .msl-reticle i:nth-child(1) { left: 50%; top: -14px; width: 2px; height: 22px; transform: translateX(-1px); }
 .msl-reticle i:nth-child(2) { left: 50%; bottom: -14px; width: 2px; height: 22px; transform: translateX(-1px); }
 .msl-reticle i:nth-child(3) { top: 50%; left: -14px; height: 2px; width: 22px; transform: translateY(-1px); }
 .msl-reticle i:nth-child(4) { top: 50%; right: -14px; height: 2px; width: 22px; transform: translateY(-1px); }
 .msl-mark { position: absolute; left: 0; top: 0; width: 0; height: 0; display: none; }
-.msl-ring { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border: 3px solid #ff4d3d; border-radius: 6px; transform: rotate(45deg); box-shadow: 0 0 16px #ff4d3d, inset 0 0 10px rgba(255, 77, 61, 0.5); animation: msl-pulse 0.8s ease-in-out infinite alternate; }
-.msl-mlabel { position: absolute; left: 30px; top: -26px; font-size: 12px; color: #ffd2cc; text-shadow: 0 1px 3px #000; white-space: nowrap; }
+/* the target box: sized to the plane on screen; red = no lock, green = locked */
+.msl-ring { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border: 3px solid #ff4d3d; border-radius: 4px; box-shadow: 0 0 12px rgba(255, 77, 61, 0.9), inset 0 0 8px rgba(255, 77, 61, 0.4); animation: msl-pulse 0.8s ease-in-out infinite alternate; }
+.msl-mark.lock .msl-ring { border-color: #6bff9c; box-shadow: 0 0 14px rgba(80, 255, 140, 0.9), inset 0 0 8px rgba(80, 255, 140, 0.4); animation: none; }
+.msl-mlabel { position: absolute; left: 30px; top: -26px; font-size: 12px; font-weight: 700; color: #ffd2cc; text-shadow: 0 1px 3px #000; white-space: nowrap; }
+.msl-mark.lock .msl-mlabel { color: #c8ffd8; }
+.msl-guide { position: absolute; left: 0; top: 0; height: 0; display: none; border-top: 2px dashed rgba(255, 110, 95, 0.8); transform-origin: 0 0; }
 @keyframes msl-pulse { from { opacity: 0.65; } to { opacity: 1; } }
 .msl-edge { position: absolute; left: 0; top: 0; display: none; color: #ff4d3d; font-size: 34px; text-shadow: 0 0 10px #ff4d3d; transform-origin: 0 0; margin: -20px 0 0 -12px; }
-.msl-state { position: absolute; left: 50%; top: calc(50% + 66px); transform: translateX(-50%); font-size: 13px; font-weight: 700; letter-spacing: 0.06em; padding: 3px 10px; border-radius: 6px; background: rgba(0, 0, 0, 0.45); }
+.msl-state { position: absolute; left: 50%; top: calc(50% + var(--rr, 44px) + 22px); transform: translateX(-50%); white-space: nowrap; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; padding: 3px 10px; border-radius: 6px; background: rgba(0, 0, 0, 0.45); }
 .msl-state.lock { color: #6bff9c; }
 .msl-state.seek { color: #ffd166; }
 .msl-state.fly { color: #8fd0ec; }
-.msl-part { position: absolute; left: 50%; top: calc(50% + 96px); transform: translateX(-50%); font-size: 16px; font-weight: 800; color: #ff8a7a; text-shadow: 0 1px 4px #000; display: none; }
+.msl-part { position: absolute; left: 50%; top: calc(50% + var(--rr, 44px) + 52px); transform: translateX(-50%); font-size: 16px; font-weight: 800; color: #ff8a7a; text-shadow: 0 1px 4px #000; display: none; }
 .msl-msg { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 14px; color: #fff; background: rgba(0, 0, 0, 0.55); padding: 4px 10px; border-radius: 6px; transition: opacity 0.3s; opacity: 0; white-space: nowrap; }
 .msl-ammo { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(14px, env(safe-area-inset-bottom)); display: flex; gap: 5px; }
 .msl-ammo i { width: 10px; height: 26px; border-radius: 3px; border: 1px solid rgba(160, 255, 190, 0.6); background: linear-gradient(to top, rgba(110, 255, 160, 0.7) calc(var(--k) * 100%), transparent 0); }
@@ -38,7 +44,9 @@
 .msl-spec.on { display: flex; }
 .msl-spec.offer { left: auto; right: var(--gr); transform: none; top: calc(var(--gt) + 108px); flex-direction: column; align-items: flex-end; }
 #ui-root.is-touch .msl-spec.offer { flex-direction: row; } /* phones: one row, clear of the TURBO button */
-#ui-root.replaying .msl-spec { display: none; }
+#ui-root.replaying .msl-spec, #ui-root.replaying .msl-hud { display: none !important; }
+/* a replay started from the control room: its NEXT CAM / RESTART / EXIT bar lives in the flight HUD */
+#ui-root.msl-control.replaying .flight-hud { display: block !important; }
 .msl-spec .msl-b { font-size: 13px; padding: 7px 12px; }
 .msl-spec-t { color: #fff; font: 700 13px system-ui, sans-serif; text-shadow: 0 1px 3px #000a; background: rgba(10, 14, 22, 0.6);
   padding: 7px 12px; border-radius: 10px; white-space: nowrap; }

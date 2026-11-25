@@ -254,7 +254,7 @@ export interface IMissiles extends GameSystem {
   /** The cameras on offer right now (plane HUD dock buttons): your nuke / missile in flight, the plane you hit. */
   camOffer?(): { missile: 'nuke' | 'missile' | null; hit: boolean };
   /** Replay: the other plane worth recording with yours (the ram target, the plane you hit, else the nearest). */
-  coSubject?(): unknown;
+  coSubject?(fallback?: unknown): unknown;
 }
 
 /** Several independently animated people in one mesh (src/npc/AvatarGroup). Matrices are absolute world matrices. */

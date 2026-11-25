@@ -120,6 +120,22 @@ export class Replay implements IReplay {
           f.cm[o + 12] -= delta.x;
           f.cm[o + 14] -= delta.z;
         }
+        if (f.x) for (let o = 0; o < f.x.length; o += 17) {
+          // the missiles (they were never shifted: after a shift they replayed 2 km off)
+          f.x[o + 12] -= delta.x;
+          f.x[o + 14] -= delta.z;
+        }
+      }
+      if (this.active) {
+        // playing: the planes' parents (roots / wreck pieces) just moved by -delta with the world, and the recorded
+        // matrices too — the saved parent inverses must follow, or every pose lands one shift (~2 km) off and the
+        // cameras film empty sky (the streaming focus follows the replayed plane, so a pass usually shifts once)
+        for (const s of this.saved.concat(this.coSaved)) {
+          const p = s.obj.parent;
+          if (!p) continue;
+          p.updateWorldMatrix(true, false);
+          s.inv.copy(p.matrixWorld).invert();
+        }
       }
       for (const e of this.events) {
         const p = e.data.position as THREE.Vector3 | undefined;
@@ -136,22 +152,32 @@ export class Replay implements IReplay {
     this.visual = null;
     this.recT = 0;
     this.hadEvent = false;
+    this.extras = [];
+    this.watchT = -1;
   }
 
-  // a sky plane hit by your missiles (src/missiles): recorded instead of your plane, with the missiles
+  // a sky plane your missiles fly at (src/missiles), with the missiles. Flying, YOUR plane stays the recorded subject
+  // and this plane is recorded beside it (the co track): a crash of yours afterwards replays your plane, not the one
+  // you shot down (user report). In the car it is the subject itself.
   private watchVisual: PlaneVisual | null = null;
   private extras: THREE.Object3D[] = [];
   private extrasAdded: THREE.Object3D[] = [];
+  private watchT = -1; // recording time of the last shot at it
+  // playback: the cameras follow the co track (the plane you shot) instead of the subject (your plane, flying on)
+  private camCo = false;
 
-  /** Record another plane (+ extra objects: the missiles) from now on, instead of yours. */
+  /** Record another plane (+ extra objects: the missiles) from now on, next to yours (or instead, in the car). */
   watch(visual: PlaneVisual, extra: THREE.Object3D[]): void {
     if (this.active) this.stop();
+    const flying = this.ctx.game.mode === 'plane' && !!this.ctx.planes.active;
     if (visual !== this.watchVisual) {
-      this.clear();
+      if (!flying) this.clear();
       this.watchVisual = visual;
-      this.visual = visual;
+      if (!flying) this.visual = visual;
     }
-    this.extras = [...extra];
+    // keep the indices of the missiles already recorded (each frame stores them in this order)
+    for (const o of extra) if (!this.extras.includes(o)) this.extras.push(o);
+    this.watchT = this.recT;
   }
 
   addExtra(obj: THREE.Object3D): void {
@@ -178,7 +204,7 @@ export class Replay implements IReplay {
     const { ctx } = this;
     const planes = ctx.planes;
     if (ctx.game.state !== 'driving') return;
-    const subject = this.watchVisual ?? (ctx.game.mode === 'plane' && planes.active ? planes.visual : null);
+    const subject = (ctx.game.mode === 'plane' && planes.active ? planes.visual : null) ?? this.watchVisual;
     if (!subject) return;
     if (subject !== this.visual) {
       this.clear();
@@ -217,8 +243,11 @@ export class Replay implements IReplay {
       });
     }
     let cv: PlaneVisual | null = null, cm: Float32Array | null = null, cvs: Float32Array | null = null;
-    if (!this.watchVisual) {
-      cv = (ctx.missiles as { coSubject?: () => PlaneVisual | null } | undefined)?.coSubject?.() ?? null;
+    {
+      // the other plane: the one you shot at, else the ram target / the plane you hit / the nearest
+      // (the ram target, else the plane you hit last, else the one you shot at in the last minute, else the nearest)
+      const shotAt = this.watchVisual && this.recT - this.watchT < 60 ? this.watchVisual : null;
+      cv = (ctx.missiles as { coSubject?: (fallback?: PlaneVisual | null) => PlaneVisual | null } | undefined)?.coSubject?.(shotAt) ?? shotAt;
       if (cv && cv !== this.visual) {
         const cp = cv.parts;
         const same = f?.cv === cv;
@@ -244,18 +273,6 @@ export class Replay implements IReplay {
     const last = this.frames[this.frames.length - 1].t;
     this.t1 = last + 1.2;
     this.t0 = Math.max(this.frames[0].t, last - CONFIG.replay.seconds);
-    // start a few seconds before the first big moment if there is one; slow motion only around the main moments
-    // (engine blasts, the split / tail / total explosion, the first hard impact) — not every secondary pop
-    let impact = false;
-    this.keyEvents = this.events.filter((e) => {
-      if (e.kind === 'engineExplode') return true;
-      if (e.kind === 'planeExplosion') return (e.data.kind as string) !== 'secondary';
-      if ((e.data.outcome as string) === 'landing' || impact) return false;
-      impact = true;
-      return true;
-    });
-    const first = this.keyEvents.find((e) => e.t >= this.t0);
-    if (first) this.t0 = Math.max(this.t0, first.t - CONFIG.replay.leadIn);
     this.saved = [];
     this.visual.parts.forEach((p, i) => {
       const o = p.object;
@@ -287,9 +304,36 @@ export class Replay implements IReplay {
     this.appliedVs = null;
     const idx = this.visual.parts.findIndex((p) => p.name === 'fuselageCenter');
     this.subjIdx = idx >= 0 ? idx : 0;
+    // whose story: your own crash (or an engine you blew after the shot) = your plane, with a pass on the other one;
+    // a missile kill while you fly on (the control room's REPLAY) = the plane you shot down, from the missile
+    const planes = ctx.planes;
+    const own = ctx.game.mode === 'plane' && this.visual === planes.visual;
+    const ownLast = this.events.reduce((t, e) => (e.kind === 'engineExplode' ? Math.max(t, e.t) : t), -1);
+    this.camCo = own && !!this.co && this.co === this.watchVisual && this.coSaved.length > 0 && !planes.crashed && ownLast < this.watchT;
+    const missileStory = this.camCo || (!!this.watchVisual && this.visual === this.watchVisual);
+    // start a few seconds before the first big moment if there is one; slow motion only around the main moments
+    // (engine blasts, the split / tail / total explosion, the first hard impact) — not every secondary pop, and only
+    // what happened to the plane the cameras follow (your crash: not the missiles that hit another plane km away)
+    const followed = this.camCo && this.co ? this.co : this.visual;
+    const nearR = Math.max(300, clamp(followed.dims.length, 10, 75) * 5);
+    const near = (e: RecEvent): boolean => {
+      const p = e.data.position as THREE.Vector3 | undefined;
+      return !p?.isVector3 || p.distanceTo(this.subjectAt(e.t, _v)) < nearR;
+    };
+    let impact = false;
+    this.keyEvents = this.events.filter((e) => {
+      if (!near(e)) return false;
+      if (e.kind === 'engineExplode') return true;
+      if (e.kind === 'planeExplosion') return (e.data.kind as string) !== 'secondary';
+      if ((e.data.outcome as string) === 'landing' || impact) return false;
+      impact = true;
+      return true;
+    });
+    const first = this.keyEvents.find((e) => e.t >= this.t0);
+    if (first) this.t0 = Math.max(this.t0, first.t - CONFIG.replay.leadIn);
     this.subjectAt(this.t0, this.subj); // the streaming focus is valid from the first frame
-    this.shots = this.extras.length ? ['Missile', 'Chase'] : ['Chase'];
-    if (this.co && this.coSaved.length) this.shots.push('Hit plane'); // a whole pass on the plane you rammed
+    this.shots = missileStory && this.extras.length ? ['Missile', 'Chase'] : ['Chase'];
+    if (!this.camCo && this.co && this.coSaved.length) this.shots.push('Hit plane'); // a whole pass on the plane you rammed / shot
     // the missiles (removed from the scene after their impact) come back for the replay
     this.extrasAdded = [];
     for (const o of this.extras) {
@@ -299,12 +343,13 @@ export class Replay implements IReplay {
         this.extrasAdded.push(o);
       }
     }
-    if (this.frames.some((f) => f.a)) this.shots.push('You');
+    if (!this.camCo && this.frames.some((f) => f.a)) this.shots.push('You');
     this.shots.push('Side', 'Ground', 'Orbit');
-    if (this.visual.partByName.fin || this.visual.partByName.tailCone) this.shots.push('Tail');
+    const cv = this.camCo && this.co ? this.co : this.visual;
+    if (cv.partByName.fin || cv.partByName.tailCone) this.shots.push('Tail');
     this.shots.push('Top');
     this.shot = 0;
-    this.size = clamp(this.visual.dims.length, 10, 75);
+    this.size = clamp(cv.dims.length, 10, 75);
     const cam = ctx.engine.camera;
     this.camSaved = { fov: cam.fov, near: cam.near };
     this.restart();
@@ -348,6 +393,7 @@ export class Replay implements IReplay {
     if (this.co && this.coLive && this.co.applyState) this.co.applyState(this.coLive);
     this.co = null;
     this.coLive = null;
+    this.camCo = false;
     for (const o of this.extras) o.matrixAutoUpdate = true;
     for (const o of this.extrasAdded) o.removeFromParent();
     this.extrasAdded = [];
@@ -513,9 +559,27 @@ export class Replay implements IReplay {
     while (i < F.length - 2 && F[i + 1].t < t) i++;
     const a = F[i], b = F[Math.min(F.length - 1, i + 1)];
     const u = b.t > a.t ? clamp((t - a.t) / (b.t - a.t), 0, 1) : 0;
+    const okA = this.trackPos(a, out), okB = this.trackPos(b, _s2);
+    if (okA && okB) return out.lerp(_s2, u);
+    if (okB) return out.copy(_s2);
+    if (okA) return out;
+    // the other plane before it was first recorded: where it was first seen
+    for (const f of F) if (f.t >= t && this.trackPos(f, out)) return out;
+    return out.set(0, 0, 0);
+  }
+
+  /** The followed plane's centre in a frame: yours (subject track) or the one you shot (co track, camCo). */
+  private trackPos(f: Frame, out: THREE.Vector3): boolean {
+    if (this.camCo) {
+      const c = this.coIdx * 16;
+      if (f.cv !== this.co || !f.cm || c + 16 > f.cm.length) return false;
+      out.set(f.cm[c + 12], f.cm[c + 13], f.cm[c + 14]);
+      return true;
+    }
     const o = this.subjIdx * 16;
-    if (o + 16 > a.m.length || o + 16 > b.m.length) return out.set(0, 0, 0);
-    return out.set(a.m[o + 12], a.m[o + 13], a.m[o + 14]).lerp(_s2.set(b.m[o + 12], b.m[o + 13], b.m[o + 14]), u);
+    if (o + 16 > f.m.length) return false;
+    out.set(f.m[o + 12], f.m[o + 13], f.m[o + 14]);
+    return true;
   }
 
   /** Fixed spectator positions for this pass (side: by the big moment; ground: by where it all ended). */
@@ -555,7 +619,7 @@ export class Replay implements IReplay {
   /** What the cameras look at: the centre fuselage (else the first part), velocity from the recording. */
   private updateSubject(a: Frame, b: Frame, u: number, realDt: number): void {
     const o = this.subjIdx * 16;
-    if (this.shots[this.shot] === 'Hit plane' && this.coA?.cm && this.coB?.cm) {
+    if ((this.camCo || this.shots[this.shot] === 'Hit plane') && this.coA?.cm && this.coB?.cm) {
       const c = this.coIdx * 16;
       _p.set(this.coA.cm[c + 12], this.coA.cm[c + 13], this.coA.cm[c + 14]);
       _p2.set(this.coB.cm[c + 12], this.coB.cm[c + 13], this.coB.cm[c + 14]);
@@ -581,7 +645,7 @@ export class Replay implements IReplay {
   }
 
   private partPos(name: string, out: THREE.Vector3): THREE.Vector3 | null {
-    const p = this.visual?.partByName[name];
+    const p = (this.camCo && this.co ? this.co : this.visual)?.partByName[name];
     if (!p) return null;
     p.object.updateWorldMatrix(true, false);
     return out.setFromMatrixPosition(p.object.matrixWorld);

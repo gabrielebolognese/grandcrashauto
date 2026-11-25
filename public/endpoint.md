@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 12 · 2026-11-25
+Endpoint version: 13 · 2026-11-25
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -107,12 +107,14 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
 
   **How to shoot:** on the map, tap a plane, then SHOOT. The map zooms out and the turrets glow with a line to the target; **tap a turret on the map** and you are in its control room, looking from behind it.
   - Aim with drag, A/D/W or the arrows, or press **AUTO LOCK (L)** to swing onto the target. Press S to fire. **No lock is needed.**
+  - **Aiming:** the target always has a box around it. A **red box** (with a dashed line from the circle to it) means no lock; bring it **into the circle** and the box and circle turn **green** = locked. The circle is the lock zone itself (about 8.5°). You start a little off the target, so you aim it yourself (or press AUTO LOCK). Off screen, a red arrow at the edge points to it.
   - While you are in the control room your own plane waits in the air exactly where it was, and carries on when you press BACK.
   - Missiles carry a bright exhaust flare, so they are easy to follow from far away, especially at night.
-  - Aimed at the red marker, it locks and **always hits**; the same keys then pick where (nose, tail, a wing, an engine).
+  - Locked (green), it **always hits**; the same keys then pick where (nose, tail, a wing, an engine).
   - Without a lock the missile flies straight and the keys steer it. Its seeker locks on if the plane comes in front of it.
   - Each S fires again. BACK returns to your car or plane while the missiles keep going.
-  - The replay shows the missile run and the plane going down. Flying, you can also RAM a sky plane on autopilot, or just crash into one.
+  - REPLAY in the control room shows the missile run and the plane you shot going down. If you crash **your own** plane afterwards, the replay is about **your** plane (the plane you shot gets its own "Hit plane" pass). Flying, you can also RAM a sky plane on autopilot, or just crash into one.
+  - The missile cameras are steady: no zoom pumping or flicker while you follow a missile or watch the plane go down, and a salvo no longer strobes the screen.
   - **Camera switches (K or the camera buttons: flying, they join the button column on the right under PLANE / REPLAY; in the car, on the right under the speed card):** **NUKE CAM / MISSILE CAM** rides your newest nuke or missile in flight (also one fired from the map with NUKE, or after BACK), then follows the plane it hits all the way down. **HIT PLANE CAM** follows the sky plane you just rammed, crashed into or shot. Your own plane waits in the air while you watch; K or BACK returns. While you watch (and in the control room, and during a replay) the top menu bar and the Explode / Reset buttons are hidden, so nothing covers the view or the camera controls.
   - After a ram, the replay shows **both planes**, with a whole pass on the plane you hit (camera "Hit plane").
 - **Towers:** 7 crashable towers in the countryside around the city, each a teleport place:
@@ -297,7 +299,7 @@ want to cut it short.
 
 | Command | Effect |
 |---|---|
-| `replay` | after a crash, replays the last ~14 s. **One camera per pass, complete**: the whole clip plays from one camera, and the next pass switches to the next camera. Order: Chase, Hit plane (only after a ram or a mid-air crash: a whole pass on the other plane), You (only if you were walking), Side (a spectator beside the big moment), Ground (a spectator on the ground near the crash site), Orbit, Tail, Top. The plane looks intact until the moment it broke, and fires appear only when they started. Slow motion around the main moments (engine blasts, the split / tail / total explosion, the first hard impact) |
+| `replay` | after a crash, replays the last ~14 s. **One camera per pass, complete**: the whole clip plays from one camera, and the next pass switches to the next camera. Order: Chase, Hit plane (only after a ram, a mid-air crash or a missile shot: a whole pass on the other plane), You (only if you were walking), Side (a spectator beside the big moment), Ground (a spectator on the ground near the crash site), Orbit, Tail, Top. The plane looks intact until the moment it broke, and fires appear only when they started. Slow motion around the main moments (engine blasts, the split / tail / total explosion, the first hard impact) |
 | `replay next` · `replay restart` · `replay stop` | next camera, starting the clip again from the beginning · the same camera from the start · stop |
 
 **Time**
@@ -472,6 +474,11 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v13 · 2026-11-25:** missiles: no flicker, clean aiming, the right replay.
+  - No more screen flicker with missiles: in the control room and the missile / hit-plane cameras, the normal camera kept rewriting the zoom under them every frame, so the view pumped in and out. Missile chase cameras are now steady (no back-and-forth stutter), flares no longer jitter or pop, and a salvo flashes once instead of strobing.
+  - Aiming: the target has a box, red until it is inside the circle, then green = locked. The circle is now the real lock zone (smaller than before: you no longer start already locked). A dashed line points from the circle to the red box.
+  - Replay: after you shoot a plane down, a crash of your own plane replays **your** plane (it showed the plane you shot). The control room's REPLAY still shows the missile run. Fixed: replayed planes and missiles jumped about 2 km away after the world recentred mid-replay (the camera then showed empty sky). The replay buttons now show for a replay started from the control room, also in the car.
 
 - **v12 · 2026-11-25:** no more overlapping buttons. The camera buttons (NUKE CAM / MISSILE CAM / HIT PLANE CAM) moved from the top centre into the right-hand button column (under the speed card in the car). While a camera is on, in the control room and in the replay, the top menu bar and Explode / Reset are hidden, so the replay buttons and the camera bar no longer cover them. The control-room key hints moved under its top line (hidden on phones).
 

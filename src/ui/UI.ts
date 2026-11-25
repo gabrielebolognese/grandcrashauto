@@ -435,7 +435,8 @@ export class UI implements IUI, UIHost {
     const touch = this.touchOn && !this.rotate?.shown;
     const planes = this.ctx.planes;
     this.touch.setVisible(driving && !plane && touch);
-    this.flightHud.setVisible(plane);
+    // the replay bar lives in the flight HUD: up during any replay (one started from the control room in the car too)
+    this.flightHud.setVisible(plane || (driving && !!this.ctx.replay?.active));
     const walking = plane && !!this.ctx.walker?.active;
     const replay = !!this.ctx.replay?.active;
     this.flightCtl.setVisible(plane && touch && !planes?.crashed && !planes?.inCockpitSequence && !walking && !replay);
