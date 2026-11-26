@@ -35,6 +35,8 @@ const _q = new THREE.Quaternion();
 const _qf = new THREE.Quaternion();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
 const _up = new THREE.Vector3();
+const _wa = new THREE.Vector3();
+const _wb = new THREE.Vector3();
 const AXIS_Y = new THREE.Vector3(0, 1, 0);
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 
@@ -63,6 +65,9 @@ export class PlaneRig {
   private eye: THREE.Vector3 | null = null;
   private wing: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private fresh = true;
+  // WATCH IT (missiles): the chase camera turns to look past your plane at the plane you watch (eased in / out)
+  private watchW = 0;
+  private watchAt = new THREE.Vector3();
   private switchT = 99;
   private readonly pivotVel = new THREE.Vector3();
   private followPiece = false;
@@ -138,10 +143,21 @@ export class PlaneRig {
     const ev = this.ctx.events;
     const plane = () => this.ctx.game?.mode === 'plane';
     ev.on('planeSpawned', () => this.reset());
-    ev.on('planeExplosion', (e) => !e.replay && plane() && this.onExplosion(e.position, e.velocity, e.radius, e.kind === 'missile' || e.kind === 'nuke' ? 'secondary' : e.kind));
+    ev.on('planeExplosion', (e) => {
+      if (e.replay || !plane()) return;
+      // another plane blowing up (a sky plane you shot / nuked / rammed) only shakes your camera: the crash cinematic
+      // is for YOUR plane (it cut the view away to the plane you hit)
+      const other = !!e.tracked && e.tracked !== this.ctx.planes?.currentTracked;
+      this.onExplosion(e.position, e.velocity, e.radius, other || e.kind === 'missile' || e.kind === 'nuke' ? 'secondary' : e.kind);
+    });
     ev.on('engineExplode', (e) => !e.replay && plane() && this.shakeAt(e.position, CONFIG.camera.planeEngineShake, 350, 3));
     ev.on('planeBreak', (e) => plane() && this.shakeAt(e.position, 0.25 + 0.6 * clamp(e.intensity, 0, 1), 400, 0));
-    ev.on('planeImpact', (e) => !e.replay && plane() && this.onImpact(e.position, e.velocity, e.outcome, e.energy));
+    ev.on('planeImpact', (e) => {
+      if (e.replay || !plane()) return;
+      // another plane's wreck hitting the ground: a shake at most, never your crash shot
+      if (e.tracked && e.tracked !== this.ctx.planes?.currentTracked) this.shakeAt(e.position, 0.4, 500, 0);
+      else this.onImpact(e.position, e.velocity, e.outcome, e.energy);
+    });
     ev.on('touchdown', (e) => {
       if (!plane()) return;
       if (e.hard) this.shakeAt(e.position, 0.45, 300, 0);
@@ -482,6 +498,20 @@ export class PlaneRig {
       rollT = 0;
     }
     if (st?.onGround && !tumbling) pitchT *= 0.3;
+    // WATCH IT: from behind your plane, along the line to the plane you watch (your plane in front, it beyond)
+    const wf = (this.ctx.missiles as { watchFocus?: THREE.Vector3 | null } | undefined)?.watchFocus ?? null;
+    if (wf) this.watchAt.copy(wf);
+    this.watchW += ((wf && !tumbling && !st?.onGround ? 1 : 0) - this.watchW) * expK(1.5, dt);
+    if (this.watchW < 0.002) this.watchW = 0;
+    if (this.watchW > 0) {
+      const wx = this.watchAt.x - this.pivot.x, wy = this.watchAt.y - this.pivot.y, wz = this.watchAt.z - this.pivot.z;
+      const yawW = Math.atan2(wx, wz);
+      let dy = yawW - yawT;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      yawT += dy * this.watchW;
+      pitchT += (clamp(Math.atan2(wy, Math.hypot(wx, wz)), -0.6, 0.45) * 0.5 - pitchT) * this.watchW;
+      rollT *= 1 - this.watchW;
+    }
 
     let distT = (c.planeDistBase + this.size * c.planeDistK) * (1 + 0.15 * speedN) * (1 + c.planeTailWiden * this.tail);
     let heightT = (2 + this.size * c.planeHeightK) * (1 + 0.6 * this.tail);
@@ -492,6 +522,11 @@ export class PlaneRig {
       distT = Math.max(distT, 22);
     }
     distT *= this.zoom;
+    if (this.watchW > 0) {
+      // WATCH IT: further back and higher — your plane smaller, in the lower part of the frame
+      distT *= 1 + 0.6 * this.watchW;
+      heightT *= 1 + 1.2 * this.watchW;
+    }
     const fovT = c.planeFov + c.planeFovSpeed * Math.pow(speedN, 1.2) + 6 * this.tail;
 
     if (this.fresh) {
@@ -539,6 +574,15 @@ export class PlaneRig {
     this.desired.set(0, this.height, -this.dist).applyQuaternion(_qf).add(this.pivot).add(this.inertiaOut);
     this.look.set(0, this.height * 0.22, this.size * 0.35 - this.size * 0.7 * this.tail).applyQuaternion(_qf).add(this.pivot);
     _up.set(0, 1, 0).applyQuaternion(_qf);
+    if (this.watchW > 0) {
+      // aim between the two: the watched plane a little above the centre, yours below it
+      _wa.subVectors(this.watchAt, this.desired).normalize();
+      _wb.subVectors(this.look, this.desired).normalize();
+      _wa.lerp(_wb, 0.25).normalize();
+      _wb.copy(this.desired).addScaledVector(_wa, Math.max(50, this.dist * 2));
+      this.look.lerp(_wb, this.watchW);
+      _up.lerp(_wa.set(0, 1, 0), this.watchW).normalize();
+    }
 
     const p = this.chasePose.pos;
     this.occ.apply(this.ctx, this.pivot, this.desired, dt, p);

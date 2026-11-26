@@ -401,6 +401,7 @@ export class Replay implements IReplay {
     this.liveState = null;
     this.appliedVs = null;
     ctx.fx.replayClock?.(null);
+    (ctx.missiles as { replayAt?: (t: number | null) => void } | undefined)?.replayAt?.(null);
     const av = (ctx.walker as unknown as { avatar?: { object?: THREE.Object3D } }).avatar?.object;
     if (av && !ctx.walker.active) av.visible = false;
     const cam = ctx.engine.camera;
@@ -500,6 +501,8 @@ export class Replay implements IReplay {
     }
     this.updateSubject(a, b, u, realDt);
     this.direct(realDt);
+    // the missiles' smoke trails / flames as they were then (after the camera moved: the ribbons face it)
+    (this.ctx.missiles as { replayAt?: (t: number | null) => void } | undefined)?.replayAt?.(a.fc + (b.fc - a.fc) * u);
   }
 
   private co: PlaneVisual | null = null;

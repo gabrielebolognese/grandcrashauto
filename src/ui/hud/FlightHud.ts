@@ -85,6 +85,8 @@ export class FlightHud {
   private camMText: HTMLSpanElement;
   private camHBtn: HTMLButtonElement;
   private camHKey: HTMLElement;
+  private watchBtn: HTMLButtonElement;
+  private watchText: HTMLSpanElement;
   private wingsBtn: HTMLButtonElement;
   private wingsPanel: HTMLDivElement;
   private replayBar: HTMLDivElement;
@@ -216,6 +218,14 @@ export class FlightHud {
     this.camHKey = h('kbd', { text: 'K' });
     this.camHBtn = h('button', { class: 'fl-dock-btn fl-camh', type: 'button', 'aria-label': 'Follow the plane you hit' }, h('span', { text: '🎯 HIT PLANE CAM' }), this.camHKey);
     this.camHBtn.addEventListener('click', () => spec('hit'));
+    // WATCH IT is on: your plane keeps its distance from that plane, the camera on it — this stops it
+    this.watchText = h('span', { text: '👁 STOP WATCHING' });
+    this.watchBtn = h('button', { class: 'fl-dock-btn fl-watch', type: 'button', 'aria-label': 'Stop watching the plane' }, this.watchText);
+    this.watchBtn.addEventListener('click', () => {
+      uiSound('click');
+      const t = ctx.missiles?.watchPlane?.(null);
+      if (t) ctx.events.emit('toast', { text: t, ms: 1400 });
+    });
     // Wing break buttons: per wing, break FAR (wingtip: hard to fly) or HALF (fades into a stall + spin in 30 s)
     this.wingsPanel = h('div', { class: 'fl-wings' });
     for (const side of ['L', 'R'] as const) {
@@ -245,6 +255,7 @@ export class FlightHud {
       this.replayBtn,
       this.camMBtn,
       this.camHBtn,
+      this.watchBtn,
     );
     // replay bar (while replaying)
     const rb = (label: string, cls: string, fn: () => void) => {
@@ -354,6 +365,9 @@ export class FlightHud {
     if (offer?.missile) setText(this.camMText, offer.missile === 'nuke' ? '☢ NUKE CAM' : '🚀 MISSILE CAM');
     setVisible(this.camHBtn, !!offer?.hit);
     this.camHKey.style.display = offer?.missile ? 'none' : ''; // K rides the missile first
+    const wn = rp?.active ? null : (ctx.missiles?.watchingName ?? null);
+    setVisible(this.watchBtn, !!wn);
+    if (wn) setText(this.watchText, `👁 STOP WATCHING · ${wn.toUpperCase()}`);
     setVisible(this.replayBar, !!rp?.active);
     this.el.classList.toggle('replaying', !!rp?.active);
     if (rp?.active) setText(this.replayCam, `CAM · ${rp.camName}${rp.speed < 0.9 ? ' · SLOW-MO' : ''}`);

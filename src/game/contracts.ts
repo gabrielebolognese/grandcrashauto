@@ -255,6 +255,12 @@ export interface IMissiles extends GameSystem {
   camOffer?(): { missile: 'nuke' | 'missile' | null; hit: boolean };
   /** Replay: the other plane worth recording with yours (the ram target, the plane you hit, else the nearest). */
   coSubject?(fallback?: unknown): unknown;
+  /** WATCH IT (map, flying): your plane keeps a good distance from this sky plane (far enough for a nuke), your camera looks at it; null = stop. */
+  watchPlane?(planeId: number | null): string;
+  /** The sky plane you are watching (for the camera), else null. */
+  readonly watchFocus?: THREE.Vector3 | null;
+  /** Its name while you watch one (the HUD's STOP WATCHING button), else null. */
+  readonly watchingName?: string | null;
 }
 
 /** Several independently animated people in one mesh (src/npc/AvatarGroup). Matrices are absolute world matrices. */
@@ -624,6 +630,8 @@ export interface IPlaneSystem extends GameSystem {
   readonly crashed: boolean;
   /** Ram autopilot (missiles / map "RAM"): where to fly into, or null. */
   ramTarget?: (() => THREE.Vector3 | null) | null;
+  /** The speed (m/s) the ram / watch autopilot wants, null = its default (≈ 1.3 × cruise). */
+  ramSpeed?: (() => number | null) | null;
   /** Crashed OR otherwise wrecked (gear collapsed in a hard landing, split, hit the ground): no more engine blasts. */
   readonly wrecked?: boolean;
   readonly crashTime: number;

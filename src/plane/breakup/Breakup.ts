@@ -395,7 +395,7 @@ export class Breakup implements IBreakup {
     this.explosionFx(center, vel, radius, 'plane', near, true);
     this.evPos.copy(center);
     this.evVel.copy(vel);
-    this.ctx.events.emit('planeExplosion', { position: this.evPos, velocity: this.evVel, radius, kind: 'total' });
+    this.ctx.events.emit('planeExplosion', { position: this.evPos, velocity: this.evVel, radius, kind: 'total', tracked: rt.plane });
     rt.exploded = true;
     rt.ignited = true;
     const all: number[] = [];
@@ -1191,7 +1191,7 @@ export class Breakup implements IBreakup {
         const radius = cfgP.explosionRadius * (blast.kind === 'middle' ? 0.38 : 0.3);
         this.explosionFx(blast.center, vel, radius, 'plane', near, true);
         this.evPos.copy(blast.center);
-        this.ctx.events.emit('planeExplosion', { position: this.evPos, velocity: vel, radius, kind: blast.kind });
+        this.ctx.events.emit('planeExplosion', { position: this.evPos, velocity: vel, radius, kind: blast.kind, tracked: rt.plane });
       }
     }
     if (blast.kind === 'middle') {
@@ -1600,7 +1600,7 @@ export class Breakup implements IBreakup {
     a.lastEventT = rt.t;
     this.evPos.copy(pos);
     this.evVel.copy(vel);
-    this.ctx.events.emit('planeImpact', { position: this.evPos, velocity: this.evVel, outcome, surface, energy, normalSpeed: vn });
+    this.ctx.events.emit('planeImpact', { position: this.evPos, velocity: this.evVel, outcome, surface, energy, normalSpeed: vn, tracked: rt.plane });
   }
 
   private emitBreak(rt: PlaneRT, pos: THREE.Vector3, vel: THREE.Vector3, pieces: number, intensity: number): void {

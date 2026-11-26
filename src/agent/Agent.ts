@@ -549,10 +549,21 @@ export class Agent implements IAgent {
           const M = ctx.missiles;
           if (!M?.spectate) return 'error: no missiles system';
           const k = w[1] ?? 'nuke';
-          if (k === 'off' || k === 'back' || k === 'stop') return M.spectate(null) || 'not watching';
+          if (k === 'off' || k === 'back' || k === 'stop') {
+            const a = M.spectate(null), b = M.watchFocus ? M.watchPlane?.(null) ?? '' : '';
+            return [a, b].filter(Boolean).join(' · ') || 'not watching';
+          }
+          if (k === 'nearest' || /^#?\d+$/.test(k)) {
+            // WATCH IT: your plane keeps its distance from that sky plane, your camera on it
+            const id = k === 'nearest' ? this.nearestSky('me') : parseInt(k.replace('#', ''), 10);
+            this.ap = { alt: null, heading: null, bank: null, speed: null, target: null };
+            this.throttleCmd = null;
+            this.holds.clear();
+            return M.watchPlane?.(id) ?? 'error: no watch';
+          }
           if (k === 'nuke' || k === 'missile') return M.spectate('missile');
           if (k === 'hit' || k === 'plane') return M.spectate('hit');
-          return 'error: watch nuke | missile | hit | off';
+          return 'error: watch nuke | missile | hit | <plane #> | nearest | off';
         }
         case 'ram': {
           const M = ctx.missiles;
@@ -1543,7 +1554,7 @@ FLY      pitch up|down [s] [0..1] · climb [s] · dive [s] · bank left|right [s
          throttle 0..100 | +10 | -10 | max | idle · release (centre everything)
 AUTO     alt <m above ground> (terrain following) · heading <deg|n|e|s|w> · bank <deg, +right> · speed <m/s> · level · ap off · alt off …
 MISSILES traffic (sky planes #) · sites · shoot <# | nearest> [from <site|kind>] [2|all] [spread] [aim nose|tail|left|right|middle] · steer <u> <v>
-         back · ram <# | nearest> | ram off (your plane flies into it) · nuke <# | nearest> | nuke <place|x z> · watch nuke|missile|hit|off (ride your nuke / follow the plane you hit)
+         back · ram <# | nearest> | ram off (your plane flies into it) · nuke <# | nearest> | nuke <place|x z> · watch nuke|missile|hit|off (ride your nuke / follow the plane you hit) · watch <#|nearest> (WATCH IT: keep a good distance, camera on it)
 TARGET   fly <type> target <concert|stage|crowd|city|beach|airport|park|place|x z> [in 14] [from n|e|s|w] [speed v] [agl h]
          (spawns on a dive that crashes there) · target <place> (home on it from where you are) · target off
 CRASH    split · tail · engine 1..4 · explode · wing left|right far|half · gear · respawn · retry

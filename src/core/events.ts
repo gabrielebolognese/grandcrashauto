@@ -74,11 +74,13 @@ export interface GameEvents extends Record<string, unknown> {
   engineFireSpread: { engine: number; position: THREE.Vector3 };
   /** Whole-plane / middle / tail explosion (planes or breakup). */
   /** replay: re-fired by the crash replay — effects / sound only (props, pedestrians, cameras ignore it). */
-  planeExplosion: { position: THREE.Vector3; velocity: THREE.Vector3; radius: number; kind: 'total' | 'middle' | 'tail' | 'secondary' | 'missile' | 'nuke'; replay?: boolean };
+  // tracked = the plane that blew up (a TrackedPlane) when the breakup system knows it: a sky plane's explosion must not
+  // cut your camera away to it (user: "do NOT automatically watch the plane when it gets hit")
+  planeExplosion: { position: THREE.Vector3; velocity: THREE.Vector3; radius: number; kind: 'total' | 'middle' | 'tail' | 'secondary' | 'missile' | 'nuke'; replay?: boolean; tracked?: unknown };
   /** Airframe tore apart (breakup) — metal tearing sound, camera shake. intensity 0..1 */
   planeBreak: { position: THREE.Vector3; velocity: THREE.Vector3; pieces: number; intensity: number };
   /** Classified impact of the plane or a big piece (breakup). */
-  planeImpact: { position: THREE.Vector3; velocity: THREE.Vector3; outcome: CrashOutcome; surface: ImpactSurface; energy: number; normalSpeed: number; replay?: boolean };
+  planeImpact: { position: THREE.Vector3; velocity: THREE.Vector3; outcome: CrashOutcome; surface: ImpactSurface; energy: number; normalSpeed: number; replay?: boolean; tracked?: unknown };
   /** Wheels touched the ground (planes). */
   touchdown: { position: THREE.Vector3; verticalSpeed: number; hard: boolean };
   gearCollapse: { position: THREE.Vector3 };

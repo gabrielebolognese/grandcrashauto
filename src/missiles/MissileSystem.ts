@@ -3,10 +3,12 @@ import './missiles.css';
 import { CONFIG } from '../config';
 import { clamp } from '../core/math';
 import { GLOBAL_UNIFORMS } from '../core/uniforms';
-import type { GameContext, IMissiles, LauncherInfo, SkyPlaneInfo, TrailHandle } from '../game/contracts';
+import type { GameContext, IMissiles, LauncherInfo, SkyPlaneInfo } from '../game/contracts';
+import { planeCfg } from '../plane/FlightModel';
 import type { PlaneVisual, TrackedPlane } from '../plane/types';
 import { AirTraffic, type SkyPlane } from './AirTraffic';
 import { Launchers, missileModel, type Launcher } from './Launchers';
+import { MissileFx, type MissileTrail } from './MissileFx';
 import { LAUNCHER_TYPES, type LauncherType } from './types';
 
 interface Missile {
@@ -24,7 +26,7 @@ interface Missile {
   u: number; // aim offset on the target: + = its right wing, - = left
   v: number; // + = nose, - = tail
   controlled: boolean;
-  trail: TrailHandle | null;
+  fx: MissileTrail | null; // flame + smoke ribbon (MissileFx)
   done: boolean;
 }
 
@@ -93,6 +95,18 @@ export class MissileSystem implements IMissiles {
   private camSet = false;
   private msgT = 0;
   private ramId: number | null = null;
+  // WATCH IT (user request): keep a good distance from this sky plane, the camera on it
+  private watchId: number | null = null;
+  private watchAlong = 0; // m you should move forward (+) / back (-) along its flight line to reach your spot
+  private watchLat = 0; // m you should move out (+) / in (-) from its flight line
+  private watchFx = 0;
+  private watchFz = 1;
+  private watchNuke = false;
+  private watchLoop = false; // overshot a slow plane: turning back toward the spot (a racetrack around it)
+  private watchR = 900;
+  private watchPt = new THREE.Vector3();
+  private watchV = new THREE.Vector3();
+  private nukeT = -99; // last nuke blast (watching stays far away for a while)
   // spectator cameras (user request): ride your nuke / missile, or follow the sky plane you just hit
   private spec: { kind: 'missile' | 'hit'; m: Missile | null; p: SkyPlane | null; at: THREE.Vector3 | null; t: number; holdT: number } | null = null;
   private lastHit: { p: SkyPlane; t: number } | null = null;
@@ -113,6 +127,7 @@ export class MissileSystem implements IMissiles {
   private flashT = 0;
   private focusV = new THREE.Vector3();
   private flareMat: THREE.SpriteMaterial | null = null;
+  private mfx: MissileFx | null = null; // missile exhaust: flames + smoke ribbons (replaces the particle trail)
 
   constructor(private ctx: GameContext) {
     this.traffic = new AirTraffic(ctx);
@@ -131,6 +146,7 @@ export class MissileSystem implements IMissiles {
       this.camPos.sub(delta);
       this.control?.impactAt.sub(delta);
       this.spec?.at?.sub(delta);
+      this.mfx?.shift(delta.x, delta.z);
     });
     ctx.events.on('planeSpawned', () => this.spectate(null));
     ctx.events.on('modeChanged', () => this.spectate(null));
@@ -163,6 +179,7 @@ export class MissileSystem implements IMissiles {
     });
     // the plane system's "ram" autopilot asks us where the target will be
     (ctx.planes as { ramTarget?: (() => THREE.Vector3 | null) | null }).ramTarget = () => this.ramPoint();
+    (ctx.planes as { ramSpeed?: (() => number | null) | null }).ramSpeed = () => this.watchSpeed();
   }
 
   // ───────────────────────────── contract ─────────────────────────────
@@ -303,6 +320,7 @@ export class MissileSystem implements IMissiles {
       this.traffic.ramId = null;
       return 'ram autopilot off';
     }
+    this.watchId = null;
     const p = this.traffic.planes.find((x) => x.id === planeId);
     if (!p) return 'that plane is gone';
     if (this.ctx.game.mode !== 'plane' || !this.ctx.planes.active || this.ctx.planes.crashed) return 'you need to be flying a plane';
@@ -465,11 +483,8 @@ export class MissileSystem implements IMissiles {
       this.specAnchor.copy(m.obj.position);
       // beside it and a touch ahead: the fire trail streams AWAY from the lens (close to it, it washes the frame out)
       eye.copy(m.obj.position).addScaledVector(md, back * 0.15).addScaledVector(this.specSide, back * 1.1).addScaledVector(UP, back * 0.35);
-      // look just ahead of its nose (the nuke near the centre of the frame), a touch toward where it is going
-      look.copy(m.obj.position).addScaledVector(md, back * 0.45);
-      const tgt = m.target ?? m.seek;
-      const goal = tgt ? tgt.pos : m.ground;
-      if (goal) look.lerp(_v3.subVectors(goal, m.obj.position).normalize().multiplyScalar(back * 0.45).add(m.obj.position), 0.15);
+      // the nuke / missile exactly in the centre of the frame (user request)
+      look.copy(m.obj.position);
       fov = 60;
     } else if (s.p) {
       // chase the plane going down: behind its motion, above and a little to the side
@@ -618,7 +633,7 @@ export class MissileSystem implements IMissiles {
     ctx.engine.scene.add(obj);
     const m: Missile = {
       obj, type: t, pos, prev: pos.clone(), dir, speed: 30, t: -delay, climb: 0, target, seek: target, ground,
-      u, v, controlled, trail: null, done: false,
+      u, v, controlled, fx: null, done: false,
     };
     obj.position.copy(pos);
     obj.quaternion.setFromUnitVectors(Z, dir);
@@ -631,7 +646,9 @@ export class MissileSystem implements IMissiles {
   private ignite(m: Missile): void {
     const { ctx } = this;
     const t = m.type;
-    m.trail = ctx.fx.attachTrail?.(m.obj, new THREE.Vector3(0, 0, -t.missileLen * 0.5), { fire: 0.7, smoke: 0.5, size: Math.max(0.3, t.missileR * 2.2), cap: 2 }) ?? null;
+    // a flame + a continuous smoke ribbon (particles left a dotted line of blobs behind a 500 m/s missile)
+    this.mfx ??= new MissileFx(ctx.engine.scene);
+    m.fx = this.mfx.start(m.obj, t.missileLen, t.missileR, ctx.fx.clock ?? 0, t.warhead === 'nuke');
     m.obj.add(this.flare(t));
     ctx.fx.smoke(m.pos, t.warhead === 'nuke' ? 3 : 1.2);
     if (this.clock - this.igniteT > 0.6) {
@@ -693,6 +710,7 @@ export class MissileSystem implements IMissiles {
   }
 
   private ramPoint(): THREE.Vector3 | null {
+    if (this.watchId !== null) return this.watchPoint();
     if (this.ramId === null) return null;
     const p = this.traffic.planes.find((x) => x.id === this.ramId);
     const me = this.ctx.planes.state.position;
@@ -711,6 +729,122 @@ export class MissileSystem implements IMissiles {
     // far: lead pursuit; close: straight at it (plus half a second of its motion)
     const tgo = d < 600 ? 0.5 : d / Math.max(60, this.ctx.planes.state.airspeed + 20);
     return this.traffic.lead(p, Math.min(tgo, 4), new THREE.Vector3());
+  }
+
+  // ───────────────────────────── WATCH IT ─────────────────────────────
+  /** Flying: your plane keeps a good distance from this sky plane and your camera looks at it (null = stop). */
+  watchPlane(planeId: number | null): string {
+    if (planeId === null) {
+      if (this.watchId === null) return 'not watching a plane';
+      this.watchId = null;
+      return 'stopped watching';
+    }
+    const p = this.traffic.planes.find((x) => x.id === planeId);
+    if (!p) return 'that plane is gone';
+    const pl = this.ctx.planes;
+    if (this.ctx.game.mode !== 'plane' || !pl.active || pl.crashed) return 'you need to be flying a plane';
+    this.ramId = null;
+    this.traffic.ramId = null;
+    this.watchId = p.id;
+    return `👁 watching the ${p.name.split(' · ')[0]} — your plane keeps its distance, your camera stays on it`;
+  }
+
+  private watched(): SkyPlane | null {
+    if (this.watchId === null) return null;
+    const p = this.traffic.planes.find((x) => x.id === this.watchId) ?? null;
+    const pl = this.ctx.planes;
+    if (!p || pl.crashed || !pl.active || this.ctx.game.mode !== 'plane') {
+      this.watchId = null;
+      return null;
+    }
+    return p;
+  }
+
+  get watchFocus(): THREE.Vector3 | null {
+    const p = this.watched();
+    return p ? this.watchV.copy(p.pos) : null;
+  }
+
+  get watchingName(): string | null {
+    return this.watched()?.name.split(' · ')[0] ?? null;
+  }
+
+  /**
+   * Where the autopilot flies while you watch: FORMATION — a spot beside the plane and a little behind it, on your side
+   * of its flight line, flying its heading at its speed (a jumbo turns 2–3°/s: chasing it or turning away needs turns it
+   * cannot make; holding station only needs small corrections). The distance: close enough to see it well (≈ 14 lengths,
+   * 0.7–1.2 km); with a nuke on its way (or just gone off) 1.5 × the nuke's sky radius (≈ 2.7 km: the blast takes out
+   * planes within ≈ 1.3 km). A hit plane: fly on straight and level (the camera keeps looking at it going down).
+   */
+  private watchPoint(): THREE.Vector3 | null {
+    const p = this.watched();
+    if (!p) return null;
+    const st = this.ctx.planes.state;
+    const me = st.position;
+    const out = this.watchPt;
+    const nukeOn = this.missiles.some((m) => !m.done && m.type.warhead === 'nuke' && (m.target === p || m.seek === p));
+    this.watchR = nukeOn || this.clock - this.nukeT < 20 ? CONFIG.missiles.nuke.skyRadius * 1.5 : clamp(p.visual.dims.length * 14, 700, 1200);
+    if (p.hit) {
+      const hr = (st.heading * Math.PI) / 180;
+      out.set(me.x + Math.sin(hr) * 3000, me.y, me.z - Math.cos(hr) * 3000);
+    } else {
+      const R = this.watchR;
+      // its flight line (horizontal) and the side of it you are on (no crossing in front of it)
+      let fx = p.vel.x, fz = p.vel.z;
+      const fl = Math.hypot(fx, fz);
+      if (fl < 5) {
+        fx = Math.sin(p.yaw);
+        fz = Math.cos(p.yaw);
+      } else {
+        fx /= fl;
+        fz /= fl;
+      }
+      const rx = me.x - p.pos.x, rz = me.z - p.pos.z;
+      const sgn = fx * rz - fz * rx >= 0 ? 1 : -1;
+      const sx = -fz * sgn, sz = fx * sgn;
+      // where you are relative to it: along its flight line, and out to the side
+      const along = rx * fx + rz * fz, lateral = rx * sx + rz * sz;
+      // the spot: 0.85 R out to the side, 0.45 R behind. Fly ITS heading, turned up to 35° (60° with a nuke on the
+      // way: get clear first) toward or away from its line to fix the side distance — never a big turn to chase a spot
+      this.watchLat = 0.85 * R - lateral;
+      this.watchAlong = -0.45 * R - along;
+      // a plane slower than you can fly (a prop plane vs a jumbo): you overshoot — turn back toward the spot, pass it,
+      // pick up the formation again (a racetrack around it; the camera stays on it)
+      // (only when it really is slower than your slowest: else you just slow down and let it catch up)
+      const type = this.ctx.planes.currentType;
+      const cfg = type ? planeCfg(type) : null;
+      const vLow = cfg ? (cfg.stallKmh * CONFIG.planes.speedResponse.minStall * 0.85 + cfg.topKmh * 0.15) / 3.6 : 0;
+      const slow = Math.hypot(p.vel.x, p.vel.z) < vLow;
+      if (this.watchAlong < -R && !nukeOn && slow) this.watchLoop = true;
+      else if (this.watchAlong > -0.3 * R || nukeOn) this.watchLoop = false;
+      if (this.watchLoop) {
+        const spX = p.pos.x + sx * 0.85 * R - fx * 0.45 * R, spZ = p.pos.z + sz * 0.85 * R - fz * 0.45 * R;
+        out.set(spX, p.pos.y + 150, spZ);
+      } else {
+        const off = clamp(this.watchLat / 1200, -1, 1) * (nukeOn ? 1.05 : 0.6);
+        const c = Math.cos(off), sn = Math.sin(off);
+        out.set(me.x + (fx * c + sx * sn) * 3000, p.pos.y + 150, me.z + (fz * c + sz * sn) * 3000);
+      }
+      this.watchFx = fx;
+      this.watchFz = fz;
+      this.watchNuke = nukeOn;
+    }
+    out.y = Math.max(out.y, this.groundAt(out.x, out.z) + 350, this.groundAt(me.x, me.z) + 300);
+    return out;
+  }
+
+  /** The speed that holds the spot: the plane's own speed, plus/minus how far ahead / behind the spot is. */
+  private watchSpeed(): number | null {
+    const p = this.watched();
+    if (!p || p.hit) return null;
+    const vs = Math.hypot(p.vel.x, p.vel.z);
+    // a nuke on its way and you are too close: flat out, sideways (watchPoint turns you away)
+    if (this.watchNuke && this.watchLat > 150) return 400;
+    // still turning onto its heading: its own speed (slower turns tighter); lined up: catch up / drop back
+    const hr = (this.ctx.planes.state.heading * Math.PI) / 180;
+    const aligned = Math.sin(hr) * this.watchFx - Math.cos(hr) * this.watchFz;
+    if (aligned < 0.5 || this.watchLoop) return vs;
+    return clamp(vs + this.watchAlong * 0.06, 40, 400);
   }
 
   // ───────────────────────────── simulation ─────────────────────────────
@@ -794,7 +928,7 @@ export class MissileSystem implements IMissiles {
   private detonate(m: Missile, at: THREE.Vector3, target: SkyPlane | null, part: string): void {
     const { ctx } = this;
     m.done = true;
-    m.trail?.stop();
+    this.mfx?.end(m.fx, ctx.fx.clock ?? 0);
     m.obj.visible = false;
     const pos = at.clone();
     const t = m.type;
@@ -876,8 +1010,9 @@ export class MissileSystem implements IMissiles {
     }
   }
 
-  /** The nuke: a blinding flash, a fireball, a mushroom cloud and a shock wave through the sky and the ground. */
+  /** The nuke: a blinding flash, a fireball, a mushroom cloud and a shock wave through the sky and the ground. (WATCH IT keeps far: nukeT) */
   private nukeBlast(pos: THREE.Vector3): void {
+    this.nukeT = this.clock;
     const { ctx } = this;
     const N = CONFIG.missiles.nuke;
     ctx.fx.explosionEx?.({ position: pos.clone(), velocity: new THREE.Vector3(), radius: N.fireball, kind: 'plane', light: true });
@@ -997,6 +1132,14 @@ export class MissileSystem implements IMissiles {
       }
     }
     this.sizeFlares();
+    this.mfx?.update(ctx.fx.clock ?? 0, ctx.engine.camera);
+  }
+
+  /** Crash replay: the smoke trails and flames as they were at fx time t (null = live again). */
+  replayAt(t: number | null): void {
+    if (!this.mfx) return;
+    if (t === null) this.mfx.live();
+    else this.mfx.replayAt(t, this.ctx.engine.camera);
   }
 
   /**
@@ -1065,10 +1208,10 @@ export class MissileSystem implements IMissiles {
       if (side.lengthSq() < 1e-4) side.set(1, 0, 0);
       side.normalize();
       anchor = m.obj.position;
-      eye.copy(anchor).addScaledVector(md, -back).addScaledVector(UP, back * 0.35).addScaledVector(side, back * 0.22);
-      // locked: keep the plane in frame; no lock: look where the missile goes (you steer it)
-      if (m.target) look.copy(c.target.pos);
-      else look.copy(anchor).addScaledVector(md, 400);
+      // three-quarter from behind (≈ 30° off its axis): the flame and the smoke ribbon show in profile, not end-on
+      eye.copy(anchor).addScaledVector(md, -back).addScaledVector(UP, back * 0.3).addScaledVector(side, back * 0.45);
+      // the missile in the centre of the screen (user request); the plane it flies at is ahead of it, in frame
+      look.copy(anchor);
       fov = 55;
     } else if (c.phase === 'impact') {
       c.impactT += dt;
@@ -1222,8 +1365,9 @@ export class MissileSystem implements IMissiles {
         y = -y;
       }
       const a = Math.atan2(-y, x);
-      const r = Math.min(W, H) * 0.42;
-      el.edge.style.transform = `translate(${W / 2 + Math.cos(a) * r}px, ${H / 2 + Math.sin(a) * r}px) rotate(${a}rad)`;
+      // on an ellipse inside the screen, clear of the top line and the buttons
+      const ex = W / 2 + Math.cos(a) * W * 0.4, ey = clamp(H / 2 + Math.sin(a) * H * 0.42, 96, H - 110);
+      el.edge.style.transform = `translate(${ex}px, ${ey}px) rotate(${a}rad)`;
     }
     el.state.className = `msl-state ${c.phase === 'aim' ? (locked ? 'lock' : 'seek') : 'fly'}`;
     const guided = !!c.first?.target;
@@ -1247,6 +1391,7 @@ export class MissileSystem implements IMissiles {
     this.traffic.dispose();
     this.launchers.dispose();
     for (const m of this.missiles) m.obj.removeFromParent();
+    this.mfx?.clear();
     this.hud?.remove();
   }
 }

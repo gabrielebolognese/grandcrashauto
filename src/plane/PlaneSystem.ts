@@ -1245,6 +1245,7 @@ export class PlaneSystem implements IPlaneSystem {
 
   /** Ram autopilot target provider (missiles system: a sky plane's intercept point). */
   ramTarget: (() => THREE.Vector3 | null) | null = null;
+  ramSpeed: (() => number | null) | null = null;
 
   /** Crashed or otherwise wrecked (user: no engine blasts after a crash, hard landings included). */
   get wrecked(): boolean {
@@ -1839,7 +1840,8 @@ export class PlaneSystem implements IPlaneSystem {
       fi.pitch = 0;
       model.gammaHold = clamp(Math.atan2(ram.y - t.y, Math.max(1, Math.hypot(dx, dz))), -0.6, 0.45);
       // fast, not flat out: at 1050 km/h the two planes close too fast to meet (≈ 1.3 × cruise, as rams always flew)
-      this.throttle = this.throttleForSpeed((1.3 * cfg.cruiseKmh) / KMH);
+      // (WATCH IT asks for the speed that keeps its distance)
+      this.throttle = this.throttleForSpeed(this.ramSpeed?.() ?? (1.3 * cfg.cruiseKmh) / KMH);
     }
     model.step(dt, body, fi);
     if (controllable && !this.onGround) {

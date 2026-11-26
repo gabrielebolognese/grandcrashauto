@@ -1,6 +1,6 @@
 # Grand Crash Auto: the endpoint for AI video makers
 
-Endpoint version: 13 · 2026-11-25
+Endpoint version: 14 · 2026-11-26
 
 You are a Claude Code agent in a separate project. Your job is to turn the user's video requests into finished
 videos of the game. This file explains everything: how to open the game, how to play it, and how to film it.
@@ -109,11 +109,14 @@ ffmpeg -i ref.mp4 -vf "fps=2,scale=480:-2,tile=4x4" -frames:v 1 ref-sheet.jpg
   - Aim with drag, A/D/W or the arrows, or press **AUTO LOCK (L)** to swing onto the target. Press S to fire. **No lock is needed.**
   - **Aiming:** the target always has a box around it. A **red box** (with a dashed line from the circle to it) means no lock; bring it **into the circle** and the box and circle turn **green** = locked. The circle is the lock zone itself (about 8.5°). You start a little off the target, so you aim it yourself (or press AUTO LOCK). Off screen, a red arrow at the edge points to it.
   - While you are in the control room your own plane waits in the air exactly where it was, and carries on when you press BACK.
-  - Missiles carry a bright exhaust flare, so they are easy to follow from far away, especially at night.
+  - Missiles have a real exhaust: a flickering **flame** behind the nozzle and a continuous **white smoke trail** along the exact path they flew (it widens, drifts and fades over about 3 s; 5 s for the nuke). No more dotted blobs behind fast missiles. From far away they also carry a bright flare, especially at night. Replays show the trails too.
+  - After you fire, the camera follows the missile with it **in the centre of the screen**, from three-quarters behind (flame and smoke in profile). NUKE CAM keeps the nuke centred too.
   - Locked (green), it **always hits**; the same keys then pick where (nose, tail, a wing, an engine).
   - Without a lock the missile flies straight and the keys steer it. Its seeker locks on if the plane comes in front of it.
   - Each S fires again. BACK returns to your car or plane while the missiles keep going.
   - REPLAY in the control room shows the missile run and the plane you shot going down. If you crash **your own** plane afterwards, the replay is about **your** plane (the plane you shot gets its own "Hit plane" pass). Flying, you can also RAM a sky plane on autopilot, or just crash into one.
+  - **Your camera stays yours:** when a plane you shot, nuked or rammed blows up, your camera no longer cuts away to it (only your own plane's explosion gets the crash cinematic).
+  - **WATCH IT** (map: tap a plane, next to RAM IT; flying only): your plane flies in **formation** beside and a little behind that plane (its heading, its speed) and your camera looks past your plane at it. Distance: about 14 of its lengths (0.7–1.2 km), and **about 2.7 km while a nuke is on its way** (the blast destroys planes within about 1.3 km), so you see the explosion from your plane and survive it. A plane slower than yours (a prop plane): your plane loops back and passes it again. After the hit your plane flies on straight, the camera stays on the falling plane. **STOP WATCHING** (button column on the right) ends it; RAM IT replaces it. A jumbo turns slowly: if the plane flies the other way, settling into formation takes 20–30 s.
   - The missile cameras are steady: no zoom pumping or flicker while you follow a missile or watch the plane go down, and a salvo no longer strobes the screen.
   - **Camera switches (K or the camera buttons: flying, they join the button column on the right under PLANE / REPLAY; in the car, on the right under the speed card):** **NUKE CAM / MISSILE CAM** rides your newest nuke or missile in flight (also one fired from the map with NUKE, or after BACK), then follows the plane it hits all the way down. **HIT PLANE CAM** follows the sky plane you just rammed, crashed into or shot. Your own plane waits in the air while you watch; K or BACK returns. While you watch (and in the control room, and during a replay) the top menu bar and the Explode / Reset buttons are hidden, so nothing covers the view or the camera controls.
   - After a ram, the replay shows **both planes**, with a whole pass on the plane you hit (camera "Hit plane").
@@ -227,6 +230,7 @@ With the stick centred, the assists hold the flight path and keep the wings leve
 | `ram nearest` · `ram 3` · `ram off` | flying: your plane's autopilot flies into that sky plane. It turns into you near the end, so a ram really connects |
 | `nuke nearest` · `nuke 3` · `nuke beach` · `nuke x z` | a nuke from the Nuke turret at a sky plane, or an airburst over a place. Each of its 2 tubes reloads in 120 s |
 | `watch nuke` · `watch missile` · `watch hit` · `watch off` | camera switches: ride your newest nuke / missile in flight (then follow the plane it hits down) · follow the sky plane you just hit or rammed · back to your view (`back` also works). Your plane waits while you watch |
+| `watch 3` · `watch nearest` | **WATCH IT**: your plane flies in formation beside that sky plane (≈ 1 km; ≈ 2.7 km while a nuke is on its way) and your camera looks at it. `watch off` stops it. Give it 20–30 s to settle before the money shot |
 
 Plane numbers change every session, so scripted scenes should use `nearest`. Turrets reload tube by tube (Twin 35 s, Quad 22 s, Octo 12 s, Nuke 120 s).
 
@@ -373,6 +377,7 @@ want to cut it short.
 | Nuke a jumbo | `shoot nearest from nuke` | 30 s | the nuke leaves the turret, then a blinding flash and a fireball; every plane nearby breaks apart |
 | Mid-air ram | `fly jumbo agl 1700 speed 170; wait 2; ram nearest` | 30–40 s | your jumbo hunts a sky plane and they collide |
 | Ram, then follow the victim down | `fly jumbo agl 1700 speed 170; wait 2; ram nearest`, after the hit `watch hit; wait 12; watch off; replay` | 50 s | the airliner you hit falls burning toward the sea; then the replay, including its "Hit plane" pass |
+| Watch the nuke from your plane | `fly jumbo agl 1700 speed 170; wait 2; watch nearest; wait 25; nuke nearest`, then wait for the hit | 40–80 s | your jumbo in front, the plane you watch beyond it; the nuke blast goes off ≈ 2.7 km away, your plane survives it and keeps the camera on the falling wreck |
 | Ride the nuke | `nuke nearest; watch nuke` | 30–60 s (longer when the plane is far from the turret) | a side chase of the striped nuke over the mountains, the blast, then the plane going down (best at `night`: the fire trail glows) |
 
 | Jumbo into the Wizard's Spire | `fly jumbo target wizard in 10` | 20 s | the jumbo hits the spire high up, the purple-hatted top topples with its glowing crystal |
@@ -474,6 +479,12 @@ The builder project adds a Changelog entry **with every game change** and raises
 that doesn't touch the commands gets an entry, so you know what's new to film.
 
 ## Changelog (newest first)
+
+- **v14 · 2026-11-26:** missile exhaust, centred missile cam, WATCH IT.
+  - New missile exhaust: a flickering flame plus a continuous smoke trail drawn along the real flight path (one mesh per missile: it looks right at any speed, at no extra cost). Replays show the trails too.
+  - The camera keeps the missile in the centre of the screen after you fire (and in NUKE CAM).
+  - Your camera no longer cuts away to a plane you shot or nuked when it blows up.
+  - WATCH IT (map, next to RAM IT; agent `watch <#|nearest>`): formation flight beside the plane, camera on it, about 1 km away, about 2.7 km while a nuke is on its way. STOP WATCHING in the button column.
 
 - **v13 · 2026-11-25:** missiles: no flicker, clean aiming, the right replay.
   - No more screen flicker with missiles: in the control room and the missile / hit-plane cameras, the normal camera kept rewriting the zoom under them every frame, so the view pumped in and out. Missile chase cameras are now steady (no back-and-forth stutter), flares no longer jitter or pop, and a salvo flashes once instead of strobing.

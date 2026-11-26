@@ -526,6 +526,11 @@ export class MapScreen {
           this.ctx.events.emit('toast', { text: M.ram(p.id), ms: 2200 });
           this.nav.dismissMap();
         });
+        // WATCH IT (user request): your plane keeps a good distance (far enough for a nuke), your camera on it
+        btn('👁 Watch it', 'btn btn-ghost', () => {
+          this.ctx.events.emit('toast', { text: M.watchPlane?.(p.id) ?? 'not available', ms: 2600 });
+          this.nav.dismissMap();
+        });
       }
       btn('☢️ Nuke', 'btn btn-ghost', () => {
         this.ctx.events.emit('toast', { text: M.nuke(p.id), ms: 2200 });
